@@ -236,8 +236,6 @@ def main(video_path: str, settings: dict):
         )
 
         scored_clips = merge_overlapping_clips(scored_clips)
-        all_clips = merge_overlapping_clips(all_clips)
-        all_clips = calculate_final_scores(all_clips, y, sr)
         
         send_progress(80, "Selecting best clips...")
         final_clips = select_final_clips(scored_clips, max_clips=target_count * 2, min_gap=30)

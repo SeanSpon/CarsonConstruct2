@@ -44,14 +44,25 @@ ipcMain.handle('export-clips', async (_event, data: {
     return { success: false, error: 'Window not found' };
   }
 
-  // Ensure output directory exists
-  if (!fs.existsSync(outputDir)) {
-    fs.mkdirSync(outputDir, { recursive: true });
-  }
+  try {
+    // Check if source file exists
+    if (!fs.existsSync(sourceFile)) {
+      win.webContents.send('export-complete', {
+        success: false,
+        outputDir,
+        errors: [`Source file not found: ${sourceFile}`],
+      });
+      return { success: false, error: 'Source file not found' };
+    }
 
-  const errors: string[] = [];
-  let completed = 0;
-  const totalTasks = (settings.exportClips ? clips.length : 0) + (settings.exportFullVideo ? 1 : 0);
+    // Ensure output directory exists
+    if (!fs.existsSync(outputDir)) {
+      fs.mkdirSync(outputDir, { recursive: true });
+    }
+
+    const errors: string[] = [];
+    let completed = 0;
+    const totalTasks = (settings.exportClips ? clips.length : 0) + (settings.exportFullVideo ? 1 : 0);
 
   // Export individual clips
   if (settings.exportClips) {
@@ -124,6 +135,16 @@ ipcMain.handle('export-clips', async (_event, data: {
   });
 
   return { success: errors.length === 0, outputDir };
+  } catch (err) {
+    // Catch any unexpected errors during export
+    const errorMsg = err instanceof Error ? err.message : String(err);
+    win.webContents.send('export-complete', {
+      success: false,
+      outputDir,
+      errors: [`Export failed: ${errorMsg}`],
+    });
+    return { success: false, error: errorMsg };
+  }
 });
 
 // Export single clip

@@ -22,14 +22,25 @@ ipcMain.handle('export-clips', async (event, data: {
 
   const { sourceFile, clips, outputDir } = data;
   
-  // Ensure output directory exists
-  if (!fs.existsSync(outputDir)) {
-    fs.mkdirSync(outputDir, { recursive: true });
-  }
+  try {
+    // Check if source file exists
+    if (!fs.existsSync(sourceFile)) {
+      win.webContents.send('export-complete', {
+        success: false,
+        outputDir,
+        errors: [`Source file not found: ${sourceFile}`],
+      });
+      return { success: false, error: 'Source file not found' };
+    }
+    
+    // Ensure output directory exists
+    if (!fs.existsSync(outputDir)) {
+      fs.mkdirSync(outputDir, { recursive: true });
+    }
 
-  let completed = 0;
-  const total = clips.length;
-  const errors: string[] = [];
+    let completed = 0;
+    const total = clips.length;
+    const errors: string[] = [];
 
   for (const clip of clips) {
     const actualStart = clip.startTime + clip.trimStartOffset;
@@ -68,6 +79,16 @@ ipcMain.handle('export-clips', async (event, data: {
   }
 
   return { success: errors.length === 0, outputDir };
+  } catch (err) {
+    // Catch any unexpected errors during export
+    const errorMsg = err instanceof Error ? err.message : String(err);
+    win.webContents.send('export-complete', {
+      success: false,
+      outputDir,
+      errors: [`Export failed: ${errorMsg}`],
+    });
+    return { success: false, error: errorMsg };
+  }
 });
 
 function exportSingleClip(

@@ -242,22 +242,33 @@ def main(video_path: str, settings: dict):
         
         # Step 7: AI Enhancement (optional)
         transcript = None
-        if use_ai and openai_key:
+        if use_ai:
+            if openai_key:
+                try:
+                    send_progress(85, "Transcribing audio with Whisper...")
+                    from ai.transcription import transcribe_with_whisper
+                    transcript = transcribe_with_whisper(audio_path, openai_key)
+                except Exception as e:
+                    send_progress(85, f"Transcription skipped: {e}")
+            else:
+                send_progress(85, "AI enabled without API key; using heuristics...")
+
             try:
-                send_progress(85, "Transcribing audio with Whisper...")
-                from ai.transcription import transcribe_with_whisper
-                transcript = transcribe_with_whisper(audio_path, openai_key)
-                
-                send_progress(90, "Enhancing clips with AI...")
-                from ai.clip_enhancement import enhance_clips_with_ai
-                final_clips = enhance_clips_with_ai(final_clips, transcript, openai_key)
+                send_progress(90, "Running translator + thinker...")
+                from ai.orchestrator import run_ai_enhancement
+                final_clips = run_ai_enhancement(final_clips, transcript, settings)
             except Exception as e:
                 send_progress(90, f"AI enhancement skipped: {e}")
         else:
             send_progress(90, "Skipping AI enhancement...")
-        
-        # Final selection (top N by score)
-        final_clips = sorted(final_clips, key=lambda c: c.get('finalScore', c.get('algorithmScore', 0)), reverse=True)
+
+        # Final selection (top N by score or thinker order)
+        if not use_ai:
+            final_clips = sorted(
+                final_clips,
+                key=lambda c: c.get('finalScore', c.get('algorithmScore', 0)),
+                reverse=True,
+            )
         final_clips = final_clips[:target_count]
         
         send_progress(95, f"Complete! Found {len(final_clips)} clips")

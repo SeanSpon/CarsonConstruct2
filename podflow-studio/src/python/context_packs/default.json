@@ -1,0 +1,29 @@
+{
+  "pack_id": "default",
+  "platform": "generic",
+  "niche": "general_podcast",
+  "constraints": {
+    "min_seconds": 15,
+    "max_seconds": 90,
+    "prefer_complete_thought": true
+  },
+  "title_style_rules": "Short, curiosity-driven, avoid clickbait slurs.",
+  "hook_style_rules": "14 words or fewer, understandable standalone.",
+  "scoring_bias": {
+    "categories": {
+      "funny": 1.05,
+      "insightful": 1.0,
+      "story": 1.0,
+      "hot_take": 1.0,
+      "advice": 0.98,
+      "emotional": 1.0,
+      "other": 0.95
+    },
+    "patterns": {
+      "laughter": 1.05,
+      "debate": 1.0,
+      "monologue": 1.0,
+      "payoff": 1.0
+    }
+  }
+}

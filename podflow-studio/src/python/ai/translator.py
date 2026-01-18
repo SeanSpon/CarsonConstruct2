@@ -167,9 +167,15 @@ def translate_clip(
 ) -> MeaningCard:
     if api_key:
         try:
-            from openai import OpenAI
+            from openai import OpenAI, AuthenticationError, RateLimitError, APIConnectionError
 
-            client = OpenAI(api_key=api_key)
+            # Validate API key format before making request
+            api_key_stripped = api_key.strip()
+            if not api_key_stripped or len(api_key_stripped) < 20:
+                print(f"TRANSLATOR: API key appears invalid (too short), using fallback", flush=True)
+                return _fallback_meaningcard(clip_card, context_pack)
+
+            client = OpenAI(api_key=api_key_stripped)
             prompt = _build_prompt(clip_card, context_pack)
             response = client.chat.completions.create(
                 model=model,
@@ -193,7 +199,15 @@ def translate_clip(
             repaired = _extract_json(repaired_raw)
             if repaired is not None:
                 return validate_meaningcard(repaired)
-        except Exception:
-            pass
+        except AuthenticationError:
+            print(f"TRANSLATOR: Invalid API key, using fallback", flush=True)
+        except RateLimitError:
+            print(f"TRANSLATOR: Rate limit exceeded, using fallback", flush=True)
+        except APIConnectionError:
+            print(f"TRANSLATOR: Connection error, using fallback", flush=True)
+        except ImportError:
+            print(f"TRANSLATOR: openai package not installed, using fallback", flush=True)
+        except Exception as e:
+            print(f"TRANSLATOR: Unexpected error ({type(e).__name__}), using fallback", flush=True)
 
     return _fallback_meaningcard(clip_card, context_pack)

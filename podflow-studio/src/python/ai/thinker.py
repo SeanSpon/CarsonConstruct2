@@ -192,7 +192,13 @@ def select_best_set(
 ) -> FinalDecision:
     if api_key:
         try:
-            from openai import OpenAI
+            from openai import OpenAI, AuthenticationError, RateLimitError, APIConnectionError
+
+            # Validate API key before making request
+            api_key_stripped = api_key.strip() if api_key else ""
+            if not api_key_stripped or len(api_key_stripped) < 20:
+                print(f"THINKER: API key appears invalid (too short), using fallback", flush=True)
+                return _fallback_selection(enriched_clips, context_pack, target_n)
 
             top_candidates = sorted(
                 enriched_clips,
@@ -200,7 +206,7 @@ def select_best_set(
                 reverse=True,
             )[:15]
 
-            client = OpenAI(api_key=api_key)
+            client = OpenAI(api_key=api_key_stripped)
             prompt = _build_prompt(top_candidates, context_pack, target_n)
             response = client.chat.completions.create(
                 model=model,
@@ -214,7 +220,15 @@ def select_best_set(
                 decision = validate_finaldecision(parsed)
                 if len(decision.selected_ids) == target_n:
                     return decision
-        except Exception:
-            pass
+        except AuthenticationError:
+            print(f"THINKER: Invalid API key, using fallback", flush=True)
+        except RateLimitError:
+            print(f"THINKER: Rate limit exceeded, using fallback", flush=True)
+        except APIConnectionError:
+            print(f"THINKER: Connection error, using fallback", flush=True)
+        except ImportError:
+            print(f"THINKER: openai package not installed, using fallback", flush=True)
+        except Exception as e:
+            print(f"THINKER: Unexpected error ({type(e).__name__}), using fallback", flush=True)
 
     return _fallback_selection(enriched_clips, context_pack, target_n)

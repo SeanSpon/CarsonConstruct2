@@ -4,6 +4,53 @@ import path from 'path';
 import fs from 'fs';
 import { getMainWindow } from '../window';
 
+// Verify exported file is playable using ffprobe
+function verifyExport(filePath: string): Promise<{ valid: boolean; duration?: number; error?: string }> {
+  return new Promise((resolve) => {
+    const ffprobe = spawn('ffprobe', [
+      '-v', 'error',
+      '-show_entries', 'format=duration',
+      '-of', 'json',
+      filePath,
+    ]);
+
+    let stdout = '';
+    let stderr = '';
+
+    ffprobe.stdout.on('data', (data) => {
+      stdout += data.toString();
+    });
+
+    ffprobe.stderr.on('data', (data) => {
+      stderr += data.toString();
+    });
+
+    ffprobe.on('close', (code) => {
+      if (code !== 0) {
+        resolve({ valid: false, error: stderr || `ffprobe exited with code ${code}` });
+        return;
+      }
+
+      try {
+        const result = JSON.parse(stdout);
+        const duration = parseFloat(result.format?.duration || '0');
+        if (duration > 0) {
+          resolve({ valid: true, duration });
+        } else {
+          resolve({ valid: false, error: 'File has zero duration' });
+        }
+      } catch (e) {
+        resolve({ valid: false, error: 'Failed to parse ffprobe output' });
+      }
+    });
+
+    ffprobe.on('error', (err) => {
+      // ffprobe not found - skip verification but warn
+      resolve({ valid: true, error: `ffprobe not found: ${err.message}. Skipping verification.` });
+    });
+  });
+}
+
 interface ExportClip {
   id: string;
   startTime: number;
@@ -77,6 +124,12 @@ ipcMain.handle('export-clips', async (_event, data: {
       try {
         await exportSingleClip(sourceFile, outputFile, actualStart, duration, settings.mode);
         
+        // Verify the exported file is playable
+        const verification = await verifyExport(outputFile);
+        if (!verification.valid) {
+          errors.push(`Clip "${clip.title || clip.id}" exported but may be corrupted: ${verification.error}`);
+        }
+        
         // Write metadata sidecar JSON
         if (clip.title || clip.hookText || clip.category) {
           const metadataFile = path.join(outputDir, `${safeName}.json`);
@@ -87,6 +140,8 @@ ipcMain.handle('export-clips', async (_event, data: {
             startTime: actualStart,
             endTime: actualEnd,
             duration,
+            verified: verification.valid,
+            actualDuration: verification.duration,
           }, null, 2));
         }
         
@@ -109,6 +164,13 @@ ipcMain.handle('export-clips', async (_event, data: {
     try {
       const outputFile = path.join(outputDir, `edited_full.${settings.format}`);
       await exportWithDeadSpacesRemoved(sourceFile, outputFile, deadSpaces, settings.mode);
+      
+      // Verify the exported full video is playable
+      const verification = await verifyExport(outputFile);
+      if (!verification.valid) {
+        errors.push(`Full video exported but may be corrupted: ${verification.error}`);
+      }
+      
       completed++;
     } catch (err) {
       errors.push(`Failed to export full video: ${err}`);

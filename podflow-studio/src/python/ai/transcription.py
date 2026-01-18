@@ -20,11 +20,22 @@ def transcribe_with_whisper(audio_path: str, api_key: str) -> Dict:
         Dictionary with text, words (with timestamps), and segments
     """
     try:
-        from openai import OpenAI
+        from openai import OpenAI, AuthenticationError, RateLimitError, APIConnectionError
     except ImportError:
         raise ImportError("openai package not installed. Run: pip install openai")
     
-    client = OpenAI(api_key=api_key)
+    # Validate API key before making request
+    api_key_stripped = api_key.strip() if api_key else ""
+    if not api_key_stripped or len(api_key_stripped) < 20:
+        print(f"TRANSCRIPTION: API key appears invalid (too short), skipping", flush=True)
+        return {
+            'text': '',
+            'words': [],
+            'segments': [],
+            'error': 'API key invalid or missing'
+        }
+    
+    client = OpenAI(api_key=api_key_stripped)
     
     # Check file size - Whisper API has 25MB limit
     file_size = os.path.getsize(audio_path)
@@ -32,6 +43,7 @@ def transcribe_with_whisper(audio_path: str, api_key: str) -> Dict:
     
     if file_size > max_size:
         # For large files, we'd need to split - for now, skip transcription
+        print(f"TRANSCRIPTION: Audio file too large ({file_size / 1024 / 1024:.1f}MB > 25MB limit)", flush=True)
         return {
             'text': '',
             'words': [],
@@ -47,7 +59,32 @@ def transcribe_with_whisper(audio_path: str, api_key: str) -> Dict:
                 response_format="verbose_json",
                 timestamp_granularities=["word", "segment"]
             )
+        except AuthenticationError:
+            print(f"TRANSCRIPTION: Invalid API key", flush=True)
+            return {
+                'text': '',
+                'words': [],
+                'segments': [],
+                'error': 'Invalid API key - check your OpenAI API key'
+            }
+        except RateLimitError:
+            print(f"TRANSCRIPTION: Rate limit exceeded", flush=True)
+            return {
+                'text': '',
+                'words': [],
+                'segments': [],
+                'error': 'Rate limit exceeded - try again later'
+            }
+        except APIConnectionError:
+            print(f"TRANSCRIPTION: Connection error", flush=True)
+            return {
+                'text': '',
+                'words': [],
+                'segments': [],
+                'error': 'Connection error - check your internet'
+            }
         except Exception as e:
+            print(f"TRANSCRIPTION: Unexpected error ({type(e).__name__}): {e}", flush=True)
             return {
                 'text': '',
                 'words': [],

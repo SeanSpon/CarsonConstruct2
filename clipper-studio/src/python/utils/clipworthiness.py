@@ -98,6 +98,7 @@ def apply_clipworthiness(
     weights = settings.get("clipworthiness_weights", _default_weights())
     scored = []
     gated_out = []
+    gated_count = 0
 
     for clip in clips:
         metrics = _speech_metrics(features, clip["startTime"], clip["endTime"])
@@ -115,6 +116,7 @@ def apply_clipworthiness(
         ]
 
         if gate_reasons:
+            gated_count += 1
             if debug:
                 gated_clip = {**clip}
                 gated_clip["gateReasons"] = gate_reasons
@@ -162,7 +164,7 @@ def apply_clipworthiness(
 
     debug_stats = {
         "candidates": len(clips),
-        "gatedOut": len(gated_out),
+        "gatedOut": gated_count,
     }
     if debug:
         debug_stats["gatedClips"] = gated_out

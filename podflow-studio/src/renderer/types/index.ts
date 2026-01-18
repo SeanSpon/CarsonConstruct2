@@ -23,6 +23,9 @@ export interface Clip {
   category?: string;
   sentiment?: 'positive' | 'negative' | 'neutral';
   aiQualityMultiplier?: number;
+  completeThought?: boolean;
+  flags?: string[];
+  qualityMultiplier?: number;
   
   // Final score
   finalScore: number;

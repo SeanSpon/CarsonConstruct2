@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import type { DragEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { FileVideo, Upload, Loader2, AlertCircle, Sparkles, Clock, Trash2, FolderOpen } from 'lucide-react';
 import { useStore } from '../stores/store';
@@ -16,6 +17,27 @@ export default function Home() {
   
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [isDragging, setIsDragging] = useState(false);
+
+  const supportedDropExtensions = ['mp4', 'mov'];
+
+  const validateAndSetProject = async (filePath: string, fileName: string, size: number) => {
+    const validation = await window.api.validateFile(filePath);
+    
+    if (!validation.valid) {
+      setError(validation.error || 'Invalid video file');
+      return false;
+    }
+
+    setProject({
+      filePath,
+      fileName,
+      size,
+      duration: validation.duration || 0,
+    });
+
+    return true;
+  };
 
   const handleSelectFile = async () => {
     setIsLoading(true);
@@ -29,21 +51,71 @@ export default function Home() {
         return;
       }
 
-      // Validate the file
-      const validation = await window.api.validateFile(file.path);
-      
-      if (!validation.valid) {
-        setError(validation.error || 'Invalid video file');
-        setIsLoading(false);
-        return;
-      }
+      await validateAndSetProject(file.path, file.name, file.size);
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
-      setProject({
-        filePath: file.path,
-        fileName: file.name,
-        size: file.size,
-        duration: validation.duration || 0,
-      });
+  const handleDragOver = (event: DragEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+
+    if (isLoading) {
+      return;
+    }
+
+    event.dataTransfer.dropEffect = 'copy';
+    setIsDragging(true);
+  };
+
+  const handleDragEnter = (event: DragEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+
+    if (!isLoading) {
+      setIsDragging(true);
+    }
+  };
+
+  const handleDragLeave = (event: DragEvent<HTMLButtonElement>) => {
+    if (isLoading) {
+      return;
+    }
+
+    const nextTarget = event.relatedTarget as Node | null;
+    if (nextTarget && event.currentTarget.contains(nextTarget)) {
+      return;
+    }
+
+    setIsDragging(false);
+  };
+
+  const handleDrop = async (event: DragEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+
+    if (isLoading) {
+      return;
+    }
+
+    setIsDragging(false);
+    const droppedFile = event.dataTransfer.files?.[0];
+
+    if (!droppedFile) {
+      return;
+    }
+
+    const extension = droppedFile.name.split('.').pop()?.toLowerCase();
+    if (!extension || !supportedDropExtensions.includes(extension)) {
+      setError('Drag-and-drop supports .mp4 and .mov files.');
+      return;
+    }
+
+    setIsLoading(true);
+    setError(null);
+
+    try {
+      await validateAndSetProject(droppedFile.path, droppedFile.name, droppedFile.size);
     } catch (err) {
       setError(String(err));
     } finally {
@@ -116,13 +188,19 @@ export default function Home() {
             {/* File Selection */}
             <button
               onClick={handleSelectFile}
+              onDragEnter={handleDragEnter}
+              onDragOver={handleDragOver}
+              onDragLeave={handleDragLeave}
+              onDrop={handleDrop}
               disabled={isLoading}
               className={`
                 w-full border-2 border-dashed rounded-2xl p-10 text-center 
                 transition-all duration-200 cursor-pointer mb-6
                 ${isLoading 
                   ? 'border-zinc-700 bg-zinc-900/50 cursor-wait' 
-                  : 'border-zinc-700 hover:border-violet-500 hover:bg-violet-500/5 bg-zinc-900/30'
+                  : isDragging
+                    ? 'border-violet-500 bg-violet-500/10'
+                    : 'border-zinc-700 hover:border-violet-500 hover:bg-violet-500/5 bg-zinc-900/30'
                 }
               `}
             >
@@ -137,8 +215,12 @@ export default function Home() {
                     <FileVideo className="w-8 h-8 text-zinc-400" />
                   </div>
                   <div>
-                    <p className="text-xl font-medium text-zinc-200">Select your podcast video</p>
-                    <p className="text-sm text-zinc-500 mt-2">MP4, MOV, WEBM, MKV supported</p>
+                    <p className="text-xl font-medium text-zinc-200">
+                      {isDragging ? 'Drop your podcast video' : 'Select your podcast video'}
+                    </p>
+                    <p className="text-sm text-zinc-500 mt-2">
+                      Drag and drop a .mp4 or .mov, or choose a file (MP4, MOV, WEBM, MKV).
+                    </p>
                   </div>
                   <div className="mt-2 px-6 py-3 bg-violet-600 hover:bg-violet-500 rounded-lg font-medium text-white transition-colors">
                     <Upload className="w-4 h-4 inline-block mr-2" />

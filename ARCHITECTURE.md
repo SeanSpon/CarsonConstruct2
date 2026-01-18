@@ -19,14 +19,14 @@ This project consists of **two complementary Electron applications** for podcast
 ### 1. **Clipper Studio** (AI-Free, Fast)
 - **Purpose:** Rapid clip detection using pure algorithmic approach
 - **Target Users:** Content creators who need speed and don't want AI costs
-- **Key Features:** 2 pattern detectors (Payoff + Monologue), hook strength scoring
+- **Key Features:** 2 pattern detectors (Payoff + Monologue), feature cache, VAD boundary snapping, speech gate, clipworthiness ensemble scoring
 - **Processing Time:** ~30-60 seconds for 1-hour podcast
 - **Cost:** $0 per video
 
 ### 2. **PodFlow Studio** (AI-Enhanced, Comprehensive)
 - **Purpose:** Production-grade clip finder with AI semantic understanding
 - **Target Users:** Professional creators/agencies willing to pay for accuracy
-- **Key Features:** 4 pattern detectors + Whisper transcription + GPT-4o title generation
+- **Key Features:** Payoff + Monologue + Laughter + Debate detectors, feature cache, VAD boundary snapping, speech gate, clipworthiness ensemble scoring, Whisper transcription + GPT-4o title generation
 - **Processing Time:** ~2-5 minutes for 1-hour podcast
 - **Cost:** ~$0.50 per video (Whisper + GPT API calls)
 
@@ -76,10 +76,10 @@ Both applications share the same core architecture with different feature sets.
 │  │  │   Payoff     │  │  Monologue   │  │   Laughter   │  │    │
 │  │  │  Detection   │  │  Detection   │  │  Detection   │  │    │
 │  │  └──────────────┘  └──────────────┘  └──────────────┘  │    │
-│  │  ┌──────────────┐  ┌──────────────┐                     │    │
-│  │  │   Silence    │  │ Hook Scorer  │                     │    │
-│  │  │  Detection   │  │              │                     │    │
-│  │  └──────────────┘  └──────────────┘                     │    │
+│  │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐  │    │
+│  │  │   Silence    │  │   Debate     │  │ Hook Scorer  │  │    │
+│  │  │  Detection   │  │  Detection   │  │              │  │    │
+│  │  └──────────────┘  └──────────────┘  └──────────────┘  │    │
 │  └─────────────────────────────────────────────────────────┘    │
 │                              ↓                                    │
 │  ┌─────────────────────────────────────────────────────────┐    │
@@ -281,7 +281,8 @@ ipcMain.handle('start-detection', (event, { projectId, filePath, settings }) →
   2. Serialize settings to JSON
   3. spawn('python', [detectorScript, filePath, settingsJson])
   4. Parse stdout for PROGRESS/RESULT/ERROR messages
-  5. Forward to renderer via webContents.send()
+  5. Throttle progress IPC (max 10/s, step changes pass immediately)
+  6. Forward to renderer via webContents.send()
 
 // Kill running detection
 ipcMain.handle('cancel-detection', (projectId) →
@@ -344,7 +345,7 @@ Same as above, but Python script:
 
 3. **Streaming vs Batch IPC:**
    - Q: Should we buffer progress updates or send immediately?
-   - Current: Every Python progress message triggers IPC
+   - Current: Progress updates are throttled to ~10/s with step-change bypass
    - Research: Debounce/throttle strategies, measure overhead
    - Expected Impact: Reduced CPU usage on main thread
 
@@ -370,39 +371,43 @@ Same as above, but Python script:
 - **AI (PodFlow only):** openai 1.12.0 (Whisper + GPT-4o-mini)
 - **Audio I/O:** soundfile 0.12.1
 - **Video Processing:** FFmpeg (subprocess calls)
+- **VAD:** webrtcvad (speech segmentation, boundary snapping)
+
+### Algorithmic Enhancements (2026-01-18)
+- **Feature cache:** `features.py` computes RMS, centroid, flatness, ZCR, onset once and reuses everywhere.
+- **VAD utilities:** `vad_utils.py` builds speech segments (WebRTC VAD with fallback) and snaps boundaries.
+- **Local baselines:** `utils/baseline.py` applies rolling medians for RMS/centroid/ZCR/onset thresholds.
+- **Speech gate:** hard gates block low speech ratio or high flatness (noise/music).
+- **Clipworthiness scoring:** `utils/clipworthiness.py` applies hard gates + soft-score ensemble with explainable breakdown.
+- **Debate detector (PodFlow):** `patterns/debate.py` detects rapid turn-taking with short gaps.
+- **Debug toggle:** gate reasons and snap diagnostics are returned only when debug is enabled.
 
 ### Main Pipeline (`detector.py`)
 
 **Clipper Studio Pipeline (Simple):**
 ```python
 def main(video_path: str):
-    1. extract_audio(video_path, tmpdir) 
+    1. extract_audio(video_path, tmpdir)
        → FFmpeg: -vn -acodec pcm_s16le -ar 22050 -ac 1
        → Output: mono WAV at 22.05kHz
-    
+
     2. y, sr = librosa.load(audio_path, sr=22050)
        → Load audio time series
        → duration = librosa.get_duration(y=y, sr=sr)
-    
-    3. payoff_moments = detect_payoff_moments(y, sr, duration)
-       → Find [silence → spike] patterns
-       → Returns: List[{start, end, score, pattern: 'payoff'}]
-    
-    4. monologue_moments = detect_energy_monologues(y, sr, duration)
-       → Find [sustained energy + fast pace] patterns
-       → Returns: List[{start, end, score, pattern: 'monologue'}]
-    
-    5. all_moments = payoff_moments + monologue_moments
-       for moment in all_moments:
-           hook_strength = calculate_hook_strength(y, sr, start, end)
-           moment['hookStrength'] = hook_strength
-           moment['hookMultiplier'] = 1.0 + (hook_strength / 100) * 0.5
-    
-    6. scored_clips = calculate_final_scores(all_moments)
-       final_clips = select_final_clips(scored_clips, max_clips=20, min_gap=30)
-    
+
+    3. features = extract_features(y, sr)
+       → Cache RMS, centroid, flatness, ZCR, onset, VAD mask
+
+    4. payoff = detect_payoff_moments(features, bounds)
+       monologue = detect_energy_monologues(features, bounds)
+
+    5. Snap to VAD boundaries + apply speech gate
+       → snap_clip_to_segments(...) + apply_clipworthiness(...)
+
+    6. scored_clips = select_final_clips(scored_clips, max_clips=20, min_gap=30)
+
     7. waveform = generate_waveform(y, num_points=1000)
-    
+
     8. send_complete(clips=final_clips, waveform=waveform)
 ```
 
@@ -410,36 +415,40 @@ def main(video_path: str):
 ```python
 def main(video_path: str, settings: dict):
     1. extract_audio_ffmpeg(video_path, audio_path)
-    
+
     2. y, sr = librosa.load(audio_path, sr=22050)
        y = normalize_audio(y, sr)  # Remove DC offset, normalize peak
-    
+
     3. # Define analysis boundaries
        start_time = settings['skip_intro']  # Default: 90s
        end_time = duration - settings['skip_outro']  # Default: 60s
-    
-    4. # Run 4 pattern detectors in sequence
-       payoff_clips = detect_payoff_moments(y, sr, duration, start_time, end_time)
-       monologue_clips = detect_energy_monologues(y, sr, duration, start_time, end_time)
-       laughter_clips = detect_laughter_moments(y, sr, duration, start_time, end_time)
-       dead_spaces = detect_dead_spaces(y, sr, duration, min_silence=3.0)
-    
-    5. # Merge overlapping clips, calculate scores
-       all_clips = merge_overlapping_clips(payoff + monologue + laughter)
-       all_clips = calculate_final_scores(all_clips, y, sr)
-       final_clips = select_final_clips(all_clips, max_clips=target_count*2, min_gap=30)
-    
-    6. # AI Enhancement (optional, if API key provided)
+
+    4. features = extract_features(y, sr)
+       → Cache RMS/centroid/flatness/ZCR/onset + VAD segments
+
+    5. # Run pattern detectors
+       payoff_clips = detect_payoff_moments(features, bounds)
+       monologue_clips = detect_energy_monologues(features, bounds)
+       laughter_clips = detect_laughter_moments(features, bounds)
+       debate_clips = detect_debate_moments(features, bounds)
+       dead_spaces = detect_dead_spaces(features, bounds, min_silence=3.0)
+
+    6. Snap to VAD boundaries + apply speech gate
+       → snap_clip_to_segments(...) + apply_clipworthiness(...)
+
+    7. Merge overlapping clips + select top candidates
+       → merge_overlapping_clips(...) + select_final_clips(...)
+
+    8. # AI Enhancement (optional, if API key provided)
        if settings['use_ai_enhancement']:
            transcript = transcribe_with_whisper(audio_path, openai_key)
            final_clips = enhance_clips_with_ai(final_clips, transcript, openai_key)
-           # Adds: title, hookText, aiScore, validationNotes
-    
-    7. # Final selection: top N clips by combined score
+
+    9. # Final selection: top N clips by combined score
        final_clips = sorted(final_clips, key=lambda c: c['finalScore'], reverse=True)
        final_clips = final_clips[:target_count]
-    
-    8. send_result(clips=final_clips, dead_spaces=dead_spaces, transcript=transcript)
+
+    10. send_result(clips=final_clips, dead_spaces=dead_spaces, transcript=transcript)
 ```
 
 ### Pattern Detection Algorithms (Deep Dive)
@@ -488,7 +497,7 @@ def main(video_path: str, settings: dict):
        trim to max, keeping payoff centered
 ```
 
-**Key Insight:** PodFlow uses LOCAL baseline (10s window) vs Clipper uses GLOBAL percentiles. Local baseline adapts to varying audio levels throughout the podcast.
+**Key Insight:** Both apps now use rolling median baselines (10-20s windows) so thresholds adapt to local audio conditions and reduce false positives.
 
 **Scoring Breakdown:**
 - Silence score (0-35): Longer pauses = more build-up
@@ -532,8 +541,8 @@ def main(video_path: str, settings: dict):
 ```
 
 **Key Features:**
-- Uses zero-crossing rate as speech pace proxy (better than onset detection)
-- Requires BOTH high energy AND fast pace (prevents music segments)
+- Uses VAD speech density + onset deviation instead of ZCR-only pacing
+- Requires BOTH high energy deviation AND dense speech (blocks music/noise)
 - Rewards longer sustained segments (passion = engagement)
 
 #### 3. **Laughter Detection** (PodFlow only, `patterns/laughter.py`)
@@ -542,25 +551,15 @@ def main(video_path: str, settings: dict):
 
 **Algorithm:**
 ```python
-1. Calculate spectral centroid (frequency center of mass)
-   spectral_centroid = librosa.feature.spectral_centroid(y=y, sr=sr)
-   # Laughter has high centroid (bright, high-frequency sound)
-   
-2. Calculate RMS energy
-   rms = librosa.feature.rms(y=y)
-   
-3. Find "bright burst" patterns
-   centroid_threshold = percentile(spectral_centroid, 75)
-   energy_threshold = percentile(rms, 65)
-   
-   for each window:
-       if centroid > centroid_threshold and energy > energy_threshold:
-           if pattern shows bursts (energy spikes every 0.2-0.5s):
-               # Laughter has rhythmic burst pattern
-               score based on:
-                   - Burst regularity (laughter rhythm)
-                   - Brightness (high frequencies)
-                   - Energy level
+1. Calculate spectral centroid + RMS + ZCR + onset strength
+   # Use rolling baselines for local deviations
+
+2. Find "bright burst" patterns
+   centroid_dev, energy_dev, zcr_dev, onset_dev
+
+3. Burst clustering
+   - Require multiple peaks within a 1-3s window
+   - Filters out isolated spikes and music hits
 ```
 
 **Key Insight:** Laughter has unique spectral signature (high centroid) + temporal pattern (bursts). This distinguishes it from music or shouts.
@@ -571,12 +570,11 @@ def main(video_path: str, settings: dict):
 
 **Algorithm:**
 ```python
-1. Calculate RMS energy
-   rms = librosa.feature.rms(y=y, hop_length=hop_length)
-   
-2. Define silence threshold
-   silence_threshold = percentile(rms, 10)  # Bottom 10%
-   
+1. Calculate RMS energy (smoothed)
+
+2. Define silence threshold relative to rolling baseline
+   silence_deviation = (rms - baseline) / baseline
+
 3. Find silence regions
    in_silence = False
    for i, energy in enumerate(rms):
@@ -621,6 +619,24 @@ def calculate_hook_strength(y, sr, clip_start, clip_end):
 ```
 
 **Impact:** Clips with strong hooks ranked higher → Better social media performance.
+
+#### 6. **Clipworthiness Scoring** (Both apps, `utils/clipworthiness.py`)
+
+**Concept:** Deterministic ensemble score with hard gates + soft scores.
+
+**Hard Gates:**
+- speech_ratio ≥ 0.70 (VAD mask)
+- spectral_flatness median ≤ 0.45 (noise/music filter)
+- speech_seconds ≥ 6s within clip
+
+**Soft Scores (0-100 each):**
+- payoff_score / monologue_score / laughter_score / debate_score
+- hook_score (energy deviation first 3s + novelty)
+- coherence_score (VAD phrase boundary alignment)
+
+**Final Score:**
+- Weighted sum (Clipper vs PodFlow weights)
+- Breakdown included when debug is enabled
 
 ### AI Enhancement Layer (PodFlow only)
 
@@ -685,6 +701,31 @@ def enhance_clips_with_ai(clips, transcript, api_key):
 
 **Key Decision:** AI is VALIDATION layer, not primary detector. Algorithms do heavy lifting (fast, free), AI adds semantic understanding (slow, paid).
 
+### Evaluation Harness (Precision@K)
+
+- **Runner:** `tools/eval/run_eval.py`
+- **Dataset format:**
+```json
+{
+  "episodes": [
+    {
+      "id": "episode-1",
+      "ground_truth": [{ "start": 120.0, "end": 150.0, "label": "payoff" }],
+      "predictions": [{ "start": 118.0, "end": 148.0, "pattern": "payoff", "finalScore": 92.0 }]
+    }
+  ]
+}
+```
+- **Command:** `python tools/eval/run_eval.py --dataset data/sample.json --k 10`
+- **Outputs:** console summary + `tools/eval/report.json`
+
+### Benchmark Note (Local)
+- Feature cache removes repeated librosa feature extraction across detectors.
+- No before/after timing captured in-repo yet; run local profiling on a 1-hour episode to populate.
+
+### Tests (Python)
+- `cd podflow-studio/src/python && python -m unittest discover -s tests`
+
 ### 🔍 **RESEARCH QUESTIONS - Python Layer:**
 
 1. **Audio Preprocessing:**
@@ -731,7 +772,7 @@ def enhance_clips_with_ai(clips, transcript, api_key):
 
 8. **Clip Boundary Optimization:**
    - Q: Should we use VAD (Voice Activity Detection) to snap boundaries to speech edges?
-   - Current: Fixed offsets (±5s)
+   - Current: VAD snapping (±2s window + tail padding), thresholds still tunable
    - Research: webrtcvad, silero-vad for precise boundaries
    - Expected Impact: Cleaner clip edges, better UX
 

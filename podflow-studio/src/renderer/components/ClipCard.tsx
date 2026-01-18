@@ -3,6 +3,7 @@ import { Check, X, Minus, Plus, Play, Flame } from 'lucide-react';
 import type { Clip } from '../types';
 import { formatTimestamp, getScoreLabel, getScoreColor } from '../types';
 import { useStore } from '../stores/store';
+import ScoreBreakdown from './ScoreBreakdown';
 
 interface ClipCardProps {
   clip: Clip;
@@ -190,6 +191,9 @@ export default function ClipCard({ clip, videoPath }: ClipCardProps) {
             "{clip.transcript}"
           </p>
         )}
+
+        {/* Score Breakdown - "Why This Clip?" */}
+        <ScoreBreakdown clip={clip} />
 
         {/* Trim controls */}
         <div className="flex items-center gap-3 mb-4">

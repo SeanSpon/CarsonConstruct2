@@ -2,6 +2,7 @@ import { useRef, useState } from 'react';
 import { Play, Pause, Check, X, ChevronLeft, ChevronRight } from 'lucide-react';
 import { useProjectStore } from '../stores/projectStore';
 import { DetectedClip, PATTERN_INFO, formatTime, ViralPattern } from '../types';
+import ScoreBreakdown from './ScoreBreakdown';
 
 interface ClipCardProps {
   clip: DetectedClip;
@@ -172,6 +173,9 @@ export default function ClipCard({ clip, videoPath }: ClipCardProps) {
             />
           </div>
         </div>
+
+        {/* Score Breakdown - "Why This Clip?" */}
+        <ScoreBreakdown clip={clip} />
 
         {/* Trim Controls */}
         <div className="flex items-center justify-between mb-4 text-sm">

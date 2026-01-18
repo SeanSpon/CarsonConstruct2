@@ -3,18 +3,30 @@ export type ViralPattern = 'payoff' | 'monologue';
 
 export type ClipStatus = 'pending' | 'accepted' | 'rejected';
 
+export interface ClipworthinessBreakdown {
+  hardGates: Record<string, boolean>;
+  softScores: Record<string, number>;
+  weights: Record<string, number>;
+  finalScore: number;
+}
+
 export interface DetectedClip {
   id: string;
   startTime: number;      // seconds
   endTime: number;        // seconds
   score: number;          // 0-100 final viral score (with hook multiplier applied)
+  algorithmScore?: number; // Raw pattern detection score before weighting
   pattern: ViralPattern;  // 'payoff' or 'monologue'
   patternLabel: string;   // "Payoff Moment" or "Energy Monologue"
   description: string;    // e.g. "2.3s pause → energy spike"
   hookStrength: number;   // 0-100 (how strong is the first 3 sec)
+  hookMultiplier?: number; // Hook strength multiplier
   status: ClipStatus;
   trimStartOffset: number;
   trimEndOffset: number;
+  
+  // Clipworthiness breakdown (why this clip)
+  clipworthiness?: ClipworthinessBreakdown;
 }
 
 export interface FileInfo {

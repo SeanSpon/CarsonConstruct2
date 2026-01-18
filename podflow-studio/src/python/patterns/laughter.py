@@ -1,183 +1,137 @@
 """
 Laughter Detection
 
-Pattern: Burst energy clusters with specific spectral characteristics
-
-Real examples:
-- Genuine laughter after a joke
-- Audience reaction
-- Contagious laughter moments
-
-Uses spectral centroid + energy bursts to identify laughter.
+Pattern: Burst clusters with high centroid + energy deviation.
+Uses local baselines and peak clustering.
 """
 
+from typing import Dict, List
+
 import numpy as np
-import librosa
-from typing import List, Dict
+from scipy.signal import find_peaks
+
+from utils.baseline import deviation_from_baseline
+
 
 def detect_laughter_moments(
-    y: np.ndarray, 
-    sr: int, 
-    duration: float,
-    start_time: float = 0,
-    end_time: float = None,
-    min_clip_duration: float = 15,
-    max_clip_duration: float = 90
+    features: Dict,
+    bounds: Dict,
+    settings: Dict,
 ) -> List[Dict]:
     """
     Find laughter moments using energy bursts and spectral analysis.
     """
-    
-    if end_time is None:
-        end_time = duration
-    
-    # Step 1: Calculate features
-    hop_length = int(sr * 0.05)  # 50ms windows
-    
-    # RMS energy
-    rms = librosa.feature.rms(y=y, hop_length=hop_length)[0]
-    times = librosa.times_like(rms, sr=sr, hop_length=hop_length)
-    
-    # Spectral centroid (laughter tends to have higher centroid)
-    spectral_centroid = librosa.feature.spectral_centroid(y=y, sr=sr, hop_length=hop_length)[0]
-    
-    # Zero crossing rate (laughter has rapid changes)
-    zcr = librosa.feature.zero_crossing_rate(y, hop_length=hop_length)[0]
-    
-    if len(rms) == 0:
+    times = features["times"]
+    rms = features["rms_smooth"]
+    centroid = features["spectral_centroid"]
+    zcr = features["zcr"]
+    onset = features["onset_strength"]
+    rms_baseline = features["rms_baseline"]
+    centroid_baseline = features["centroid_baseline"]
+    zcr_baseline = features["zcr_baseline"]
+    onset_baseline = features["onset_baseline"]
+    hop_s = features["frame_duration"]
+
+    start_time = bounds["start_time"]
+    end_time = bounds["end_time"]
+    min_clip_duration = bounds["min_duration"]
+    max_clip_duration = bounds["max_duration"]
+
+    debug = settings.get("debug", False)
+
+    if rms.size == 0:
         return []
-    
-    # Normalize features
-    rms_norm = (rms - np.min(rms)) / (np.max(rms) - np.min(rms) + 0.001)
-    centroid_norm = (spectral_centroid - np.min(spectral_centroid)) / (np.max(spectral_centroid) - np.min(spectral_centroid) + 0.001)
-    zcr_norm = (zcr - np.min(zcr)) / (np.max(zcr) - np.min(zcr) + 0.001)
-    
-    # Step 2: Calculate laughter likelihood score
-    # Laughter characteristics: bursts of energy with high spectral centroid and ZCR
-    min_len = min(len(rms_norm), len(centroid_norm), len(zcr_norm), len(times))
-    
-    # Calculate energy derivative (bursts)
-    energy_diff = np.abs(np.diff(rms_norm[:min_len]))
-    energy_diff = np.pad(energy_diff, (0, 1), mode='edge')
-    
-    # Laughter score combining features
+
+    energy_dev = np.clip(deviation_from_baseline(rms, rms_baseline), 0.0, None)
+    centroid_dev = np.clip(deviation_from_baseline(centroid, centroid_baseline), 0.0, None)
+    zcr_dev = np.clip(deviation_from_baseline(zcr, zcr_baseline), 0.0, None)
+    onset_dev = np.clip(deviation_from_baseline(onset, onset_baseline), 0.0, None)
+
     laughter_score = (
-        0.3 * rms_norm[:min_len] +           # High energy
-        0.3 * centroid_norm[:min_len] +      # High spectral centroid
-        0.2 * zcr_norm[:min_len] +           # High zero crossings
-        0.2 * energy_diff                     # Burst pattern
+        0.35 * energy_dev
+        + 0.25 * centroid_dev
+        + 0.2 * zcr_dev
+        + 0.2 * onset_dev
     )
-    
-    # Smooth the score
-    window_size = 10  # 500ms smoothing
-    if len(laughter_score) >= window_size:
-        laughter_score = np.convolve(laughter_score, np.ones(window_size)/window_size, mode='same')
-    
-    # Step 3: Find high-laughter regions
-    threshold = np.percentile(laughter_score, 85)  # Top 15%
-    
-    laughter_regions = []
-    in_region = False
-    region_start = 0
-    region_start_idx = 0
-    
-    for i in range(min_len):
-        time = times[i]
-        score = laughter_score[i]
-        
-        # Skip if outside analysis range
-        if time < start_time or time > end_time:
-            if in_region:
-                region_end = time
-                region_duration = region_end - region_start
-                if 2 <= region_duration <= 15:  # Laughter typically 2-15 seconds
-                    laughter_regions.append({
-                        'start': region_start,
-                        'end': region_end,
-                        'duration': region_duration,
-                        'start_idx': region_start_idx,
-                        'end_idx': i,
-                        'peak_score': np.max(laughter_score[region_start_idx:i])
-                    })
-                in_region = False
-            continue
-        
-        if score > threshold and not in_region:
-            in_region = True
-            region_start = time
-            region_start_idx = i
-        elif score <= threshold and in_region:
-            in_region = False
-            region_end = time
-            region_duration = region_end - region_start
-            
-            if 2 <= region_duration <= 15:  # Laughter typically 2-15 seconds
-                laughter_regions.append({
-                    'start': region_start,
-                    'end': region_end,
-                    'duration': region_duration,
-                    'start_idx': region_start_idx,
-                    'end_idx': i,
-                    'peak_score': np.max(laughter_score[region_start_idx:i])
-                })
-    
-    # Handle region at end
-    if in_region:
-        region_end = min(times[-1], end_time)
-        region_duration = region_end - region_start
-        if 2 <= region_duration <= 15:
-            laughter_regions.append({
-                'start': region_start,
-                'end': region_end,
-                'duration': region_duration,
-                'start_idx': region_start_idx,
-                'end_idx': min_len - 1,
-                'peak_score': np.max(laughter_score[region_start_idx:])
-            })
-    
-    # Step 4: Convert regions to clips (with context before the laughter)
+
+    if laughter_score.size == 0:
+        return []
+
+    threshold = np.percentile(laughter_score, 85)
+    peak_indices, _ = find_peaks(laughter_score, height=threshold, distance=max(1, int(0.2 / hop_s)))
+    peak_times = times[peak_indices] if peak_indices.size else np.array([])
+
+    clusters = []
+    if peak_times.size:
+        cluster_start = peak_times[0]
+        cluster_peaks = [peak_times[0]]
+        for peak in peak_times[1:]:
+            if peak - cluster_start <= 3.0:
+                cluster_peaks.append(float(peak))
+            else:
+                if len(cluster_peaks) >= 3:
+                    clusters.append((cluster_peaks[0], cluster_peaks[-1], len(cluster_peaks)))
+                cluster_start = peak
+                cluster_peaks = [float(peak)]
+        if len(cluster_peaks) >= 3:
+            clusters.append((cluster_peaks[0], cluster_peaks[-1], len(cluster_peaks)))
+
     laughter_clips = []
-    
-    for region in laughter_regions:
-        # Include 10-15 seconds before the laughter (setup/joke)
-        context_before = min(15, region['start'] - start_time)
-        clip_start = region['start'] - context_before
-        
-        # Include the full laughter + a bit after
-        clip_end = min(end_time, region['end'] + 3)
+    for cluster_start, cluster_end, peak_count in clusters:
+        if cluster_end < start_time or cluster_start > end_time:
+            continue
+        if cluster_end - cluster_start < 1.0:
+            continue
+
+        region_start = max(start_time, cluster_start - 0.5)
+        region_end = min(end_time, cluster_end + 0.8)
+        region_duration = region_end - region_start
+
+        if region_duration < 1.5 or region_duration > 15.0:
+            continue
+
+        start_idx = int(np.searchsorted(times, region_start, side="left"))
+        end_idx = int(np.searchsorted(times, region_end, side="right"))
+        peak_score = float(np.max(laughter_score[start_idx:end_idx]))
+
+        clip_start = max(start_time, region_start - 10.0)
+        clip_end = min(end_time, region_end + 3.0)
         clip_duration = clip_end - clip_start
-        
-        # Enforce duration limits
+
         if clip_duration < min_clip_duration:
             extra = min_clip_duration - clip_duration
             clip_start = max(start_time, clip_start - extra / 2)
             clip_end = min(end_time, clip_end + extra / 2)
             clip_duration = clip_end - clip_start
-        
+
         if clip_duration > max_clip_duration:
-            # Keep the laughter moment, trim context
-            clip_start = max(start_time, region['start'] - 10)
-            clip_end = min(end_time, region['end'] + 3)
+            clip_start = max(start_time, region_start - 8.0)
+            clip_end = min(end_time, region_end + 3.0)
             clip_duration = clip_end - clip_start
-        
-        # Calculate algorithm score
-        intensity_score = min(40, region['peak_score'] * 50)
-        duration_score = min(30, (region['duration'] / 10) * 30)
-        distinctness_score = min(30, (region['peak_score'] - threshold) / threshold * 30)
-        
-        algorithm_score = intensity_score + duration_score + distinctness_score
-        
-        laughter_clips.append({
-            'id': f"laughter_{len(laughter_clips) + 1}",
-            'startTime': round(clip_start, 2),
-            'endTime': round(clip_end, 2),
-            'duration': round(clip_duration, 2),
-            'pattern': 'laughter',
-            'patternLabel': 'Laughter Moment',
-            'description': f"{region['duration']:.1f}s laughter burst",
-            'algorithmScore': round(min(100, algorithm_score), 1),
-            'hookStrength': round(min(100, intensity_score * 2), 1),
-            'hookMultiplier': round(1.0 + (region['peak_score'] - 0.5) * 0.3, 2),
-        })
-    
+
+        intensity_score = min(45.0, peak_score * 40.0)
+        duration_score = min(25.0, (region_duration / 10.0) * 25.0)
+        burst_score = min(30.0, (peak_count / 6.0) * 30.0)
+        algorithm_score = intensity_score + duration_score + burst_score
+
+        clip = {
+            "id": f"laughter_{len(laughter_clips) + 1}",
+            "startTime": round(clip_start, 2),
+            "endTime": round(clip_end, 2),
+            "duration": round(clip_duration, 2),
+            "pattern": "laughter",
+            "patternLabel": "Laughter Moment",
+            "description": f"{region_duration:.1f}s laughter burst cluster",
+            "algorithmScore": round(min(100, algorithm_score), 1),
+        }
+
+        if debug:
+            clip["debug"] = {
+                "baseline_used": "rms/centroid/zcr/onset",
+                "peakScore": round(peak_score, 3),
+                "clusterPeaks": peak_count,
+            }
+
+        laughter_clips.append(clip)
+
     return laughter_clips

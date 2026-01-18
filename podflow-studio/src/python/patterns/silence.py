@@ -4,95 +4,126 @@ Dead Space Detection
 Finds silence regions > threshold for auto-edit feature.
 """
 
+from typing import Dict, List
+
 import numpy as np
-import librosa
-from typing import List, Dict
+
+from utils.baseline import deviation_from_baseline
+
 
 def detect_dead_spaces(
-    y: np.ndarray, 
-    sr: int, 
-    duration: float,
-    min_silence: float = 3.0,
-    max_silence: float = 30.0
+    features: Dict,
+    bounds: Dict,
+    settings: Dict,
 ) -> List[Dict]:
     """
     Find dead space (silence/very low energy) regions.
-    
-    Args:
-        y: Audio time series
-        sr: Sample rate
-        duration: Total duration in seconds
-        min_silence: Minimum silence duration to detect (default 3s)
-        max_silence: Maximum silence duration (split if longer)
-    
-    Returns:
-        List of dead space regions with remove flag
     """
-    
-    # Calculate RMS energy in small windows
-    hop_length = int(sr * 0.05)  # 50ms windows
-    rms = librosa.feature.rms(y=y, hop_length=hop_length)[0]
-    times = librosa.times_like(rms, sr=sr, hop_length=hop_length)
-    
-    if len(rms) == 0:
+    times = features["times"]
+    rms = features["rms_smooth"]
+    baseline = features["rms_baseline"]
+
+    min_silence = settings.get("min_silence", 3.0)
+    max_silence = settings.get("max_silence", 30.0)
+    silence_deviation = settings.get("silence_deviation", -0.45)
+
+    start_time = bounds["start_time"]
+    end_time = bounds["end_time"]
+
+    if rms.size == 0:
         return []
-    
-    # Define silence threshold (bottom 15% of energy)
-    silence_threshold = np.percentile(rms, 15)
-    
-    # Find silence regions
+
+    deviation = deviation_from_baseline(rms, baseline)
+
     dead_spaces = []
     in_silence = False
-    silence_start = 0
-    
-    for i, (time, energy) in enumerate(zip(times, rms)):
-        if energy < silence_threshold and not in_silence:
+    silence_start = 0.0
+
+    for i, time in enumerate(times):
+        if time < start_time or time > end_time:
+            if in_silence:
+                silence_end = float(time)
+                silence_duration = silence_end - silence_start
+                if silence_duration >= min_silence:
+                    dead_spaces.extend(
+                        _split_silence(
+                            silence_start,
+                            silence_end,
+                            min_silence,
+                            max_silence,
+                            len(dead_spaces),
+                        )
+                    )
+                in_silence = False
+            continue
+
+        if deviation[i] <= silence_deviation and not in_silence:
             in_silence = True
-            silence_start = time
-        elif energy >= silence_threshold and in_silence:
+            silence_start = float(time)
+        elif deviation[i] > silence_deviation and in_silence:
             in_silence = False
-            silence_end = time
+            silence_end = float(time)
             silence_duration = silence_end - silence_start
-            
-            # Only include if longer than minimum
             if silence_duration >= min_silence:
-                # Split if too long
-                if silence_duration > max_silence:
-                    num_splits = int(np.ceil(silence_duration / max_silence))
-                    split_duration = silence_duration / num_splits
-                    
-                    for j in range(num_splits):
-                        split_start = silence_start + j * split_duration
-                        split_end = split_start + split_duration
-                        
-                        dead_spaces.append({
-                            'id': f"dead_{len(dead_spaces) + 1}",
-                            'startTime': round(split_start, 2),
-                            'endTime': round(split_end, 2),
-                            'duration': round(split_duration, 2),
-                            'remove': True  # Default to remove
-                        })
-                else:
-                    dead_spaces.append({
-                        'id': f"dead_{len(dead_spaces) + 1}",
-                        'startTime': round(silence_start, 2),
-                        'endTime': round(silence_end, 2),
-                        'duration': round(silence_duration, 2),
-                        'remove': True  # Default to remove
-                    })
-    
-    # Handle silence at end
+                dead_spaces.extend(
+                    _split_silence(
+                        silence_start,
+                        silence_end,
+                        min_silence,
+                        max_silence,
+                        len(dead_spaces),
+                    )
+                )
+
     if in_silence:
-        silence_end = duration
+        silence_end = min(end_time, float(times[-1]))
         silence_duration = silence_end - silence_start
-        
         if silence_duration >= min_silence:
-            dead_spaces.append({
-                'id': f"dead_{len(dead_spaces) + 1}",
-                'startTime': round(silence_start, 2),
-                'endTime': round(silence_end, 2),
-                'duration': round(silence_duration, 2),
-                'remove': True
-            })
-    
+            dead_spaces.extend(
+                _split_silence(
+                    silence_start,
+                    silence_end,
+                    min_silence,
+                    max_silence,
+                    len(dead_spaces),
+                )
+            )
+
     return dead_spaces
+
+
+def _split_silence(
+    silence_start: float,
+    silence_end: float,
+    min_silence: float,
+    max_silence: float,
+    offset: int,
+) -> List[Dict]:
+    silence_duration = silence_end - silence_start
+    spaces = []
+    if silence_duration > max_silence:
+        num_splits = int(np.ceil(silence_duration / max_silence))
+        split_duration = silence_duration / num_splits
+        for j in range(num_splits):
+            split_start = silence_start + j * split_duration
+            split_end = split_start + split_duration
+            spaces.append(
+                {
+                    "id": f"dead_{offset + len(spaces) + 1}",
+                    "startTime": round(split_start, 2),
+                    "endTime": round(split_end, 2),
+                    "duration": round(split_duration, 2),
+                    "remove": True,
+                }
+            )
+    else:
+        spaces.append(
+            {
+                "id": f"dead_{offset + 1}",
+                "startTime": round(silence_start, 2),
+                "endTime": round(silence_end, 2),
+                "duration": round(silence_duration, 2),
+                "remove": True,
+            }
+        )
+    return spaces

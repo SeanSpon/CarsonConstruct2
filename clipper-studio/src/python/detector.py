@@ -24,13 +24,16 @@ def send_progress(step: str, progress: int, message: str):
     }), flush=True)
 
 
-def send_complete(clips: list, waveform: list):
+def send_complete(clips: list, waveform: list, debug: dict = None):
     """Send completion message with results"""
-    print(json.dumps({
+    payload = {
         "type": "complete",
         "clips": clips,
-        "waveform": waveform
-    }), flush=True)
+        "waveform": waveform,
+    }
+    if debug is not None:
+        payload["debug"] = debug
+    print(json.dumps(payload), flush=True)
 
 
 def send_error(error: str):
@@ -41,7 +44,7 @@ def send_error(error: str):
     }), flush=True)
 
 
-def main(video_path: str):
+def main(video_path: str, debug: bool = False):
     """Main detection pipeline - 2 patterns only"""
     
     # Import dependencies
@@ -53,11 +56,13 @@ def main(video_path: str):
         sys.exit(1)
     
     # Import our modules
+    from features import extract_features
     from patterns.payoff import detect_payoff_moments
     from patterns.monologue import detect_energy_monologues
-    from patterns.hook_scorer import calculate_hook_strength
     from utils.audio import extract_audio, generate_waveform
+    from utils.clipworthiness import apply_clipworthiness
     from utils.scoring import calculate_final_scores, select_final_clips
+    from vad_utils import snap_clip_to_segments
     
     with tempfile.TemporaryDirectory() as tmpdir:
         audio_path = os.path.join(tmpdir, "audio.wav")
@@ -82,43 +87,75 @@ def main(video_path: str):
         
         send_progress("extracting", 20, "Audio loaded successfully")
         
-        # Step 2: Detect Payoff Moments (silence → spike)
+        # Step 2: Build feature cache + VAD
+        send_progress("features", 25, "Extracting audio features...")
+        feature_settings = {"baseline_window_s": 15.0}
+        features = extract_features(y, sr, settings=feature_settings)
+
+        bounds = {
+            "start_time": 0.0,
+            "end_time": duration,
+            "min_duration": 15.0,
+            "max_duration": 90.0,
+        }
+
+        # Step 3: Detect Payoff Moments (silence → spike)
         send_progress("payoff", 30, "Detecting payoff moments...")
         try:
-            payoff_moments = detect_payoff_moments(y, sr, duration)
+            payoff_moments = detect_payoff_moments(features, bounds, {"debug": debug})
             send_progress("payoff", 50, f"Found {len(payoff_moments)} potential payoff moments")
         except Exception as e:
             send_error(f"Payoff detection failed: {e}")
             sys.exit(1)
         
-        # Step 3: Detect Energy Monologues (sustained high energy + fast pace)
+        # Step 4: Detect Energy Monologues (sustained high energy + dense speech)
         send_progress("monologue", 55, "Detecting energy monologues...")
         try:
-            monologue_moments = detect_energy_monologues(y, sr, duration)
+            monologue_moments = detect_energy_monologues(features, bounds, {"debug": debug})
             send_progress("monologue", 75, f"Found {len(monologue_moments)} potential monologues")
         except Exception as e:
             send_error(f"Monologue detection failed: {e}")
             sys.exit(1)
         
-        # Step 4: Combine and score with hook strength
-        send_progress("scoring", 80, "Calculating hook strength...")
-        
+        # Step 5: Snap boundaries + score with clipworthiness
+        send_progress("scoring", 80, "Snapping and scoring clips...")
+
         all_moments = payoff_moments + monologue_moments
-        
-        # Calculate hook strength for each moment
+        snapped = []
         for moment in all_moments:
-            try:
-                hook_data = calculate_hook_strength(y, sr, moment['start'], moment['end'])
-                moment['hookStrength'] = int(hook_data['strength_score'])
-                moment['hookMultiplier'] = hook_data['multiplier']
-            except:
-                moment['hookStrength'] = 50
-                moment['hookMultiplier'] = 1.0
-        
+            new_start, new_end, snapped_flag, snap_reason = snap_clip_to_segments(
+                moment["startTime"],
+                moment["endTime"],
+                features.get("vad_segments", []),
+                (0.0, duration),
+                bounds["min_duration"],
+                bounds["max_duration"],
+                snap_window_s=2.0,
+                tail_padding_s=0.4,
+            )
+            moment["startTime"] = round(new_start, 2)
+            moment["endTime"] = round(new_end, 2)
+            moment["duration"] = round(new_end - new_start, 2)
+            moment["start"] = moment["startTime"]
+            moment["end"] = moment["endTime"]
+            if debug:
+                moment.setdefault("debug", {})
+                moment["debug"]["snapApplied"] = snapped_flag
+                moment["debug"]["snapReason"] = snap_reason
+            snapped.append(moment)
+
+        scored_clips, debug_stats = apply_clipworthiness(
+            snapped, features, {"debug": debug}, debug=debug
+        )
+        scored_clips = calculate_final_scores(scored_clips)
+
+        send_progress(
+            "scoring",
+            85,
+            f"Gated {debug_stats['gatedOut']} of {debug_stats['candidates']} candidates",
+        )
+
         send_progress("scoring", 90, "Selecting best clips...")
-        
-        # Calculate final scores and select top clips
-        scored_clips = calculate_final_scores(all_moments)
         final_clips = select_final_clips(scored_clips, max_clips=20, min_gap=30)
         
         send_progress("scoring", 95, "Generating waveform...")
@@ -129,18 +166,23 @@ def main(video_path: str):
         send_progress("scoring", 100, f"Complete! Found {len(final_clips)} clips")
         
         # Send final results
-        send_complete(final_clips, waveform)
+        debug_payload = None
+        if debug:
+            debug_payload = {"gating": debug_stats}
+
+        send_complete(final_clips, waveform, debug=debug_payload)
 
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
-        send_error("Usage: python detector.py <video_path>")
+        send_error("Usage: python detector.py <video_path> [--debug]")
         sys.exit(1)
-    
+
     video_path = sys.argv[1]
-    
+    debug_flag = "--debug" in sys.argv[2:]
+
     if not os.path.exists(video_path):
         send_error(f"Video file not found: {video_path}")
         sys.exit(1)
-    
-    main(video_path)
+
+    main(video_path, debug=debug_flag)

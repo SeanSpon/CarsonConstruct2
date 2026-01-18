@@ -3,10 +3,15 @@ Clip scoring and selection utilities
 """
 
 import numpy as np
-from typing import List, Dict
+from typing import List, Dict, Optional
 from .audio import calculate_hook_strength
 
-def calculate_final_scores(clips: List[Dict], y: np.ndarray, sr: int) -> List[Dict]:
+def calculate_final_scores(
+    clips: List[Dict],
+    y: Optional[np.ndarray] = None,
+    sr: Optional[int] = None,
+    features: Optional[Dict] = None,
+) -> List[Dict]:
     """
     Calculate final scores for all clips, including hook strength.
     
@@ -21,23 +26,21 @@ def calculate_final_scores(clips: List[Dict], y: np.ndarray, sr: int) -> List[Di
     scored_clips = []
     
     for clip in clips:
-        # Calculate hook strength if not already done
-        if 'hookStrength' not in clip or clip['hookStrength'] == 0:
+        if "finalScore" in clip:
+            scored_clips.append(clip)
+            continue
+
+        if "hookStrength" not in clip or clip["hookStrength"] == 0:
             hook_data = calculate_hook_strength(
-                y, sr, 
-                clip['startTime'], 
-                clip['endTime']
+                y, sr, clip["startTime"], clip["endTime"], features=features
             )
-            clip['hookStrength'] = hook_data['strength_score']
-            clip['hookMultiplier'] = hook_data['multiplier']
-        
-        # Calculate final score
-        algorithm_score = clip.get('algorithmScore', 50)
-        hook_multiplier = clip.get('hookMultiplier', 1.0)
-        
-        # Final score = algorithm score * hook multiplier
+            clip["hookStrength"] = hook_data["strength_score"]
+            clip["hookMultiplier"] = hook_data["multiplier"]
+
+        algorithm_score = clip.get("algorithmScore", 50)
+        hook_multiplier = clip.get("hookMultiplier", 1.0)
         final_score = algorithm_score * hook_multiplier
-        clip['finalScore'] = round(min(100, final_score), 1)
+        clip["finalScore"] = round(min(100, final_score), 1)
         
         scored_clips.append(clip)
     
@@ -71,7 +74,9 @@ def merge_overlapping_clips(clips: List[Dict], overlap_threshold: float = 10.0) 
         
         if overlap > overlap_threshold:
             # Merge: extend the end time and keep the higher score
-            if clip.get('algorithmScore', 0) > last.get('algorithmScore', 0):
+            clip_score = clip.get('finalScore', clip.get('algorithmScore', 0))
+            last_score = last.get('finalScore', last.get('algorithmScore', 0))
+            if clip_score > last_score:
                 # Replace with higher scoring clip, but extend times
                 merged[-1] = {
                     **clip,

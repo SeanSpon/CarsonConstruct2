@@ -26,7 +26,7 @@ This project consists of **two complementary Electron applications** for podcast
 ### 2. **PodFlow Studio** (AI-Enhanced, Comprehensive)
 - **Purpose:** Production-grade clip finder with AI semantic understanding
 - **Target Users:** Professional creators/agencies willing to pay for accuracy
-- **Key Features:** Payoff + Monologue + Laughter + Debate detectors, feature cache, VAD boundary snapping, speech gate, clipworthiness ensemble scoring, Whisper transcription + GPT-4o title generation
+- **Key Features:** Payoff + Monologue + Laughter + Debate detectors, feature cache, VAD boundary snapping, speech gate, clipworthiness ensemble scoring, Whisper transcription + GPT-4o-mini clip enhancement (titles/hooks/quality multiplier)
 - **Processing Time:** ~2-5 minutes for 1-hour podcast
 - **Cost:** ~$0.50 per video (Whisper + GPT API calls)
 
@@ -71,22 +71,22 @@ Both applications share the same core architecture with different feature sets.
 │  └──────────────────────────────────────────────────────────┘   │
 │                              ↓                                    │
 │  ┌─────────────────────────────────────────────────────────┐    │
-│  │              PATTERN DETECTION MODULES                   │    │
+│  │         PATTERN DETECTION + SCORING MODULES              │    │
 │  │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐  │    │
 │  │  │   Payoff     │  │  Monologue   │  │   Laughter   │  │    │
 │  │  │  Detection   │  │  Detection   │  │  Detection   │  │    │
 │  │  └──────────────┘  └──────────────┘  └──────────────┘  │    │
 │  │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐  │    │
-│  │  │   Silence    │  │   Debate     │  │ Hook Scorer  │  │    │
-│  │  │  Detection   │  │  Detection   │  │              │  │    │
+│  │  │   Silence    │  │   Debate     │  │  Clip Score  │  │    │
+│  │  │  Detection   │  │  Detection   │  │   Scoring    │  │    │
 │  │  └──────────────┘  └──────────────┘  └──────────────┘  │    │
 │  └─────────────────────────────────────────────────────────┘    │
 │                              ↓                                    │
 │  ┌─────────────────────────────────────────────────────────┐    │
 │  │              AI ENHANCEMENT LAYER (Optional)             │    │
 │  │  ┌──────────────┐          ┌──────────────┐            │    │
-│  │  │   Whisper    │    →     │   GPT-4o     │            │    │
-│  │  │ Transcription│          │ Title Gen    │            │    │
+│  │  │   Whisper    │    →     │ GPT-4o-mini  │            │    │
+│  │  │ Transcription│          │ Clip Enhance │            │    │
 │  │  └──────────────┘          └──────────────┘            │    │
 │  └─────────────────────────────────────────────────────────┘    │
 └─────────────────────────────────────────────────────────────────┘
@@ -375,10 +375,10 @@ Same as above, but Python script:
 
 ### Algorithmic Enhancements (2026-01-18)
 - **Feature cache:** `features.py` computes RMS, centroid, flatness, ZCR, onset once and reuses everywhere.
-- **VAD utilities:** `vad_utils.py` builds speech segments (WebRTC VAD with fallback) and snaps boundaries.
+- **VAD utilities:** `vad_utils.py` builds speech segments (WebRTC VAD with fallback) and always attempts boundary snapping (no UI toggle; clips stay unchanged if no segments).
 - **Local baselines:** `utils/baseline.py` applies rolling medians for RMS/centroid/ZCR/onset thresholds.
-- **Speech gate:** hard gates block low speech ratio or high flatness (noise/music).
-- **Clipworthiness scoring:** `utils/clipworthiness.py` applies hard gates + soft-score ensemble with explainable breakdown.
+- **Speech gate:** hard gates block low speech ratio or high flatness (noise/music); reject reasons surface only in debug output.
+- **Clipworthiness scoring:** `utils/clipworthiness.py` applies hard gates + soft-score ensemble; clip breakdown is always attached, with extra debug metrics when enabled.
 - **Debate detector (PodFlow):** `patterns/debate.py` detects rapid turn-taking with short gaps.
 - **Debug toggle:** gate reasons and snap diagnostics are returned only when debug is enabled.
 
@@ -587,38 +587,21 @@ def main(video_path: str, settings: dict):
 
 **Use Case:** Auto-edit feature removes these silences to tighten pacing.
 
-#### 5. **Hook Strength Scoring** (Clipper only, `patterns/hook_scorer.py`)
+#### 5. **Hook Strength Scoring** (Both apps, `utils/clipworthiness.py`)
 
-**Concept:** First 3 seconds of clip should grab attention (TikTok/Instagram optimization)
+**Concept:** First 3 seconds of a clip should grab attention; score uses energy lift + onset novelty.
 
 **Algorithm:**
 ```python
-def calculate_hook_strength(y, sr, clip_start, clip_end):
-    hook_window = y[clip_start : clip_start + 3s]
-    
-    # Calculate multiple features
-    energy = np.mean(librosa.feature.rms(y=hook_window))
-    spectral_contrast = np.mean(librosa.feature.spectral_contrast(y=hook_window))
-    tempo = librosa.beat.tempo(y=hook_window, sr=sr)
-    
-    # Score based on:
-    # - Energy: Higher = more attention-grabbing
-    # - Spectral contrast: Higher = more interesting/dynamic
-    # - Tempo: Faster = more engaging
-    
-    hook_score = normalize(
-        energy * 0.4 + 
-        spectral_contrast * 0.4 + 
-        tempo_factor * 0.2
-    )
-    
-    return {
-        'strength_score': hook_score (0-100),
-        'multiplier': 1.0 + (hook_score / 100) * 0.5  # Boost final score by up to 50%
-    }
+1. hook_window = [clip_start, clip_start + 3s]
+2. rms_ratio = mean(rms) / mean(rms_baseline)
+3. onset_dev = deviation_from_baseline(onset, onset_baseline)
+4. novelty = clamp(mean(onset_dev), 0.0, 2.0)
+5. hook_score = clamp(50 + (rms_ratio - 1.0) * 35 + novelty * 15, 0, 100)
+6. hook_multiplier = clamp(0.85 + (hook_score - 50) / 200, 0.85, 1.2)
 ```
 
-**Impact:** Clips with strong hooks ranked higher → Better social media performance.
+**Impact:** hook_score feeds clipworthiness, and hook_multiplier modestly boosts final score.
 
 #### 6. **Clipworthiness Scoring** (Both apps, `utils/clipworthiness.py`)
 
@@ -636,7 +619,8 @@ def calculate_hook_strength(y, sr, clip_start, clip_end):
 
 **Final Score:**
 - Weighted sum (Clipper vs PodFlow weights)
-- Breakdown included when debug is enabled
+- Breakdown always attached to scored clips (`clip['clipworthiness']`)
+- Debug adds gate metrics/hook ratio and gated clip details in debug payload
 
 ### AI Enhancement Layer (PodFlow only)
 
@@ -651,7 +635,7 @@ def transcribe_with_whisper(audio_path, api_key):
             model="whisper-1",
             file=audio_file,
             response_format="verbose_json",
-            timestamp_granularity="word"  # Word-level timestamps
+            timestamp_granularities=["word", "segment"]
         )
     
     # Returns: {segments: [{start, end, text}], words: [{start, end, word}]}
@@ -671,9 +655,11 @@ def enhance_clips_with_ai(clips, transcript, api_key):
         # GPT-4o-mini prompt
         prompt = f"""
         You are a viral content expert. Analyze this podcast clip and provide:
-        1. Viral-optimized title (8-12 words, curiosity-driven)
-        2. Hook text (first sentence that grabs attention)
-        3. Quality score (1-10) with validation notes
+        1. Validation flags (isComplete, startsClean, endsClean)
+        2. Viral-optimized title (8-12 words, curiosity-driven)
+        3. Hook text (first sentence that grabs attention)
+        4. Category + sentiment
+        5. Quality multiplier (0.7-1.3)
         
         Transcript: "{clip_transcript}"
         Duration: {clip['duration']}s
@@ -690,14 +676,21 @@ def enhance_clips_with_ai(clips, transcript, api_key):
         # Parse response, add to clip
         clip['title'] = parsed_response['title']
         clip['hookText'] = parsed_response['hookText']
-        clip['aiScore'] = parsed_response['qualityScore']
-        clip['validationNotes'] = parsed_response['notes']
+        clip['isComplete'] = parsed_response.get('isComplete', True)
+        clip['startsClean'] = parsed_response.get('startsClean', True)
+        clip['endsClean'] = parsed_response.get('endsClean', True)
+        clip['category'] = parsed_response.get('category', 'story')
+        clip['sentiment'] = parsed_response.get('sentiment', 'neutral')
+        clip['aiQualityMultiplier'] = parsed_response['qualityScore']
         
-        # Calculate final score: 60% algorithm + 40% AI
-        clip['finalScore'] = (clip['algorithmScore'] * 0.6) + (clip['aiScore'] * 10 * 0.4)
+        # Calculate final score: apply AI multiplier to algorithmic score
+        base_score = clip.get('finalScore', clip.get('algorithmScore', 50))
+        clip['finalScore'] = min(100, base_score * clip['aiQualityMultiplier'])
     
     # Cost: ~$0.02 per clip (~$0.20 for 10 clips)
 ```
+
+If transcript is empty or AI parsing fails, clips keep their algorithmic scores and skip AI fields.
 
 **Key Decision:** AI is VALIDATION layer, not primary detector. Algorithms do heavy lifting (fast, free), AI adds semantic understanding (slow, paid).
 
@@ -718,6 +711,7 @@ def enhance_clips_with_ai(clips, transcript, api_key):
 ```
 - **Command:** `python tools/eval/run_eval.py --dataset data/sample.json --k 10`
 - **Outputs:** console summary + `tools/eval/report.json`
+- **Dependencies:** Python stdlib only (no extra setup)
 
 ### Benchmark Note (Local)
 - Feature cache removes repeated librosa feature extraction across detectors.

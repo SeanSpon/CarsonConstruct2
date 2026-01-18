@@ -94,7 +94,7 @@ src/
     │   ├── payoff.py        # Silence → spike
     │   ├── monologue.py     # Sustained energy
     │   ├── laughter.py      # Burst clusters
-│   ├── debate.py        # Rapid turn-taking
+    │   ├── debate.py        # Rapid turn-taking
     │   └── silence.py       # Dead space
     ├── ai/
     │   ├── transcription.py # Whisper API

@@ -41,53 +41,51 @@ def generate_waveform(y: np.ndarray, num_points: int = 1000) -> list:
     return waveform
 
 
-def calculate_hook_strength(y: np.ndarray, sr: int, start_time: float, end_time: float) -> dict:
+def calculate_hook_strength(
+    y: np.ndarray,
+    sr: int,
+    start_time: float,
+    end_time: float,
+    features: dict = None,
+) -> dict:
     """
     Calculate hook strength for the first 3 seconds of a clip.
-    Compares to local baseline (30s before clip).
-    
-    Args:
-        y: Audio time series
-        sr: Sample rate
-        start_time: Clip start in seconds
-        end_time: Clip end in seconds
-    
-    Returns:
-        Dictionary with strength_score and multiplier
     """
-    import librosa
-    
-    # Get first 3 seconds of clip
-    hook_start = int(start_time * sr)
-    hook_end = int(min(start_time + 3, end_time) * sr)
-    hook_audio = y[hook_start:hook_end] if hook_end > hook_start else y[hook_start:]
-    
-    # Get 30 seconds before clip for baseline
-    baseline_start = int(max(0, start_time - 30) * sr)
-    baseline_end = int(start_time * sr)
-    baseline_audio = y[baseline_start:baseline_end] if baseline_end > baseline_start else y[:hook_start]
-    
-    if len(hook_audio) == 0 or len(baseline_audio) == 0:
-        return {'strength_score': 50, 'multiplier': 1.0}
-    
-    # Calculate RMS energy
-    hook_rms = np.sqrt(np.mean(hook_audio ** 2))
-    baseline_rms = np.sqrt(np.mean(baseline_audio ** 2))
-    
-    # Calculate ratio
-    if baseline_rms > 0:
-        ratio = hook_rms / baseline_rms
+    if features:
+        times = features["times"]
+        rms = features["rms_smooth"]
+        baseline = features["rms_baseline"]
+        hook_end = min(start_time + 3, end_time)
+        start_idx = int(np.searchsorted(times, start_time, side="left"))
+        end_idx = int(np.searchsorted(times, hook_end, side="right"))
+        if end_idx <= start_idx:
+            return {"strength_score": 50, "multiplier": 1.0}
+        hook_rms = float(np.mean(rms[start_idx:end_idx]))
+        baseline_rms = float(np.mean(baseline[start_idx:end_idx]))
     else:
-        ratio = 1.0
-    
-    # Convert to score (0-100)
+        import librosa
+
+        hook_start = int(start_time * sr)
+        hook_end = int(min(start_time + 3, end_time) * sr)
+        hook_audio = y[hook_start:hook_end] if hook_end > hook_start else y[hook_start:]
+
+        baseline_start = int(max(0, start_time - 30) * sr)
+        baseline_end = int(start_time * sr)
+        baseline_audio = y[baseline_start:baseline_end] if baseline_end > baseline_start else y[:hook_start]
+
+        if len(hook_audio) == 0 or len(baseline_audio) == 0:
+            return {"strength_score": 50, "multiplier": 1.0}
+
+        hook_rms = np.sqrt(np.mean(hook_audio ** 2))
+        baseline_rms = np.sqrt(np.mean(baseline_audio ** 2))
+
+    ratio = hook_rms / (baseline_rms + 1e-6)
+
     strength_score = min(100, max(0, ratio * 50))
-    
-    # Calculate multiplier (0.85 - 1.25)
     multiplier = 0.85 + (ratio - 0.5) * 0.4
     multiplier = max(0.85, min(1.25, multiplier))
-    
+
     return {
-        'strength_score': round(strength_score, 1),
-        'multiplier': round(multiplier, 2)
+        "strength_score": round(strength_score, 1),
+        "multiplier": round(multiplier, 2),
     }

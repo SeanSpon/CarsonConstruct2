@@ -276,7 +276,7 @@ export default function Export() {
                   </span>
                 </div>
                 <p className="text-xs text-zinc-500">
-                  Stream copy, instant export. May have minor issues at cut points.
+                  Stream copy (keyframe cuts). Timing may drift a few frames at boundaries.
                 </p>
               </button>
               <button
@@ -294,7 +294,7 @@ export default function Export() {
                   </span>
                 </div>
                 <p className="text-xs text-zinc-500">
-                  Re-encode for clean cuts. Takes longer but always perfect.
+                  Re-encode for frame-accurate cuts. Slower but frame-perfect.
                 </p>
               </button>
             </div>

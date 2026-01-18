@@ -77,7 +77,7 @@ function exportSingleClip(
   duration: number
 ): Promise<void> {
   return new Promise((resolve, reject) => {
-    // Use -c copy for fast stream copy (no re-encode)
+    // Use -c copy for stream copy (keyframe-aligned cuts)
     const ffmpeg = spawn('ffmpeg', [
       '-y', // Overwrite output
       '-ss', startTime.toString(),

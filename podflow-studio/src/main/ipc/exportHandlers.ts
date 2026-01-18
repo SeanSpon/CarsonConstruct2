@@ -143,10 +143,10 @@ function exportSingleClip(
     ];
 
     if (mode === 'fast') {
-      // Stream copy - fast but may have issues at clip boundaries
+      // Stream copy - fast but keyframe-aligned (boundary timing can drift)
       args.push('-c', 'copy', '-avoid_negative_ts', 'make_zero');
     } else {
-      // Re-encode - slower but always clean
+      // Re-encode - slower but frame-accurate cuts
       args.push(
         '-c:v', 'libx264',
         '-preset', 'fast',

@@ -4,6 +4,9 @@ import path from 'path';
 import fs from 'fs';
 
 let detectionProcess: ChildProcess | null = null;
+const PROGRESS_MIN_INTERVAL_MS = 100;
+const PROGRESS_MIN_DELTA = 1;
+let progressThrottle = { lastSentAt: 0, lastProgress: 0, lastStep: '' };
 
 // Get the path to the Python scripts
 function getPythonScriptPath(): string {
@@ -59,6 +62,7 @@ ipcMain.handle('start-detection', async (event, filePath: string) => {
   });
 
   let outputBuffer = '';
+  progressThrottle = { lastSentAt: 0, lastProgress: 0, lastStep: '' };
 
   detectionProcess.stdout?.on('data', (data) => {
     outputBuffer += data.toString();
@@ -74,11 +78,26 @@ ipcMain.handle('start-detection', async (event, filePath: string) => {
         const message = JSON.parse(line);
         
         if (message.type === 'progress') {
-          win.webContents.send('detection-progress', {
-            step: message.step,
-            progress: message.progress,
-            message: message.message,
-          });
+          const now = Date.now();
+          const progressDelta = Math.abs(message.progress - progressThrottle.lastProgress);
+          const stepChanged = message.step !== progressThrottle.lastStep;
+          const shouldSend =
+            stepChanged ||
+            progressDelta >= PROGRESS_MIN_DELTA ||
+            now - progressThrottle.lastSentAt >= PROGRESS_MIN_INTERVAL_MS;
+
+          if (shouldSend) {
+            win.webContents.send('detection-progress', {
+              step: message.step,
+              progress: message.progress,
+              message: message.message,
+            });
+            progressThrottle = {
+              lastSentAt: now,
+              lastProgress: message.progress,
+              lastStep: message.step,
+            };
+          }
         } else if (message.type === 'complete') {
           win.webContents.send('detection-complete', {
             clips: message.clips || [],

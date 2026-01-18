@@ -47,7 +47,7 @@ def enhance_clips_with_ai(clips: List[Dict], transcript: Dict, api_key: str) -> 
             if not clip_text or len(clip_text) < 10:
                 # Skip AI enhancement if no transcript
                 clip['transcript'] = clip_text
-                clip['finalScore'] = clip.get('algorithmScore', 50)
+                clip['finalScore'] = clip.get('finalScore', clip.get('algorithmScore', 50))
                 enhanced_clips.append(clip)
                 continue
             
@@ -105,20 +105,20 @@ Return ONLY valid JSON, no explanation or markdown."""
             }
             
             # Calculate final score
-            algorithm_score = clip.get('algorithmScore', 50)
+            base_score = clip.get('finalScore', clip.get('algorithmScore', 50))
             ai_multiplier = enhanced_clip['aiQualityMultiplier']
-            enhanced_clip['finalScore'] = round(min(100, algorithm_score * ai_multiplier), 1)
+            enhanced_clip['finalScore'] = round(min(100, base_score * ai_multiplier), 1)
             
             enhanced_clips.append(enhanced_clip)
             
         except json.JSONDecodeError as e:
             # JSON parsing failed, keep original clip
             clip['transcript'] = clip_text if 'clip_text' in dir() else ''
-            clip['finalScore'] = clip.get('algorithmScore', 50)
+            clip['finalScore'] = clip.get('finalScore', clip.get('algorithmScore', 50))
             enhanced_clips.append(clip)
         except Exception as e:
             # Any other error, keep original clip
-            clip['finalScore'] = clip.get('algorithmScore', 50)
+            clip['finalScore'] = clip.get('finalScore', clip.get('algorithmScore', 50))
             enhanced_clips.append(clip)
     
     return enhanced_clips

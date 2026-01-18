@@ -18,15 +18,18 @@ def calculate_final_scores(clips: List[Dict]) -> List[Dict]:
     scored_clips = []
     
     for clip in clips:
-        base_score = clip.get('score', 50)
-        hook_multiplier = clip.get('hookMultiplier', 1.0)
-        
-        # Apply hook multiplier
+        if clip.get("clipworthiness"):
+            scored_clips.append(clip)
+            continue
+
+        base_score = clip.get("score", clip.get("algorithmScore", 50))
+        hook_multiplier = clip.get("hookMultiplier", 1.0)
+
         final_score = min(100, base_score * hook_multiplier)
-        
+
         scored_clip = {
             **clip,
-            'score': round(final_score, 1)
+            "score": round(final_score, 1),
         }
         scored_clips.append(scored_clip)
     

@@ -26,7 +26,7 @@ This project consists of **two complementary Electron applications** for podcast
 ### 2. **PodFlow Studio** (AI-Enhanced, Comprehensive)
 - **Purpose:** Production-grade clip finder with AI semantic understanding
 - **Target Users:** Professional creators/agencies willing to pay for accuracy
-- **Key Features:** Payoff + Monologue + Laughter + Debate detectors, feature cache, VAD boundary snapping, speech gate, clipworthiness ensemble scoring, Whisper transcription + GPT-4o-mini clip enhancement (titles/hooks/quality multiplier)
+- **Key Features:** Payoff + Monologue + Laughter + Debate detectors, feature cache, VAD boundary snapping, speech gate, clipworthiness ensemble scoring, Whisper transcription + Translator/Thinker meaning cards + caching
 - **Processing Time:** ~2-5 minutes for 1-hour podcast
 - **Cost:** ~$0.50 per video (Whisper + GPT API calls)
 
@@ -84,10 +84,10 @@ Both applications share the same core architecture with different feature sets.
 │                              ↓                                    │
 │  ┌─────────────────────────────────────────────────────────┐    │
 │  │              AI ENHANCEMENT LAYER (Optional)             │    │
-│  │  ┌──────────────┐          ┌──────────────┐            │    │
-│  │  │   Whisper    │    →     │ GPT-4o-mini  │            │    │
-│  │  │ Transcription│          │ Clip Enhance │            │    │
-│  │  └──────────────┘          └──────────────┘            │    │
+│  │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐  │    │
+│  │  │   Whisper    │→ │ Translator   │→ │   Thinker    │  │    │
+│  │  │ Transcription│  │ MeaningCard  │  │  Top N Set   │  │    │
+│  │  └──────────────┘  └──────────────┘  └──────────────┘  │    │
 │  └─────────────────────────────────────────────────────────┘    │
 └─────────────────────────────────────────────────────────────────┘
                               ↓
@@ -439,14 +439,14 @@ def main(video_path: str, settings: dict):
     7. Merge overlapping clips + select top candidates
        → merge_overlapping_clips(...) + select_final_clips(...)
 
-    8. # AI Enhancement (optional, if API key provided)
+    8. # AI Enhancement (optional)
        if settings['use_ai_enhancement']:
-           transcript = transcribe_with_whisper(audio_path, openai_key)
-           final_clips = enhance_clips_with_ai(final_clips, transcript, openai_key)
+           transcript = transcribe_with_whisper(audio_path, openai_key)  # if key provided
+           final_clips = run_ai_enhancement(final_clips, transcript, settings)
 
-    9. # Final selection: top N clips by combined score
-       final_clips = sorted(final_clips, key=lambda c: c['finalScore'], reverse=True)
-       final_clips = final_clips[:target_count]
+    9. # Final selection: top N clips
+       # If AI disabled, sort by finalScore.
+       # If AI enabled, thinker ranking already returns N clips.
 
     10. send_result(clips=final_clips, dead_spaces=dead_spaces, transcript=transcript)
 ```
@@ -644,55 +644,21 @@ def transcribe_with_whisper(audio_path, api_key):
 
 **Use Case:** Enables semantic clip analysis (keywords, topics, speaker diarization potential).
 
-#### 2. **GPT-4o-mini Clip Enhancement** (`ai/clip_enhancement.py`)
+#### 2. **Translator + Thinker Orchestration** (`ai/translator.py`, `ai/thinker.py`, `ai/orchestrator.py`)
 
 ```python
-def enhance_clips_with_ai(clips, transcript, api_key):
-    for clip in clips:
-        # Extract transcript segment for this clip
-        clip_transcript = get_transcript_segment(transcript, clip['startTime'], clip['endTime'])
-        
-        # GPT-4o-mini prompt
-        prompt = f"""
-        You are a viral content expert. Analyze this podcast clip and provide:
-        1. Validation flags (isComplete, startsClean, endsClean)
-        2. Viral-optimized title (8-12 words, curiosity-driven)
-        3. Hook text (first sentence that grabs attention)
-        4. Category + sentiment
-        5. Quality multiplier (0.7-1.3)
-        
-        Transcript: "{clip_transcript}"
-        Duration: {clip['duration']}s
-        Pattern: {clip['pattern']}
-        Algorithm Score: {clip['algorithmScore']}
-        """
-        
-        response = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.7
-        )
-        
-        # Parse response, add to clip
-        clip['title'] = parsed_response['title']
-        clip['hookText'] = parsed_response['hookText']
-        clip['isComplete'] = parsed_response.get('isComplete', True)
-        clip['startsClean'] = parsed_response.get('startsClean', True)
-        clip['endsClean'] = parsed_response.get('endsClean', True)
-        clip['category'] = parsed_response.get('category', 'story')
-        clip['sentiment'] = parsed_response.get('sentiment', 'neutral')
-        clip['aiQualityMultiplier'] = parsed_response['qualityScore']
-        
-        # Calculate final score: apply AI multiplier to algorithmic score
-        base_score = clip.get('finalScore', clip.get('algorithmScore', 50))
-        clip['finalScore'] = min(100, base_score * clip['aiQualityMultiplier'])
-    
-    # Cost: ~$0.02 per clip (~$0.20 for 10 clips)
+def run_ai_enhancement(candidates, transcript, settings):
+    # Build ClipCard for each candidate
+    # Translator: ClipCard -> MeaningCard (title/hook/category/flags)
+    # Thinker: pick best N with dedupe + constraints
+    # Cache MeaningCard per clip to skip repeat calls
+    return selected_clips
 ```
 
-If transcript is empty or AI parsing fails, clips keep their algorithmic scores and skip AI fields.
-
-**Key Decision:** AI is VALIDATION layer, not primary detector. Algorithms do heavy lifting (fast, free), AI adds semantic understanding (slow, paid).
+- **Translator:** Converts each ClipCard into MeaningCard JSON (category, complete thought, title/hook, flags, multiplier)
+- **Thinker:** Selects the best N clips with dedupe, constraints, and optional AI reasoning
+- **Orchestrator:** Handles caching, fallbacks, and final score updates
+- **Fallbacks:** No API key or AI errors → deterministic heuristics + algorithmic ranking
 
 ### Evaluation Harness (Precision@K)
 

@@ -43,6 +43,10 @@ export default function ClipCard({ clip, videoPath }: ClipCardProps) {
 
   const scoreLabel = getScoreLabel(clip.finalScore);
   const scoreColor = getScoreColor(clip.finalScore);
+  const completeThought = clip.completeThought ?? clip.isComplete;
+  const cleanEdges = Boolean(clip.startsClean && clip.endsClean);
+  const qualityMultiplier = clip.qualityMultiplier ?? clip.aiQualityMultiplier;
+  const displayFlags = clip.flags ? clip.flags.slice(0, 2) : [];
 
   // Pattern colors
   const patternColors = {
@@ -99,13 +103,29 @@ export default function ClipCard({ clip, videoPath }: ClipCardProps) {
       {/* Content */}
       <div className="p-4">
         {/* Pattern Badge + Category */}
-        <div className="flex items-center gap-2 mb-2">
+        <div className="flex flex-wrap items-center gap-2 mb-2">
           <span className={`px-2 py-0.5 text-xs font-medium rounded border ${patternColor}`}>
             {clip.patternLabel}
           </span>
           {clip.category && (
             <span className="px-2 py-0.5 text-xs font-medium rounded bg-zinc-800 text-zinc-400">
               {clip.category}
+            </span>
+          )}
+          {completeThought !== undefined && (
+            <span
+              className={`px-2 py-0.5 text-xs font-medium rounded ${
+                completeThought
+                  ? 'bg-emerald-500/10 text-emerald-400'
+                  : 'bg-amber-500/10 text-amber-400'
+              }`}
+            >
+              {completeThought ? 'Complete thought' : 'Needs context'}
+            </span>
+          )}
+          {typeof qualityMultiplier === 'number' && !Number.isNaN(qualityMultiplier) && (
+            <span className="px-2 py-0.5 text-xs font-medium rounded bg-zinc-800 text-zinc-300">
+              x{qualityMultiplier.toFixed(2)}
             </span>
           )}
         </div>
@@ -124,18 +144,38 @@ export default function ClipCard({ clip, videoPath }: ClipCardProps) {
         <p className={`text-xs ${scoreColor} mb-2`}>{scoreLabel}</p>
 
         {/* Quality indicators (AI) */}
-        {(clip.isComplete !== undefined || clip.startsClean !== undefined) && (
+        {(completeThought !== undefined || cleanEdges) && (
           <div className="flex gap-1.5 mb-2">
-            {clip.isComplete && (
-              <span className="px-1.5 py-0.5 bg-emerald-500/10 text-emerald-400 text-[10px] rounded">
-                Complete
+            {completeThought !== undefined && (
+              <span
+                className={`px-1.5 py-0.5 text-[10px] rounded ${
+                  completeThought
+                    ? 'bg-emerald-500/10 text-emerald-400'
+                    : 'bg-amber-500/10 text-amber-400'
+                }`}
+              >
+                {completeThought ? 'Complete' : 'Partial'}
               </span>
             )}
-            {clip.startsClean && clip.endsClean && (
+            {cleanEdges && (
               <span className="px-1.5 py-0.5 bg-blue-500/10 text-blue-400 text-[10px] rounded">
                 Clean
               </span>
             )}
+          </div>
+        )}
+
+        {/* Flags */}
+        {displayFlags.length > 0 && (
+          <div className="flex flex-wrap gap-1.5 mb-2">
+            {displayFlags.map((flag) => (
+              <span
+                key={flag}
+                className="px-1.5 py-0.5 bg-zinc-800 text-zinc-400 text-[10px] rounded"
+              >
+                {flag.replace(/_/g, ' ')}
+              </span>
+            ))}
           </div>
         )}
 

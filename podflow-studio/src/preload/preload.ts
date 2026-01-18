@@ -22,6 +22,7 @@ export interface DetectionSettings {
   skipOutro: number;
   useAiEnhancement: boolean;
   openaiApiKey?: string;
+  debug?: boolean;
 }
 
 export interface ExportSettings {

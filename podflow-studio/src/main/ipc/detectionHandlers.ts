@@ -5,6 +5,9 @@ import { getMainWindow } from '../window';
 
 // Store active detection processes
 const activeProcesses = new Map<string, ChildProcess>();
+const progressState = new Map<string, { lastSentAt: number; lastProgress: number; lastMessage: string }>();
+const PROGRESS_MIN_INTERVAL_MS = 100;
+const PROGRESS_MIN_DELTA = 1;
 
 interface DetectionSettings {
   targetCount: number;
@@ -14,6 +17,7 @@ interface DetectionSettings {
   skipOutro: number;
   useAiEnhancement: boolean;
   openaiApiKey?: string;
+  debug?: boolean;
 }
 
 // Start detection process
@@ -53,6 +57,7 @@ ipcMain.handle('start-detection', async (_event, data: {
     skip_outro: settings.skipOutro,
     use_ai_enhancement: settings.useAiEnhancement,
     openai_api_key: settings.openaiApiKey || process.env.OPENAI_API_KEY || '',
+    debug: settings.debug || false,
   });
 
   // Spawn Python process
@@ -75,12 +80,28 @@ ipcMain.handle('start-detection', async (_event, data: {
         const parts = line.substring(9).split(':');
         const progress = parseInt(parts[0], 10);
         const message = parts.slice(1).join(':').trim();
-        
-        win.webContents.send('detection-progress', {
-          projectId,
-          progress,
-          message,
-        });
+
+        const now = Date.now();
+        const state = progressState.get(projectId) || { lastSentAt: 0, lastProgress: 0, lastMessage: '' };
+        const progressDelta = Math.abs(progress - state.lastProgress);
+        const messageChanged = message !== state.lastMessage;
+        const shouldSend =
+          messageChanged ||
+          progressDelta >= PROGRESS_MIN_DELTA ||
+          now - state.lastSentAt >= PROGRESS_MIN_INTERVAL_MS;
+
+        if (shouldSend) {
+          win.webContents.send('detection-progress', {
+            projectId,
+            progress,
+            message,
+          });
+          progressState.set(projectId, {
+            lastSentAt: now,
+            lastProgress: progress,
+            lastMessage: message,
+          });
+        }
       } else if (line.startsWith('RESULT:')) {
         try {
           const result = JSON.parse(line.substring(7));
@@ -118,6 +139,7 @@ ipcMain.handle('start-detection', async (_event, data: {
   // Handle process exit
   pythonProcess.on('close', (code) => {
     activeProcesses.delete(projectId);
+    progressState.delete(projectId);
     
     if (code !== 0 && code !== null) {
       win.webContents.send('detection-error', {

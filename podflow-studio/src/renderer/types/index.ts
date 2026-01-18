@@ -6,7 +6,7 @@ export interface Clip {
   duration: number;
   
   // Algorithm detection
-  pattern: 'payoff' | 'monologue' | 'laughter';
+  pattern: 'payoff' | 'monologue' | 'laughter' | 'debate';
   patternLabel: string;
   description: string;
   algorithmScore: number;
@@ -26,6 +26,14 @@ export interface Clip {
   
   // Final score
   finalScore: number;
+
+  // Clipworthiness breakdown (optional)
+  clipworthiness?: {
+    hardGates: Record<string, boolean>;
+    softScores: Record<string, number>;
+    weights: Record<string, number>;
+    finalScore: number;
+  };
   
   // User adjustments
   trimStartOffset: number;
@@ -74,6 +82,7 @@ export interface DetectionSettings {
   skipOutro: number;
   useAiEnhancement: boolean;
   openaiApiKey?: string;
+  debug?: boolean;
 }
 
 // Export settings

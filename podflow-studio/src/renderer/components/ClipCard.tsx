@@ -49,6 +49,7 @@ export default function ClipCard({ clip, videoPath }: ClipCardProps) {
     payoff: 'bg-violet-500/20 text-violet-400 border-violet-500/30',
     monologue: 'bg-blue-500/20 text-blue-400 border-blue-500/30',
     laughter: 'bg-amber-500/20 text-amber-400 border-amber-500/30',
+    debate: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30',
   };
 
   const patternColor = patternColors[clip.pattern] || patternColors.payoff;

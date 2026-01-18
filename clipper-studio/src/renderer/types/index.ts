@@ -26,7 +26,7 @@ export interface FileInfo {
 }
 
 export interface DetectionProgress {
-  step: string;           // 'extracting' | 'payoff' | 'monologue' | 'scoring'
+  step: string;           // 'extracting' | 'features' | 'payoff' | 'monologue' | 'scoring'
   progress: number;       // 0-100
   message: string;        // "Detecting payoff moments..."
 }

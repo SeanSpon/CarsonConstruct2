@@ -94,39 +94,65 @@ def extract_audio_ffmpeg(video_path: str, audio_path: str, ffmpeg_path: str = No
     import subprocess
     import shutil
     
+    print(f"DEBUG:extract_audio_ffmpeg called", flush=True)
+    print(f"DEBUG:Received ffmpeg_path: {ffmpeg_path}", flush=True)
+    
     # Determine FFmpeg path with fallbacks
     ffmpeg_cmd = None
     
     # 1. Try provided path
-    if ffmpeg_path and os.path.exists(ffmpeg_path):
-        ffmpeg_cmd = ffmpeg_path
-        print(f"DEBUG:Using provided FFmpeg: {ffmpeg_cmd}", flush=True)
-    # 2. Try common Windows locations if provided path doesn't exist
-    elif ffmpeg_path:
-        print(f"DEBUG:Provided FFmpeg path doesn't exist: {ffmpeg_path}", flush=True)
+    if ffmpeg_path:
+        exists = os.path.exists(ffmpeg_path)
+        is_file = os.path.isfile(ffmpeg_path) if exists else False
+        print(f"DEBUG:Provided path exists={exists}, isfile={is_file}", flush=True)
+        if exists and is_file:
+            # Verify it's a reasonable size (real ffmpeg is > 50MB usually)
+            try:
+                size = os.path.getsize(ffmpeg_path)
+                print(f"DEBUG:FFmpeg binary size: {size / 1024 / 1024:.1f} MB", flush=True)
+                if size > 1000000:  # At least 1MB
+                    ffmpeg_cmd = ffmpeg_path
+                    print(f"DEBUG:Using provided FFmpeg: {ffmpeg_cmd}", flush=True)
+                else:
+                    print(f"DEBUG:FFmpeg binary too small ({size} bytes), might be corrupted", flush=True)
+            except Exception as e:
+                print(f"DEBUG:Error checking ffmpeg size: {e}", flush=True)
+        else:
+            print(f"DEBUG:Provided FFmpeg path doesn't exist or not a file: {ffmpeg_path}", flush=True)
     
-    # 3. Try system PATH
+    # 2. Try system PATH
     if not ffmpeg_cmd:
+        print(f"DEBUG:Trying system PATH...", flush=True)
         system_ffmpeg = shutil.which('ffmpeg')
         if system_ffmpeg:
             ffmpeg_cmd = system_ffmpeg
             print(f"DEBUG:Using system FFmpeg: {ffmpeg_cmd}", flush=True)
+        else:
+            print(f"DEBUG:FFmpeg not found in system PATH", flush=True)
     
-    # 4. Try common Windows install locations
+    # 3. Try common Windows install locations
     if not ffmpeg_cmd:
+        print(f"DEBUG:Trying common Windows locations...", flush=True)
         common_paths = [
             r'C:\ffmpeg\bin\ffmpeg.exe',
+            r'C:\ffmpeg\ffmpeg.exe',
             r'C:\Program Files\ffmpeg\bin\ffmpeg.exe',
             r'C:\Program Files (x86)\ffmpeg\bin\ffmpeg.exe',
+            os.path.expanduser(r'~\ffmpeg\bin\ffmpeg.exe'),
         ]
         for path in common_paths:
-            if os.path.exists(path):
+            if os.path.exists(path) and os.path.isfile(path):
                 ffmpeg_cmd = path
                 print(f"DEBUG:Using FFmpeg from common location: {ffmpeg_cmd}", flush=True)
                 break
     
     if not ffmpeg_cmd:
-        raise Exception("FFmpeg not found. Please install FFmpeg and add it to your PATH, or install to C:\\ffmpeg")
+        raise Exception(
+            "FFmpeg not found. Please install FFmpeg:\n"
+            "  Option 1: winget install FFmpeg\n"
+            "  Option 2: Download from https://ffmpeg.org/download.html and add to PATH\n"
+            "  Option 3: Extract to C:\\ffmpeg\\bin\\ffmpeg.exe"
+        )
     
     cmd = [
         ffmpeg_cmd, '-y',
@@ -138,11 +164,20 @@ def extract_audio_ffmpeg(video_path: str, audio_path: str, ffmpeg_path: str = No
         audio_path
     ]
     
-    print(f"DEBUG:Running FFmpeg command: {' '.join(cmd[:3])}...", flush=True)
+    print(f"DEBUG:Running FFmpeg: {ffmpeg_cmd}", flush=True)
+    print(f"DEBUG:Input: {video_path}", flush=True)
+    print(f"DEBUG:Output: {audio_path}", flush=True)
     
-    result = subprocess.run(cmd, capture_output=True, text=True)
-    if result.returncode != 0:
-        raise Exception(f"FFmpeg error: {result.stderr}")
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+        print(f"DEBUG:FFmpeg return code: {result.returncode}", flush=True)
+        if result.returncode != 0:
+            print(f"DEBUG:FFmpeg stderr: {result.stderr[:500] if result.stderr else 'empty'}", flush=True)
+            raise Exception(f"FFmpeg error (code {result.returncode}): {result.stderr}")
+    except subprocess.TimeoutExpired:
+        raise Exception("FFmpeg timed out after 5 minutes")
+    except FileNotFoundError as e:
+        raise Exception(f"FFmpeg executable not found at {ffmpeg_cmd}: {e}")
 
 def normalize_audio(y, sr):
     """Normalize audio for consistent analysis"""

@@ -178,11 +178,17 @@ const startJob = async (data: {
 
   // Handle stdout - progress and results
   pythonProcess.stdout.on('data', (data) => {
-    // #region agent log
-    console.log('[Detection] Python stdout:', data.toString().substring(0, 200));
-    debugLog('detectionHandlers.ts:pythonProcess:stdout', 'Got stdout', { data: data.toString().substring(0, 200) }, 'F');
-    // #endregion
-    const lines = data.toString().split('\n').filter((line: string) => line.trim());
+    const fullOutput = data.toString();
+    const lines = fullOutput.split('\n').filter((line: string) => line.trim());
+
+    // Log all lines for debugging
+    for (const line of lines) {
+      if (line.startsWith('DEBUG:')) {
+        console.log('[Detection]', line);
+      } else if (line.startsWith('ERROR:') || line.startsWith('PROGRESS:') || line.startsWith('RESULT:')) {
+        console.log('[Detection] Python stdout:', line.substring(0, 300));
+      }
+    }
 
     for (const line of lines) {
       if (line.startsWith('PROGRESS:')) {

@@ -81,9 +81,6 @@ const startJob = async (data: {
   settings: DetectionSettings;
   durationSeconds?: number;
 }) => {
-  // #region agent log
-  console.log('=== [Detection] startJob ENTERED ===');
-  // #endregion
   const { projectId, filePath, settings, durationSeconds } = data;
   const win = getMainWindow();
   if (!win) {
@@ -144,12 +141,7 @@ const startJob = async (data: {
     ffmpeg_path: ffmpegPath,
   });
 
-  // #region agent log
-  debugLog('detectionHandlers.ts:startJob:spawn', 'About to spawn Python', { pythonScript, pythonDir, settingsJson: settingsJson.substring(0, 200) }, 'B');
-  console.log('[Detection] About to spawn Python:', pythonScript);
-  console.log('[Detection] File path:', filePath);
-  console.log('[Detection] FFmpeg path being passed:', ffmpegPath);
-  // #endregion
+  console.log('[Detection] Spawning Python detector:', pythonScript);
 
   // Spawn Python process
   let pythonProcess: ChildProcess;
@@ -161,16 +153,10 @@ const startJob = async (data: {
         PYTHONUNBUFFERED: '1',
       },
     });
-    // #region agent log
-    console.log('[Detection] spawn() returned, pid:', pythonProcess.pid);
-    debugLog('detectionHandlers.ts:spawn:returned', 'spawn() returned', { pid: pythonProcess.pid, connected: pythonProcess.connected }, 'F');
-    // #endregion
+    console.log('[Detection] Python process started, PID:', pythonProcess.pid);
   } catch (spawnError: unknown) {
-    // #region agent log
     const errMsg = spawnError instanceof Error ? spawnError.message : String(spawnError);
-    console.log('[Detection] spawn() threw exception:', errMsg);
-    debugLog('detectionHandlers.ts:spawn:exception', 'spawn() threw', { error: errMsg }, 'F');
-    // #endregion
+    console.error('[Detection] Failed to spawn Python:', errMsg);
     getJobStore().update(projectId, { status: 'failed', error: errMsg });
     win.webContents.send('detection-error', { projectId, error: `Python spawn failed: ${errMsg}` });
     return { success: false, error: errMsg };
@@ -178,11 +164,6 @@ const startJob = async (data: {
 
   activeProcesses.set(projectId, pythonProcess);
   activeJobId = projectId;
-
-  // #region agent log
-  debugLog('detectionHandlers.ts:pythonProcess:spawned', 'Python process spawned', { pid: pythonProcess.pid }, 'F');
-  console.log('[Detection] Python process spawned with PID:', pythonProcess.pid);
-  // #endregion
 
   // Handle stdout - progress and results
   pythonProcess.stdout.on('data', (data) => {
@@ -246,6 +227,7 @@ const startJob = async (data: {
             clips: result.clips || [],
             deadSpaces: result.deadSpaces || [],
             transcript: result.transcript || null,
+            speakers: result.speakers || [],
           });
         } catch (e) {
           console.error('Failed to parse detection result:', e);
@@ -262,10 +244,7 @@ const startJob = async (data: {
   // Handle stderr - errors
   pythonProcess.stderr.on('data', (data) => {
     const errorMessage = data.toString();
-    console.error('Python stderr:', errorMessage);
-    // #region agent log
-    debugLog('detectionHandlers.ts:pythonProcess:stderr', 'Got stderr', { data: errorMessage.substring(0, 500) }, 'F');
-    // #endregion
+    console.error('[Detection] Python stderr:', errorMessage);
 
     // Only send critical errors, not warnings
     if (errorMessage.includes('Error') || errorMessage.includes('Exception')) {
@@ -279,10 +258,7 @@ const startJob = async (data: {
 
   // Handle process exit
   pythonProcess.on('close', (code) => {
-    // #region agent log
-    console.log('[Detection] Python process closed with code:', code);
-    debugLog('detectionHandlers.ts:pythonProcess:close', 'Process closed', { code }, 'F');
-    // #endregion
+    console.log('[Detection] Python process exited with code:', code);
     activeProcesses.delete(projectId);
     progressState.delete(projectId);
     activeJobId = null;
@@ -304,9 +280,7 @@ const startJob = async (data: {
   });
 
   pythonProcess.on('error', (err) => {
-    // #region agent log
-    debugLog('detectionHandlers.ts:pythonProcess:error', 'Python spawn failed', { error: err.message }, 'C');
-    // #endregion
+    console.error('[Detection] Python process error:', err.message);
     activeProcesses.delete(projectId);
     activeJobId = null;
     getJobStore().update(projectId, { status: 'failed', error: err.message });
@@ -319,10 +293,6 @@ const startJob = async (data: {
   return { success: true };
 };
 
-// #region agent log
-const debugLog = (location: string, message: string, data: Record<string, unknown>, hypothesisId: string) => { fetch('http://127.0.0.1:7243/ingest/5a29b418-6eb9-4d45-b489-cbbacb9ac2f5',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location,message,data,timestamp:Date.now(),sessionId:'debug-session',hypothesisId})}).catch(()=>{}); };
-// #endregion
-
 // Start detection process
 ipcMain.handle('start-detection', async (_event, data: {
   projectId: string;
@@ -330,9 +300,6 @@ ipcMain.handle('start-detection', async (_event, data: {
   settings: DetectionSettings;
   durationSeconds?: number;
 }) => {
-  // #region agent log
-  debugLog('detectionHandlers.ts:start-detection', 'Handler invoked', { projectId: data.projectId, filePath: data.filePath, hasSettings: !!data.settings }, 'A');
-  // #endregion
   const { projectId, filePath, settings, durationSeconds } = data;
   const win = getMainWindow();
 

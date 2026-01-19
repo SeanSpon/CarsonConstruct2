@@ -6,6 +6,11 @@ module.exports = {
   ],
   theme: {
     extend: {
+      maxWidth: {
+        // Custom max-width for ultrawide monitor support
+        'ultrawide': '2560px',
+        'video': '1200px',
+      },
       colors: {
         // SeeZee Clip Studios Brand Tokens
         sz: {

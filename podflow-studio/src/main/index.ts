@@ -1,4 +1,4 @@
-import { app, BrowserWindow } from 'electron';
+import { app, BrowserWindow, Menu } from 'electron';
 import path from 'node:path';
 import { setMainWindow } from './window';
 
@@ -8,6 +8,19 @@ import './ipc/detectionHandlers';
 import './ipc/exportHandlers';
 import './ipc/reviewHandlers';
 import './ipc/cloudHandlers';
+import './ipc/premiereExport';
+import { registerAiEffectsHandlers } from './ipc/aiEffectsHandlers';
+import { registerProjectFileHandlers } from './ipc/projectFileHandlers';
+import { registerChatHandlers } from './ipc/chatHandlers';
+
+// Register AI effects handlers
+registerAiEffectsHandlers();
+
+// Register project file handlers
+registerProjectFileHandlers();
+
+// Register chat handlers
+registerChatHandlers();
 
 console.log('=== [MAIN] All imports complete, IPC handlers registered ===');
 
@@ -15,9 +28,17 @@ declare const MAIN_WINDOW_VITE_DEV_SERVER_URL: string;
 declare const MAIN_WINDOW_VITE_NAME: string;
 
 const createWindow = () => {
+  // Remove the default Electron menu bar (we use a custom menu in the renderer)
+  Menu.setApplicationMenu(null);
+
   const mainWindow = new BrowserWindow({
     width: 1200,
     height: 800,
+    minWidth: 960,
+    minHeight: 600,
+    useContentSize: true, // Use content area size instead of window frame size
+    backgroundColor: '#0D1117', // Match app background to prevent white flash on resize
+    title: 'PodFlow Studio',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,

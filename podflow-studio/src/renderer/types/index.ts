@@ -43,11 +43,47 @@ export interface AudioTrack {
   id: string;
   type: 'main' | 'broll' | 'sfx' | 'music';
   filePath?: string;
+  fileName?: string;
   startTime: number;
   endTime: number;
+  duration?: number;
   volume: number; // 0-100, where 100 = 0dB
   fadeIn?: number;
   fadeOut?: number;
+  muted?: boolean;
+  locked?: boolean;
+  waveformData?: number[];
+}
+
+// Timeline item group for nesting
+export interface TimelineGroup {
+  id: string;
+  name: string;
+  color: string;
+  itemIds: string[]; // IDs of clips/audio tracks in this group
+  collapsed?: boolean;
+  locked?: boolean;
+}
+
+// Applied effect on a clip/track
+export interface AppliedEffect {
+  id: string;
+  effectId: string;
+  category: 'ai' | 'video' | 'audio' | 'text';
+  name: string;
+  enabled: boolean;
+  parameters?: Record<string, number | string | boolean>;
+}
+
+// Timeline track configuration
+export interface TimelineTrack {
+  id: string;
+  name: string;
+  type: 'video' | 'audio' | 'broll' | 'music' | 'text';
+  visible: boolean;
+  locked: boolean;
+  height: number;
+  muted?: boolean;
 }
 
 // QA check result
@@ -105,6 +141,11 @@ export interface Clip {
   trimStartOffset: number;
   trimEndOffset: number;
   status: 'pending' | 'accepted' | 'rejected';
+  
+  // Editing state
+  groupId?: string; // Group this clip belongs to
+  locked?: boolean;
+  appliedEffects?: AppliedEffect[];
 }
 
 // Dead space detected for auto-edit
@@ -137,6 +178,13 @@ export interface Project {
   fileName: string;
   duration: number;
   size: number;
+  // Video metadata
+  resolution?: string;
+  width?: number;
+  height?: number;
+  fps?: number;
+  thumbnailPath?: string;
+  bitrate?: number;
 }
 
 // Detection settings
@@ -151,12 +199,48 @@ export interface DetectionSettings {
   debug?: boolean;
 }
 
+// Transition types for clip compilation
+export type TransitionType = 'none' | 'crossfade' | 'dip-to-black';
+
+export interface TransitionSettings {
+  type: TransitionType;
+  duration: number; // seconds (0.5 - 2.0)
+}
+
 // Export settings
 export interface ExportSettings {
   format: 'mp4' | 'mov';
   mode: 'fast' | 'accurate';
   exportClips: boolean;
+  exportClipsCompilation: boolean;
   exportFullVideo: boolean;
+  transition: TransitionSettings;
+}
+
+// Premiere Pro / NLE export settings
+export type NLEExportFormat = 'fcp-xml' | 'edl' | 'markers-csv' | 'premiere-markers';
+
+export interface NLEExportSettings {
+  format: NLEExportFormat;
+  includeClips: boolean;
+  includeDeadSpaces: boolean;
+  sequenceName?: string;
+  frameRate: number;
+  dropFrame: boolean;
+}
+
+// Premiere Pro marker colors
+export type PremiereMarkerColor = 
+  | 'green' | 'red' | 'purple' | 'orange' | 'yellow' 
+  | 'white' | 'blue' | 'cyan' | 'pink' | 'lavender';
+
+export interface PremiereMarker {
+  name: string;
+  comment: string;
+  startTime: number;
+  duration: number;
+  color: PremiereMarkerColor;
+  markerType: 'comment' | 'chapter' | 'segmentation' | 'weblink';
 }
 
 // Detection progress

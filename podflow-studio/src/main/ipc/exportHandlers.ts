@@ -1,7 +1,8 @@
-import { ipcMain, shell } from 'electron';
+import { ipcMain, shell, app } from 'electron';
 import { spawn } from 'child_process';
 import path from 'path';
 import fs from 'fs';
+import os from 'os';
 import { getMainWindow } from '../window';
 
 // Use bundled ffmpeg for reliability (no system dependency)
@@ -53,11 +54,20 @@ interface DeadSpace {
   remove: boolean;
 }
 
+type TransitionType = 'none' | 'crossfade' | 'dip-to-black';
+
+interface TransitionSettings {
+  type: TransitionType;
+  duration: number; // seconds (0.5 - 2.0)
+}
+
 interface ExportSettings {
   format: 'mp4' | 'mov';
   mode: 'fast' | 'accurate';
   exportClips: boolean;
+  exportClipsCompilation: boolean;
   exportFullVideo: boolean;
+  transition: TransitionSettings;
 }
 
 // Export clips
@@ -82,7 +92,9 @@ ipcMain.handle('export-clips', async (_event, data: {
 
   const errors: string[] = [];
   let completed = 0;
-  const totalTasks = (settings.exportClips ? clips.length : 0) + (settings.exportFullVideo ? 1 : 0);
+  const totalTasks = (settings.exportClips ? clips.length : 0) + 
+    (settings.exportClipsCompilation ? 1 : 0) + 
+    (settings.exportFullVideo ? 1 : 0);
 
   // Export individual clips
   if (settings.exportClips) {
@@ -125,6 +137,39 @@ ipcMain.handle('export-clips', async (_event, data: {
       } catch (err) {
         errors.push(`Failed to export ${clip.title || clip.id}: ${err}`);
       }
+    }
+  }
+
+  // Export clips compilation (all clips joined with transitions)
+  if (settings.exportClipsCompilation && clips.length > 0) {
+    win.webContents.send('export-progress', {
+      current: completed + 1,
+      total: totalTasks,
+      clipName: 'Clips compilation',
+      type: 'compilation',
+    });
+
+    try {
+      const outputFile = path.join(outputDir, `clips_compilation.${settings.format}`);
+      await exportClipsCompilation(
+        sourceFile, 
+        outputFile, 
+        clips, 
+        settings.transition, 
+        settings.mode,
+        (percent, message) => {
+          win.webContents.send('export-progress', {
+            current: completed + 1,
+            total: totalTasks,
+            clipName: message,
+            type: 'compilation',
+            percent,
+          });
+        }
+      );
+      completed++;
+    } catch (err) {
+      errors.push(`Failed to export clips compilation: ${err}`);
     }
   }
 
@@ -304,6 +349,207 @@ function exportWithDeadSpacesRemoved(
       if (code === 0) {
         resolve();
       } else {
+        reject(new Error(errorOutput || `FFmpeg exited with code ${code}`));
+      }
+    });
+
+    ffmpeg.on('error', reject);
+  });
+}
+
+// Export clips compilation with transitions
+function exportClipsCompilation(
+  sourceFile: string,
+  outputFile: string,
+  clips: ExportClip[],
+  transition: TransitionSettings,
+  mode: 'fast' | 'accurate',
+  onProgress?: (percent: number, message: string) => void
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (clips.length === 0) {
+      reject(new Error('No clips to compile'));
+      return;
+    }
+
+    // Sort clips by start time
+    const sortedClips = [...clips].sort((a, b) => {
+      const aStart = a.startTime + a.trimStartOffset;
+      const bStart = b.startTime + b.trimStartOffset;
+      return aStart - bStart;
+    });
+
+    // Calculate clip durations and build segments
+    const segments = sortedClips.map(clip => ({
+      start: clip.startTime + clip.trimStartOffset,
+      end: clip.endTime + clip.trimEndOffset,
+      duration: (clip.endTime + clip.trimEndOffset) - (clip.startTime + clip.trimStartOffset),
+    }));
+
+    // If only one clip, just extract it
+    if (segments.length === 1) {
+      const seg = segments[0];
+      const args = [
+        '-y',
+        '-ss', seg.start.toString(),
+        '-i', sourceFile,
+        '-t', seg.duration.toString(),
+        '-c:v', 'libx264',
+        '-preset', 'fast',
+        '-crf', '23',
+        '-c:a', 'aac',
+        '-b:a', '192k',
+        outputFile
+      ];
+
+      const ffmpeg = spawn(ffmpegPath, args, { windowsHide: true });
+      let errorOutput = '';
+
+      ffmpeg.stderr.on('data', (data) => {
+        errorOutput += data.toString();
+      });
+
+      ffmpeg.on('close', (code) => {
+        if (code === 0) resolve();
+        else reject(new Error(errorOutput || `FFmpeg exited with code ${code}`));
+      });
+
+      ffmpeg.on('error', reject);
+      return;
+    }
+
+    // Build FFmpeg filter based on transition type
+    const transitionDuration = transition.duration;
+    const filterParts: string[] = [];
+    
+    if (transition.type === 'none') {
+      // Simple concatenation without transitions
+      const concatInputs: string[] = [];
+      
+      for (let i = 0; i < segments.length; i++) {
+        const seg = segments[i];
+        filterParts.push(`[0:v]trim=start=${seg.start}:end=${seg.end},setpts=PTS-STARTPTS[v${i}]`);
+        filterParts.push(`[0:a]atrim=start=${seg.start}:end=${seg.end},asetpts=PTS-STARTPTS[a${i}]`);
+        concatInputs.push(`[v${i}][a${i}]`);
+      }
+      
+      filterParts.push(`${concatInputs.join('')}concat=n=${segments.length}:v=1:a=1[outv][outa]`);
+    } else if (transition.type === 'crossfade') {
+      // Crossfade transitions using xfade filter
+      // First, trim all clips
+      for (let i = 0; i < segments.length; i++) {
+        const seg = segments[i];
+        filterParts.push(`[0:v]trim=start=${seg.start}:end=${seg.end},setpts=PTS-STARTPTS[v${i}]`);
+        filterParts.push(`[0:a]atrim=start=${seg.start}:end=${seg.end},asetpts=PTS-STARTPTS[a${i}]`);
+      }
+      
+      // Apply xfade between consecutive clips
+      let lastVideoLabel = 'v0';
+      let lastAudioLabel = 'a0';
+      let runningDuration = segments[0].duration;
+      
+      for (let i = 1; i < segments.length; i++) {
+        const offset = runningDuration - transitionDuration;
+        const newVideoLabel = i === segments.length - 1 ? 'outv' : `xv${i}`;
+        const newAudioLabel = i === segments.length - 1 ? 'outa' : `xa${i}`;
+        
+        // Video crossfade
+        filterParts.push(
+          `[${lastVideoLabel}][v${i}]xfade=transition=fade:duration=${transitionDuration}:offset=${offset.toFixed(3)}[${newVideoLabel}]`
+        );
+        
+        // Audio crossfade
+        filterParts.push(
+          `[${lastAudioLabel}][a${i}]acrossfade=d=${transitionDuration}:c1=tri:c2=tri[${newAudioLabel}]`
+        );
+        
+        lastVideoLabel = newVideoLabel;
+        lastAudioLabel = newAudioLabel;
+        runningDuration = offset + segments[i].duration;
+      }
+    } else if (transition.type === 'dip-to-black') {
+      // Dip to black transitions
+      // First, trim all clips and add fade out/in
+      const halfTransition = transitionDuration / 2;
+      
+      for (let i = 0; i < segments.length; i++) {
+        const seg = segments[i];
+        const fadeOutStart = seg.duration - halfTransition;
+        
+        // Video: fade out at end, fade in at start (except first/last)
+        let videoFilter = `[0:v]trim=start=${seg.start}:end=${seg.end},setpts=PTS-STARTPTS`;
+        if (i > 0) {
+          videoFilter += `,fade=t=in:st=0:d=${halfTransition}`;
+        }
+        if (i < segments.length - 1) {
+          videoFilter += `,fade=t=out:st=${fadeOutStart.toFixed(3)}:d=${halfTransition}`;
+        }
+        videoFilter += `[v${i}]`;
+        filterParts.push(videoFilter);
+        
+        // Audio: fade out at end, fade in at start (except first/last)
+        let audioFilter = `[0:a]atrim=start=${seg.start}:end=${seg.end},asetpts=PTS-STARTPTS`;
+        if (i > 0) {
+          audioFilter += `,afade=t=in:st=0:d=${halfTransition}`;
+        }
+        if (i < segments.length - 1) {
+          audioFilter += `,afade=t=out:st=${fadeOutStart.toFixed(3)}:d=${halfTransition}`;
+        }
+        audioFilter += `[a${i}]`;
+        filterParts.push(audioFilter);
+      }
+      
+      // Concatenate with brief black gap
+      const concatInputs: string[] = [];
+      for (let i = 0; i < segments.length; i++) {
+        concatInputs.push(`[v${i}][a${i}]`);
+      }
+      filterParts.push(`${concatInputs.join('')}concat=n=${segments.length}:v=1:a=1[outv][outa]`);
+    }
+
+    const filterComplex = filterParts.join(';');
+    
+    const args = [
+      '-y',
+      '-i', sourceFile,
+      '-filter_complex', filterComplex,
+      '-map', '[outv]',
+      '-map', '[outa]',
+      '-c:v', 'libx264',
+      '-preset', mode === 'fast' ? 'ultrafast' : 'fast',
+      '-crf', '23',
+      '-c:a', 'aac',
+      '-b:a', '192k',
+      outputFile
+    ];
+
+    console.log('[Export] Clips compilation FFmpeg args:', args.join(' '));
+
+    const ffmpeg = spawn(ffmpegPath, args, { windowsHide: true });
+    let errorOutput = '';
+
+    ffmpeg.stderr.on('data', (data) => {
+      const str = data.toString();
+      errorOutput += str;
+      
+      // Parse progress from FFmpeg output
+      const timeMatch = str.match(/time=(\d+):(\d+):(\d+)/);
+      if (timeMatch && onProgress) {
+        const hours = parseInt(timeMatch[1]);
+        const mins = parseInt(timeMatch[2]);
+        const secs = parseInt(timeMatch[3]);
+        const currentTime = hours * 3600 + mins * 60 + secs;
+        const totalDuration = segments.reduce((sum, s) => sum + s.duration, 0);
+        const percent = Math.min(100, Math.round((currentTime / totalDuration) * 100));
+        onProgress(percent, `Rendering compilation... ${percent}%`);
+      }
+    });
+
+    ffmpeg.on('close', (code) => {
+      if (code === 0) {
+        resolve();
+      } else {
+        console.error('[Export] FFmpeg error:', errorOutput);
         reject(new Error(errorOutput || `FFmpeg exited with code ${code}`));
       }
     });
@@ -495,5 +741,192 @@ ipcMain.handle('open-folder', async (_event, folderPath: string) => {
     } catch (e) {
       return { success: false, error: String(e) };
     }
+  }
+});
+
+// Preview clips compilation - quick low-res render
+ipcMain.handle('preview-clips-compilation', async (_event, data: {
+  sourceFile: string;
+  clips: ExportClip[];
+  transition: TransitionSettings;
+}) => {
+  const { sourceFile, clips, transition } = data;
+  const win = getMainWindow();
+  
+  if (!win) {
+    return { success: false, error: 'Window not found' };
+  }
+
+  if (clips.length === 0) {
+    return { success: false, error: 'No clips to preview' };
+  }
+
+  // Create temp file for preview
+  const tempDir = app.getPath('temp');
+  const previewFile = path.join(tempDir, `podflow_preview_${Date.now()}.mp4`);
+
+  // Sort clips by start time
+  const sortedClips = [...clips].sort((a, b) => {
+    const aStart = a.startTime + a.trimStartOffset;
+    const bStart = b.startTime + b.trimStartOffset;
+    return aStart - bStart;
+  });
+
+  // Calculate segments
+  const segments = sortedClips.map(clip => ({
+    start: clip.startTime + clip.trimStartOffset,
+    end: clip.endTime + clip.trimEndOffset,
+    duration: (clip.endTime + clip.trimEndOffset) - (clip.startTime + clip.trimStartOffset),
+  }));
+
+  return new Promise((resolve) => {
+    // Build filter for 480p preview with transitions
+    const filterParts: string[] = [];
+    const transitionDuration = transition.duration;
+    
+    if (transition.type === 'none' || segments.length === 1) {
+      // Simple concatenation
+      const concatInputs: string[] = [];
+      
+      for (let i = 0; i < segments.length; i++) {
+        const seg = segments[i];
+        // Scale to 480p and trim
+        filterParts.push(`[0:v]trim=start=${seg.start}:end=${seg.end},setpts=PTS-STARTPTS,scale=-2:480[v${i}]`);
+        filterParts.push(`[0:a]atrim=start=${seg.start}:end=${seg.end},asetpts=PTS-STARTPTS[a${i}]`);
+        concatInputs.push(`[v${i}][a${i}]`);
+      }
+      
+      filterParts.push(`${concatInputs.join('')}concat=n=${segments.length}:v=1:a=1[outv][outa]`);
+    } else if (transition.type === 'crossfade') {
+      // Crossfade with 480p scaling
+      for (let i = 0; i < segments.length; i++) {
+        const seg = segments[i];
+        filterParts.push(`[0:v]trim=start=${seg.start}:end=${seg.end},setpts=PTS-STARTPTS,scale=-2:480[v${i}]`);
+        filterParts.push(`[0:a]atrim=start=${seg.start}:end=${seg.end},asetpts=PTS-STARTPTS[a${i}]`);
+      }
+      
+      let lastVideoLabel = 'v0';
+      let lastAudioLabel = 'a0';
+      let runningDuration = segments[0].duration;
+      
+      for (let i = 1; i < segments.length; i++) {
+        const offset = runningDuration - transitionDuration;
+        const newVideoLabel = i === segments.length - 1 ? 'outv' : `xv${i}`;
+        const newAudioLabel = i === segments.length - 1 ? 'outa' : `xa${i}`;
+        
+        filterParts.push(
+          `[${lastVideoLabel}][v${i}]xfade=transition=fade:duration=${transitionDuration}:offset=${offset.toFixed(3)}[${newVideoLabel}]`
+        );
+        filterParts.push(
+          `[${lastAudioLabel}][a${i}]acrossfade=d=${transitionDuration}:c1=tri:c2=tri[${newAudioLabel}]`
+        );
+        
+        lastVideoLabel = newVideoLabel;
+        lastAudioLabel = newAudioLabel;
+        runningDuration = offset + segments[i].duration;
+      }
+    } else if (transition.type === 'dip-to-black') {
+      // Dip to black with 480p scaling
+      const halfTransition = transitionDuration / 2;
+      
+      for (let i = 0; i < segments.length; i++) {
+        const seg = segments[i];
+        const fadeOutStart = seg.duration - halfTransition;
+        
+        let videoFilter = `[0:v]trim=start=${seg.start}:end=${seg.end},setpts=PTS-STARTPTS,scale=-2:480`;
+        if (i > 0) {
+          videoFilter += `,fade=t=in:st=0:d=${halfTransition}`;
+        }
+        if (i < segments.length - 1) {
+          videoFilter += `,fade=t=out:st=${fadeOutStart.toFixed(3)}:d=${halfTransition}`;
+        }
+        videoFilter += `[v${i}]`;
+        filterParts.push(videoFilter);
+        
+        let audioFilter = `[0:a]atrim=start=${seg.start}:end=${seg.end},asetpts=PTS-STARTPTS`;
+        if (i > 0) {
+          audioFilter += `,afade=t=in:st=0:d=${halfTransition}`;
+        }
+        if (i < segments.length - 1) {
+          audioFilter += `,afade=t=out:st=${fadeOutStart.toFixed(3)}:d=${halfTransition}`;
+        }
+        audioFilter += `[a${i}]`;
+        filterParts.push(audioFilter);
+      }
+      
+      const concatInputs: string[] = [];
+      for (let i = 0; i < segments.length; i++) {
+        concatInputs.push(`[v${i}][a${i}]`);
+      }
+      filterParts.push(`${concatInputs.join('')}concat=n=${segments.length}:v=1:a=1[outv][outa]`);
+    }
+
+    const filterComplex = filterParts.join(';');
+    
+    const args = [
+      '-y',
+      '-i', sourceFile,
+      '-filter_complex', filterComplex,
+      '-map', '[outv]',
+      '-map', '[outa]',
+      '-c:v', 'libx264',
+      '-preset', 'ultrafast',
+      '-crf', '28', // Lower quality for faster preview
+      '-c:a', 'aac',
+      '-b:a', '128k',
+      previewFile
+    ];
+
+    console.log('[Preview] Starting preview render...');
+
+    const ffmpeg = spawn(ffmpegPath, args, { windowsHide: true });
+    let errorOutput = '';
+
+    ffmpeg.stderr.on('data', (data) => {
+      const str = data.toString();
+      errorOutput += str;
+      
+      // Parse progress
+      const timeMatch = str.match(/time=(\d+):(\d+):(\d+)/);
+      if (timeMatch) {
+        const hours = parseInt(timeMatch[1]);
+        const mins = parseInt(timeMatch[2]);
+        const secs = parseInt(timeMatch[3]);
+        const currentTime = hours * 3600 + mins * 60 + secs;
+        const totalDuration = segments.reduce((sum, s) => sum + s.duration, 0);
+        const percent = Math.min(100, Math.round((currentTime / totalDuration) * 100));
+        
+        win.webContents.send('preview-progress', {
+          percent,
+          message: `Rendering preview... ${percent}%`,
+        });
+      }
+    });
+
+    ffmpeg.on('close', (code) => {
+      if (code === 0) {
+        console.log('[Preview] Preview render complete:', previewFile);
+        resolve({ success: true, previewFile });
+      } else {
+        console.error('[Preview] FFmpeg error:', errorOutput);
+        resolve({ success: false, error: errorOutput || `FFmpeg exited with code ${code}` });
+      }
+    });
+
+    ffmpeg.on('error', (err) => {
+      resolve({ success: false, error: String(err) });
+    });
+  });
+});
+
+// Clean up preview file
+ipcMain.handle('cleanup-preview', async (_event, previewFile: string) => {
+  try {
+    if (fs.existsSync(previewFile)) {
+      fs.unlinkSync(previewFile);
+    }
+    return { success: true };
+  } catch (err) {
+    return { success: false, error: String(err) };
   }
 });

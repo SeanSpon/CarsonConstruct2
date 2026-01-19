@@ -1,5 +1,5 @@
 import { memo } from 'react';
-import { Check, X, Scissors, Download, Copy, Link } from 'lucide-react';
+import { Check, X, Scissors, Download, Copy, Link, CheckCircle2 } from 'lucide-react';
 import type { Clip } from '../../types';
 import { Button, Badge } from '../ui';
 
@@ -9,6 +9,9 @@ interface QuickActionsProps {
   onReject: () => void;
   onTrim?: () => void;
   onExport: () => void;
+  onToggleQA?: () => void;
+  showQAPanel?: boolean;
+  qaIssueCount?: number;
 }
 
 // Pattern to display name mapping
@@ -27,7 +30,7 @@ const patternColors: Record<string, string> = {
   debate: 'bg-[#F97316]/20 text-[#F97316] border-[#F97316]/30',
 };
 
-function QuickActions({ clip, onAccept, onReject, onTrim, onExport }: QuickActionsProps) {
+function QuickActions({ clip, onAccept, onReject, onTrim, onExport, onToggleQA, showQAPanel, qaIssueCount = 0 }: QuickActionsProps) {
   // Copy title to clipboard
   const handleCopyTitle = () => {
     if (clip.title) {
@@ -109,6 +112,25 @@ function QuickActions({ clip, onAccept, onReject, onTrim, onExport }: QuickActio
             >
               Copy Hook
             </Button>
+          )}
+
+          {onToggleQA && (
+            <>
+              <div className="w-px h-6 bg-sz-border mx-1" />
+              <Button
+                variant={showQAPanel ? 'primary' : 'ghost'}
+                size="sm"
+                leftIcon={<CheckCircle2 className="w-4 h-4" />}
+                onClick={onToggleQA}
+              >
+                QA Check
+                {qaIssueCount > 0 && (
+                  <span className="ml-1 px-1.5 py-0.5 rounded-full text-[10px] bg-red-500 text-white">
+                    {qaIssueCount}
+                  </span>
+                )}
+              </Button>
+            </>
           )}
         </div>
 

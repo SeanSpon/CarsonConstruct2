@@ -9,6 +9,7 @@ function Home() {
   const navigate = useNavigate();
   const {
     project,
+    clips,
     setProject,
     clearProject,
     recentProjects,
@@ -92,10 +93,29 @@ function Home() {
     setError(null);
   }, [clearProject]);
 
-  // Navigate to clips page if project is already loaded
+  // Auto-restore session: navigate to last route if project exists
   useEffect(() => {
-    if (project) {
-      // Small delay to show the selected file before navigating
+    const state = useStore.getState();
+    if (project && state.lastRoute && state.lastRoute !== '/') {
+      // Validate project file still exists before navigating
+      window.api.validateFile(project.filePath).then((validation) => {
+        if (validation.valid) {
+          console.log('[Home] Restoring session, navigating to:', state.lastRoute);
+          navigate(state.lastRoute);
+        } else {
+          // File no longer exists, clear project
+          useStore.getState().clearProject();
+        }
+      }).catch(() => {
+        // Error validating, clear project
+        useStore.getState().clearProject();
+      });
+    } else if (project && clips.length > 0) {
+      // Project has clips, navigate to edit page
+      navigate('/edit');
+    } else if (project) {
+      // Project exists but no clips, navigate to clips page
+      navigate('/clips');
     }
   }, [project, navigate]);
 

@@ -1,5 +1,5 @@
-import { memo, useCallback } from 'react';
-import { X, Sliders, Brain, Download, Palette } from 'lucide-react';
+import { memo, useCallback, useEffect, useState } from 'react';
+import { X, Sliders, Brain, Download, Palette, Cloud, CloudOff, LogIn, LogOut, Check, Loader2 } from 'lucide-react';
 import { useStore } from '../../stores/store';
 import { Button, Toggle, Input } from '../ui';
 import { SliderInput, NumberRangeInput } from '../settings';
@@ -11,6 +11,50 @@ interface SettingsDrawerProps {
 
 function SettingsDrawer({ isOpen, onClose }: SettingsDrawerProps) {
   const { settings, exportSettings, updateSettings, updateExportSettings } = useStore();
+  
+  // Cloud storage state
+  const [isCloudAuthenticated, setIsCloudAuthenticated] = useState(false);
+  const [hasCloudCredentials, setHasCloudCredentials] = useState(false);
+  const [isAuthenticating, setIsAuthenticating] = useState(false);
+  
+  // Check cloud auth status on open
+  useEffect(() => {
+    if (isOpen) {
+      const checkAuth = async () => {
+        try {
+          const result = await window.api.checkCloudAuth();
+          setIsCloudAuthenticated(result.isAuthenticated);
+          setHasCloudCredentials(result.hasCredentials);
+        } catch (err) {
+          console.error('Failed to check cloud auth:', err);
+        }
+      };
+      checkAuth();
+    }
+  }, [isOpen]);
+  
+  const handleCloudSignIn = useCallback(async () => {
+    setIsAuthenticating(true);
+    try {
+      const result = await window.api.startCloudAuth();
+      if (result.success) {
+        setIsCloudAuthenticated(true);
+      }
+    } catch (err) {
+      console.error('Cloud sign in failed:', err);
+    } finally {
+      setIsAuthenticating(false);
+    }
+  }, []);
+  
+  const handleCloudSignOut = useCallback(async () => {
+    try {
+      await window.api.signOutCloud();
+      setIsCloudAuthenticated(false);
+    } catch (err) {
+      console.error('Cloud sign out failed:', err);
+    }
+  }, []);
 
   const handleTargetCountChange = useCallback((value: number) => {
     updateSettings({ targetCount: value });
@@ -235,6 +279,70 @@ function SettingsDrawer({ isOpen, onClose }: SettingsDrawerProps) {
                   </button>
                 </div>
               </div>
+            </div>
+          </section>
+
+          {/* Cloud Storage */}
+          <section>
+            <div className="flex items-center gap-2 mb-4">
+              <Cloud className="w-4 h-4 text-sz-accent" />
+              <h3 className="text-sm font-medium text-sz-text">Cloud Storage</h3>
+            </div>
+
+            <div className="space-y-4">
+              {!hasCloudCredentials ? (
+                <div className="p-3 rounded-sz bg-amber-500/10 border border-amber-500/30">
+                  <p className="text-xs text-amber-300">
+                    Google Drive not configured.
+                  </p>
+                  <p className="text-[10px] text-amber-400/70 mt-1">
+                    Set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET environment variables to enable cloud upload.
+                  </p>
+                </div>
+              ) : isCloudAuthenticated ? (
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <div className="w-8 h-8 rounded-full bg-emerald-500/20 flex items-center justify-center">
+                      <Check className="w-4 h-4 text-emerald-400" />
+                    </div>
+                    <div>
+                      <p className="text-sm text-sz-text">Connected</p>
+                      <p className="text-[10px] text-sz-text-muted">
+                        Google Drive ready
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={handleCloudSignOut}
+                    className="flex items-center gap-1 px-2 py-1 rounded text-xs text-sz-text-secondary hover:text-sz-text hover:bg-sz-bg-tertiary transition-colors"
+                  >
+                    <LogOut className="w-3 h-3" />
+                    Sign out
+                  </button>
+                </div>
+              ) : (
+                <div className="flex flex-col items-center py-4">
+                  <div className="w-12 h-12 rounded-full bg-sz-bg-tertiary flex items-center justify-center mb-3">
+                    <CloudOff className="w-6 h-6 text-sz-text-muted" />
+                  </div>
+                  <p className="text-sm text-sz-text mb-1">Not connected</p>
+                  <p className="text-[10px] text-sz-text-muted mb-3">
+                    Sign in to upload exports to Google Drive
+                  </p>
+                  <button
+                    onClick={handleCloudSignIn}
+                    disabled={isAuthenticating}
+                    className="flex items-center gap-2 px-3 py-2 rounded-sz bg-sz-accent text-white hover:bg-sz-accent-hover disabled:opacity-50 transition-colors text-sm"
+                  >
+                    {isAuthenticating ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <LogIn className="w-4 h-4" />
+                    )}
+                    {isAuthenticating ? 'Connecting...' : 'Sign in with Google'}
+                  </button>
+                </div>
+              )}
             </div>
           </section>
         </div>

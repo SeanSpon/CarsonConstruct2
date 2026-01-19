@@ -24,12 +24,13 @@ def send_progress(progress: int, message: str):
     """Send progress update to Electron via stdout"""
     print(f"PROGRESS:{progress}:{message}", flush=True)
 
-def send_result(clips: list, dead_spaces: list, transcript: dict = None, debug: dict = None):
+def send_result(clips: list, dead_spaces: list, transcript: dict = None, speakers: list = None, debug: dict = None):
     """Send final results"""
     result = {
         "clips": clips,
         "deadSpaces": dead_spaces,
         "transcript": transcript,
+        "speakers": speakers or [],
     }
     if debug is not None:
         result["debug"] = debug
@@ -462,6 +463,66 @@ def main(video_path: str, settings: dict):
             send_progress(90, "Skipping AI enhancement...")
             final_clips = algorithm_clips
 
+        # Speaker Diarization (identify who's speaking when)
+        speaker_segments = []
+        enable_diarization = settings.get("enable_diarization", True)
+        num_speakers = settings.get("num_speakers")  # None = auto-detect
+        hf_token = settings.get("hf_token") or os.environ.get("HF_TOKEN")
+        
+        if enable_diarization and need_audio:
+            diarization_cache_path = os.path.join(cache_dir, "diarization.json") if cache_dir else None
+            cached_diarization = None
+            
+            if diarization_cache_path:
+                diarization_payload = _safe_read_json(diarization_cache_path)
+                if diarization_payload and diarization_payload.get("input_hash") == input_hash:
+                    cached_diarization = diarization_payload.get("speakers")
+            
+            if cached_diarization is not None:
+                send_progress(92, "Cache hit: speaker diarization")
+                speaker_segments = cached_diarization
+            else:
+                try:
+                    send_progress(92, "Running speaker diarization...")
+                    from ai.speaker_diarization import run_speaker_diarization
+                    
+                    diarization_result = run_speaker_diarization(
+                        audio_path,
+                        method="auto",  # Try pyannote first, fallback to VAD
+                        num_speakers=num_speakers,
+                        huggingface_token=hf_token,
+                        transcript=transcript,
+                    )
+                    
+                    # Convert to serializable format
+                    speaker_segments = [
+                        {
+                            "speakerId": seg.speaker_id,
+                            "speakerName": seg.speaker_label,
+                            "startTime": round(seg.start_time, 2),
+                            "endTime": round(seg.end_time, 2),
+                            "confidence": round(seg.confidence, 2),
+                        }
+                        for seg in diarization_result.segments
+                    ]
+                    
+                    send_progress(93, f"Found {diarization_result.speaker_count} speakers")
+                    
+                    # Cache diarization results
+                    if diarization_cache_path:
+                        _write_json(
+                            diarization_cache_path,
+                            {
+                                "input_hash": input_hash,
+                                "speakers": speaker_segments,
+                                "speaker_count": diarization_result.speaker_count,
+                                "speaker_stats": diarization_result.speaker_stats,
+                            },
+                        )
+                except Exception as e:
+                    send_progress(93, f"Speaker diarization skipped: {e}")
+                    speaker_segments = []
+
         # Final selection (top N by score or thinker order)
         if not ai_enabled:
             final_clips = sorted(
@@ -481,7 +542,7 @@ def main(video_path: str, settings: dict):
             }
 
         # Send results
-        send_result(final_clips, dead_spaces, transcript, debug=debug_payload)
+        send_result(final_clips, dead_spaces, transcript, speaker_segments, debug=debug_payload)
 
 
 if __name__ == "__main__":

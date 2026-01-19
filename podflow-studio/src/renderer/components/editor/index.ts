@@ -1,6 +1,8 @@
 // Editor Components - SeeZee Clip Studios
 export { default as EditorView } from './EditorView';
 export { default as Header } from './Header';
+export { default as MenuBar } from './MenuBar';
+export type { MenuBarProps } from './MenuBar';
 export { default as DropZone } from './DropZone';
 export { default as StatusBar } from './StatusBar';
 export { default as VideoPreview } from './VideoPreview';
@@ -12,4 +14,9 @@ export { default as ClipThumbnail } from './ClipThumbnail';
 export { default as ProgressOverlay } from './ProgressOverlay';
 export { default as SettingsDrawer } from './SettingsDrawer';
 export { default as ProjectSetup } from './ProjectSetup';
+export { default as QAPanel } from './QAPanel';
+export { default as ProjectPanel } from './ProjectPanel';
+export { default as EffectsPanel } from './EffectsPanel';
+export { default as ExportPreviewModal } from './ExportPreviewModal';
+export { default as ChatPanel } from './ChatPanel';
 export type { ProjectType, EditingPreferences, CameraInput } from './ProjectSetup';

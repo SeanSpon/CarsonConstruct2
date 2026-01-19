@@ -30,7 +30,7 @@ function ClipStrip({ clips, selectedClipId, onSelectClip, onExportAll }: ClipStr
   }, []);
 
   return (
-    <div className="bg-sz-bg-secondary rounded-sz-lg border border-sz-border overflow-hidden h-full flex flex-col">
+    <div className="bg-sz-bg-secondary rounded-sz-lg border border-sz-border overflow-hidden h-full flex flex-col no-select">
       {/* Header */}
       <div className="flex items-center justify-between px-3 py-2 border-b border-sz-border flex-shrink-0">
         <div className="flex items-center gap-2">
@@ -72,7 +72,7 @@ function ClipStrip({ clips, selectedClipId, onSelectClip, onExportAll }: ClipStr
       {/* Clip cards - horizontal scroll */}
       <div
         ref={scrollRef}
-        className="flex-1 overflow-x-auto overflow-y-hidden p-3"
+        className="flex-1 overflow-x-auto overflow-y-hidden p-3 min-w-0 no-select"
       >
         <div className="flex gap-3 h-full">
           {clips.map((clip) => (

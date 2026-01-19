@@ -45,7 +45,7 @@ function ClipFinder() {
     if (settings.useAiEnhancement && project.duration > 0) {
       const estimate = estimateAiCost(project.duration, settings.targetCount);
       const confirmed = window.confirm(
-        `Estimated AI cost: ${formatCost(estimate.total)} (Whisper ${formatCost(estimate.whisperCost)} + GPT ${formatCost(estimate.gptCost)}). Continue?`
+        `🚀 Ready to analyze your video with AI?\n\nEstimated cost: ${formatCost(estimate.total)}\n  • Transcription (Whisper): ${formatCost(estimate.whisperCost)}\n  • Content analysis (GPT): ${formatCost(estimate.gptCost)}\n\nProceed with AI-powered detection?`
       );
       if (!confirmed) {
         setDetecting(false);

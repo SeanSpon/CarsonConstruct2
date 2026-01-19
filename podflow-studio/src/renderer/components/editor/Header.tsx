@@ -1,22 +1,136 @@
 import { memo } from 'react';
 import { Settings, HelpCircle, Minus, Square, X } from 'lucide-react';
 import { IconButton } from '../ui';
+import MenuBar, { MenuBarProps } from './MenuBar';
+
+interface RecentProject {
+  filePath: string;
+  name: string;
+  modifiedAt: string;
+}
 
 interface HeaderProps {
   onSettingsClick: () => void;
   onHelpClick?: () => void;
+  // Menu bar props
+  onNewProject?: () => void;
+  onOpenProject?: () => void;
+  onSave?: () => void;
+  onSaveAs?: () => void;
+  onImportVideo?: () => void;
+  onExit?: () => void;
+  recentProjects?: RecentProject[];
+  onOpenRecent?: (filePath: string) => void;
+  // Edit actions
+  onUndo?: () => void;
+  onRedo?: () => void;
+  onAcceptClip?: () => void;
+  onRejectClip?: () => void;
+  canUndo?: boolean;
+  canRedo?: boolean;
+  hasSelectedClip?: boolean;
+  // View actions
+  showQAPanel?: boolean;
+  onToggleQAPanel?: () => void;
+  showEffectsPanel?: boolean;
+  onToggleEffectsPanel?: () => void;
+  showProjectPanel?: boolean;
+  onToggleProjectPanel?: () => void;
+  showChatPanel?: boolean;
+  onToggleChatPanel?: () => void;
+  onZoomIn?: () => void;
+  onZoomOut?: () => void;
+  onResetZoom?: () => void;
+  // Help actions
+  onShowShortcuts?: () => void;
+  onShowAbout?: () => void;
 }
 
-function Header({ onSettingsClick, onHelpClick }: HeaderProps) {
+function Header({
+  onSettingsClick,
+  onHelpClick,
+  // Menu bar props
+  onNewProject,
+  onOpenProject,
+  onSave,
+  onSaveAs,
+  onImportVideo,
+  onExit,
+  recentProjects,
+  onOpenRecent,
+  // Edit
+  onUndo,
+  onRedo,
+  onAcceptClip,
+  onRejectClip,
+  canUndo,
+  canRedo,
+  hasSelectedClip,
+  // View
+  showQAPanel,
+  onToggleQAPanel,
+  showEffectsPanel,
+  onToggleEffectsPanel,
+  showProjectPanel,
+  onToggleProjectPanel,
+  showChatPanel,
+  onToggleChatPanel,
+  onZoomIn,
+  onZoomOut,
+  onResetZoom,
+  // Help
+  onShowShortcuts,
+  onShowAbout,
+}: HeaderProps) {
   return (
     <header className="h-12 bg-sz-bg-secondary border-b border-sz-border flex items-center justify-between px-4 select-none drag-region">
-      {/* Logo */}
-      <div className="flex items-center gap-0 no-drag">
-        <span className="text-sm font-bold text-sz-text tracking-wide">SEE</span>
-        <span className="mx-1.5 px-2 py-0.5 bg-sz-accent rounded text-[10px] font-bold text-white tracking-wide">
-          STUDIO
-        </span>
-        <span className="text-sm font-bold text-sz-text tracking-wide">ZEE</span>
+      {/* Left: Logo + Menu Bar */}
+      <div className="flex items-center gap-4 no-drag">
+        {/* Logo */}
+        <div className="flex items-center gap-0">
+          <span className="text-sm font-bold text-sz-text tracking-wide">PodFlow</span>
+          <span className="mx-1.5 px-2 py-0.5 bg-sz-accent rounded text-[10px] font-bold text-white tracking-wide">
+            STUDIO
+          </span>
+        </div>
+
+        {/* Menu Bar */}
+        <MenuBar
+          // File
+          onNewProject={onNewProject}
+          onOpenProject={onOpenProject}
+          onSave={onSave}
+          onSaveAs={onSaveAs}
+          onImportVideo={onImportVideo}
+          onSettings={onSettingsClick}
+          onExit={onExit}
+          recentProjects={recentProjects}
+          onOpenRecent={onOpenRecent}
+          // Edit
+          onUndo={onUndo}
+          onRedo={onRedo}
+          onAcceptClip={onAcceptClip}
+          onRejectClip={onRejectClip}
+          canUndo={canUndo}
+          canRedo={canRedo}
+          hasSelectedClip={hasSelectedClip}
+          // View
+          showQAPanel={showQAPanel}
+          onToggleQAPanel={onToggleQAPanel}
+          showEffectsPanel={showEffectsPanel}
+          onToggleEffectsPanel={onToggleEffectsPanel}
+          showProjectPanel={showProjectPanel}
+          onToggleProjectPanel={onToggleProjectPanel}
+          showChatPanel={showChatPanel}
+          onToggleChatPanel={onToggleChatPanel}
+          onZoomIn={onZoomIn}
+          onZoomOut={onZoomOut}
+          onResetZoom={onResetZoom}
+          // Help
+          onShowShortcuts={onShowShortcuts}
+          onShowDocs={onHelpClick}
+          onShowAbout={onShowAbout}
+        />
       </div>
 
       {/* Right controls */}

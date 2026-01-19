@@ -1,7 +1,8 @@
 import { memo, useState, useCallback, useEffect, useRef } from 'react';
 import { useStore } from '../../stores/store';
 import { estimateAiCost, formatCost } from '../../types';
-import type { Clip, EditingPreferences } from '../../types';
+import { createProjectFile, serializeProjectFile, loadProjectFile, parseProjectFile } from '../../stores/projectFile';
+import type { Clip, QACheck, AudioTrack } from '../../types';
 
 import Header from './Header';
 import DropZone from './DropZone';
@@ -12,14 +13,22 @@ import QuickActions from './QuickActions';
 import ClipStrip from './ClipStrip';
 import ProgressOverlay from './ProgressOverlay';
 import SettingsDrawer from './SettingsDrawer';
-import ProjectSetup from './ProjectSetup';
+import QAPanel from './QAPanel';
+import ProjectPanel from './ProjectPanel';
+import EffectsPanel from './EffectsPanel';
+import ExportPreviewModal from './ExportPreviewModal';
+import ChatPanel from './ChatPanel';
 
 function EditorView() {
   const {
     project,
     setProject,
-    clearProject,
     clips,
+    deadSpaces,
+    speakerSegments,
+    audioTracks,
+    timelineGroups,
+    transcript,
     isDetecting,
     detectionProgress,
     detectionError,
@@ -33,20 +42,48 @@ function EditorView() {
     setCurrentJobId,
     currentJobId,
     updateClipStatus,
-    lastJobId,
-    setupComplete,
-    setSetupComplete,
-    editingPreferences,
-    setEditingPreferences,
-    setCameras,
+    updateDeadSpaceRemove,
+    updateClipTrim,
+    qaChecks,
+    setQAChecks,
+    setQARunning,
+    markQACheckFixed,
+    // New actions
+    splitClipAtTime,
+    duplicateClip,
+    deleteClip,
+    moveClip,
+    groupClips,
+    ungroupClips,
+    addAudioTrack,
+    removeAudioTrack,
+    updateAudioTrack,
+    addClipEffect,
+    removeClipEffect,
+    toggleClipEffect,
+    // Project file state
+    projectFilePath: storedProjectFilePath,
+    setProjectFilePath: setStoredProjectFilePath,
+    setLastAutoSaveTime,
   } = useStore();
 
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selectedClipId, setSelectedClipId] = useState<string | null>(null);
+  const [selectedClipIds, setSelectedClipIds] = useState<string[]>([]);
   const [showSettings, setShowSettings] = useState(false);
+  const [showExportPreview, setShowExportPreview] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
+  
+  // Panel visibility state for View menu
+  const [showProjectPanel, setShowProjectPanel] = useState(true);
+  const [showEffectsPanel, setShowEffectsPanel] = useState(true);
+  const [showChatPanel, setShowChatPanel] = useState(false);
+  
+  // Use projectFilePath from store (synced with stored project)
+  const projectFilePath = storedProjectFilePath;
+  const setProjectFilePath = setStoredProjectFilePath;
   
   const videoRef = useRef<HTMLVideoElement | null>(null);
 
@@ -59,6 +96,76 @@ function EditorView() {
       setSelectedClipId(clips[0].id);
     }
   }, [clips, selectedClipId]);
+
+  // Auto-save every 60 seconds when project has changes
+  useEffect(() => {
+    if (!project) return;
+
+    const autoSaveInterval = setInterval(async () => {
+      // Generate a project ID from the file path
+      const projectId = project.filePath.replace(/[^a-zA-Z0-9]/g, '_').slice(-50);
+      
+      const projectFile = createProjectFile({
+        selectedClipId,
+        currentTime,
+        showQAPanel,
+      });
+      const json = serializeProjectFile(projectFile);
+      
+      try {
+        const result = await window.api.projectAutoSave(projectId, json);
+        if (result.success) {
+          setLastAutoSaveTime(Date.now());
+          console.log('[AutoSave] Project auto-saved at', new Date().toLocaleTimeString());
+        }
+      } catch (err) {
+        console.error('[AutoSave] Failed to auto-save:', err);
+      }
+    }, 60000); // Auto-save every 60 seconds
+
+    return () => clearInterval(autoSaveInterval);
+  }, [project, clips, deadSpaces, selectedClipId, currentTime, showQAPanel, setLastAutoSaveTime]);
+
+  // Check for recovery on mount
+  useEffect(() => {
+    const checkRecovery = async () => {
+      if (!project) return;
+      
+      const projectId = project.filePath.replace(/[^a-zA-Z0-9]/g, '_').slice(-50);
+      
+      try {
+        const result = await window.api.projectCheckRecovery(projectId);
+        if (result.success && result.hasRecovery && result.content) {
+          const recoveryDate = result.recoveryDate 
+            ? new Date(result.recoveryDate).toLocaleString() 
+            : 'unknown time';
+          
+          const shouldRecover = window.confirm(
+            `Found auto-saved project from ${recoveryDate}.\n\nWould you like to recover it?`
+          );
+          
+          if (shouldRecover) {
+            try {
+              const projectFile = parseProjectFile(result.content);
+              const uiState = loadProjectFile(projectFile);
+              handleUIStateLoaded(uiState);
+              console.log('[Recovery] Recovered project from auto-save');
+            } catch (err) {
+              console.error('[Recovery] Failed to load recovery file:', err);
+            }
+          } else {
+            // Clear the auto-save if user declines
+            await window.api.projectClearAutoSave(projectId);
+          }
+        }
+      } catch (err) {
+        console.error('[Recovery] Failed to check for recovery:', err);
+      }
+    };
+    
+    // Only check once when project loads
+    checkRecovery();
+  }, [project?.filePath]); // Only run when project file path changes
 
   // Handle file selection
   const handleSelectFile = useCallback(async () => {
@@ -84,6 +191,12 @@ function EditorView() {
         fileName: file.name,
         size: file.size,
         duration: validation.duration || 0,
+        resolution: validation.resolution,
+        width: validation.width,
+        height: validation.height,
+        fps: validation.fps,
+        thumbnailPath: validation.thumbnailPath,
+        bitrate: validation.bitrate,
       });
     } catch (err) {
       setError(String(err));
@@ -111,6 +224,12 @@ function EditorView() {
         fileName,
         size: 0,
         duration: validation.duration || 0,
+        resolution: validation.resolution,
+        width: validation.width,
+        height: validation.height,
+        fps: validation.fps,
+        thumbnailPath: validation.thumbnailPath,
+        bitrate: validation.bitrate,
       });
     } catch (err) {
       setError(String(err));
@@ -139,6 +258,12 @@ function EditorView() {
         fileName,
         size: 0,
         duration: validation.duration || 0,
+        resolution: validation.resolution,
+        width: validation.width,
+        height: validation.height,
+        fps: validation.fps,
+        thumbnailPath: validation.thumbnailPath,
+        bitrate: validation.bitrate,
       });
     } catch (err) {
       setError(String(err));
@@ -149,29 +274,17 @@ function EditorView() {
 
   // Start detection
   const handleStartDetection = useCallback(async () => {
-    // #region agent log
-    console.log('[DEBUG] handleStartDetection called, project:', !!project);
-    fetch('http://127.0.0.1:7244/ingest/35756edc-cf7d-4d9e-ab6e-5b8765ec420b',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'EditorView.tsx:handleStartDetection:START',message:'Function entry',data:{hasProject:!!project},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'E'})}).catch(()=>{});
-    // #endregion
     if (!project) return;
 
     setDetecting(true);
     setDetectionError(null);
 
-    // #region agent log
-    console.log('[DEBUG] About to check AI enhancement, useAiEnhancement:', settings.useAiEnhancement, 'duration:', project.duration);
-    fetch('http://127.0.0.1:7244/ingest/35756edc-cf7d-4d9e-ab6e-5b8765ec420b',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'EditorView.tsx:handleStartDetection:beforeConfirm',message:'Before confirm check',data:{useAiEnhancement:settings.useAiEnhancement,duration:project.duration},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'E'})}).catch(()=>{});
-    // #endregion
-
+    // Confirm AI enhancement cost if enabled
     if (settings.useAiEnhancement && project.duration > 0) {
       const estimate = estimateAiCost(project.duration, settings.targetCount);
       const confirmed = window.confirm(
-        `Estimated AI cost: ${formatCost(estimate.total)} (Whisper ${formatCost(estimate.whisperCost)} + GPT ${formatCost(estimate.gptCost)}). Continue?`
+        `🚀 Ready to analyze your video with AI?\n\nEstimated cost: ${formatCost(estimate.total)}\n  • Transcription (Whisper): ${formatCost(estimate.whisperCost)}\n  • Content analysis (GPT): ${formatCost(estimate.gptCost)}\n\nProceed with AI-powered detection?`
       );
-      // #region agent log
-      console.log('[DEBUG] confirm result:', confirmed);
-      fetch('http://127.0.0.1:7244/ingest/35756edc-cf7d-4d9e-ab6e-5b8765ec420b',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'EditorView.tsx:handleStartDetection:afterConfirm',message:'After confirm dialog',data:{confirmed},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'E'})}).catch(()=>{});
-      // #endregion
       if (!confirmed) {
         setDetecting(false);
         return;
@@ -181,10 +294,6 @@ function EditorView() {
     const jobId = `job_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
     setCurrentJobId(jobId);
 
-    // #region agent log
-    fetch('http://127.0.0.1:7244/ingest/35756edc-cf7d-4d9e-ab6e-5b8765ec420b',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'EditorView.tsx:handleStartDetection',message:'Calling startDetection',data:{jobId,filePath:project.filePath},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'D'})}).catch(()=>{});
-    // #endregion
-
     try {
       const result = await window.api.startDetection(
         jobId,
@@ -193,17 +302,11 @@ function EditorView() {
         project.duration
       );
 
-      // #region agent log
-      fetch('http://127.0.0.1:7244/ingest/35756edc-cf7d-4d9e-ab6e-5b8765ec420b',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'EditorView.tsx:handleStartDetection:result',message:'Got result from startDetection',data:{result},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'D'})}).catch(()=>{});
-      // #endregion
-
       if (!result.success) {
         setDetectionError(result.error || 'Failed to start detection');
       }
     } catch (err) {
-      // #region agent log
-      fetch('http://127.0.0.1:7244/ingest/35756edc-cf7d-4d9e-ab6e-5b8765ec420b',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'EditorView.tsx:handleStartDetection:error',message:'startDetection threw error',data:{error:String(err)},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'D'})}).catch(()=>{});
-      // #endregion
+      console.error('[Detection] Error starting detection:', err);
       setDetectionError(String(err));
       setDetecting(false);
     }
@@ -216,12 +319,22 @@ function EditorView() {
     setDetecting(false);
   }, [currentJobId, setDetecting]);
 
-  // Export all accepted clips
-  const handleExportAll = useCallback(async () => {
+  // Show export preview modal
+  const handleShowExportPreview = useCallback(() => {
+    const acceptedClips = clips.filter(c => c.status === 'accepted');
+    if (acceptedClips.length > 0) {
+      setShowExportPreview(true);
+    }
+  }, [clips]);
+
+  // Export clips (called from preview modal with selected IDs)
+  const handleExportFromPreview = useCallback(async (selectedClipIds: string[]) => {
     if (!project) return;
     
-    const acceptedClips = clips.filter(c => c.status === 'accepted');
-    if (acceptedClips.length === 0) return;
+    const clipsToExport = clips.filter(c => selectedClipIds.includes(c.id));
+    if (clipsToExport.length === 0) return;
+
+    setShowExportPreview(false);
 
     try {
       const outputDir = await window.api.selectOutputDir();
@@ -229,7 +342,7 @@ function EditorView() {
 
       await window.api.exportClips({
         sourceFile: project.filePath,
-        clips: acceptedClips.map(c => ({
+        clips: clipsToExport.map(c => ({
           id: c.id,
           startTime: c.startTime + c.trimStartOffset,
           endTime: c.endTime + c.trimEndOffset,
@@ -247,6 +360,11 @@ function EditorView() {
       console.error('Export failed:', err);
     }
   }, [project, clips, exportSettings]);
+
+  // Export all accepted clips (legacy, for keyboard shortcut)
+  const handleExportAll = useCallback(async () => {
+    handleShowExportPreview();
+  }, [handleShowExportPreview]);
 
   // Export single clip
   const handleExportClip = useCallback(async (clip: Clip) => {
@@ -280,11 +398,116 @@ function EditorView() {
   // Handle clip selection
   const handleSelectClip = useCallback((clipId: string) => {
     setSelectedClipId(clipId);
+    setSelectedClipIds([clipId]); // Reset multi-select to just this clip
     const clip = clips.find(c => c.id === clipId);
     if (clip && videoRef.current) {
       videoRef.current.currentTime = clip.startTime;
     }
   }, [clips]);
+
+  // Handle multi-select
+  const handleMultiSelectClip = useCallback((clipId: string, addToSelection: boolean) => {
+    if (addToSelection) {
+      setSelectedClipIds(prev => {
+        if (prev.includes(clipId)) {
+          // Remove from selection
+          const newSelection = prev.filter(id => id !== clipId);
+          if (newSelection.length > 0) {
+            setSelectedClipId(newSelection[newSelection.length - 1]);
+          } else {
+            setSelectedClipId(null);
+          }
+          return newSelection;
+        } else {
+          // Add to selection
+          setSelectedClipId(clipId);
+          return [...prev, clipId];
+        }
+      });
+    } else {
+      setSelectedClipId(clipId);
+      setSelectedClipIds([clipId]);
+    }
+  }, []);
+
+  // Handle split clip
+  const handleSplitClip = useCallback((clipId: string, splitTime: number) => {
+    splitClipAtTime(clipId, splitTime);
+  }, [splitClipAtTime]);
+
+  // Handle duplicate clip
+  const handleDuplicateClip = useCallback((clipId: string) => {
+    duplicateClip(clipId);
+  }, [duplicateClip]);
+
+  // Handle delete clip
+  const handleDeleteClip = useCallback((clipId: string) => {
+    // Deselect if this clip was selected
+    if (selectedClipId === clipId) {
+      setSelectedClipId(null);
+    }
+    setSelectedClipIds(prev => prev.filter(id => id !== clipId));
+    // Actually delete from store
+    deleteClip(clipId);
+  }, [selectedClipId, deleteClip]);
+
+  // Handle group clips
+  const handleGroupClips = useCallback((clipIds: string[], groupName?: string) => {
+    groupClips(clipIds, groupName);
+  }, [groupClips]);
+
+  // Handle ungroup clips
+  const handleUngroupClips = useCallback((groupId: string) => {
+    ungroupClips(groupId);
+  }, [ungroupClips]);
+
+  // Handle move clip on timeline
+  const handleMoveClip = useCallback((clipId: string, newStartTime: number) => {
+    moveClip(clipId, newStartTime);
+  }, [moveClip]);
+
+  // Handle add audio track
+  const handleAddAudioTrack = useCallback(async () => {
+    try {
+      // Open file picker for audio
+      const file = await window.api.selectFile();
+      if (!file) return;
+      
+      // Validate it's an audio file
+      const isAudio = /\.(mp3|wav|aac|m4a|ogg|flac)$/i.test(file.path);
+      if (!isAudio) {
+        setError('Please select an audio file (MP3, WAV, AAC, etc.)');
+        return;
+      }
+      
+      // Add the audio track
+      const newTrack = {
+        id: `audio_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+        type: 'main' as const,
+        filePath: file.path,
+        fileName: file.name,
+        startTime: 0,
+        endTime: project?.duration || 60, // Default to project duration
+        volume: 100,
+        muted: false,
+        locked: false,
+      };
+      addAudioTrack(newTrack);
+    } catch (err) {
+      console.error('Failed to add audio track:', err);
+      setError('Failed to add audio track');
+    }
+  }, [addAudioTrack, project]);
+
+  // Handle remove audio track
+  const handleRemoveAudioTrack = useCallback((trackId: string) => {
+    removeAudioTrack(trackId);
+  }, [removeAudioTrack]);
+
+  // Handle update audio track
+  const handleUpdateAudioTrack = useCallback((trackId: string, updates: Partial<typeof audioTracks[0]>) => {
+    updateAudioTrack(trackId, updates);
+  }, [updateAudioTrack]);
 
   // Handle accept/reject
   const handleAccept = useCallback(() => {
@@ -399,6 +622,42 @@ function EditorView() {
             handleSelectClip(clips[nextIndex].id);
           }
           break;
+        case 'j':
+        case 'J':
+          // Ctrl+J: Toggle AI Chat panel
+          if (e.ctrlKey || e.metaKey) {
+            e.preventDefault();
+            handleToggleChatPanel();
+          }
+          break;
+        case 's':
+        case 'S':
+          // Ctrl+S: Save, Ctrl+Shift+S: Save As
+          if (e.ctrlKey || e.metaKey) {
+            e.preventDefault();
+            if (e.shiftKey) {
+              handleSaveProjectAs();
+            } else {
+              handleSaveProject();
+            }
+          }
+          break;
+        case 'o':
+        case 'O':
+          // Ctrl+O: Open project
+          if (e.ctrlKey || e.metaKey) {
+            e.preventDefault();
+            handleOpenProjectFile();
+          }
+          break;
+        case 'n':
+        case 'N':
+          // Ctrl+N: New project
+          if (e.ctrlKey || e.metaKey) {
+            e.preventDefault();
+            handleNewProject();
+          }
+          break;
       }
     };
 
@@ -411,38 +670,420 @@ function EditorView() {
     handleExportAll,
     handleExportClip,
     handleSelectClip,
+    handleToggleChatPanel,
+    handleSaveProject,
+    handleSaveProjectAs,
+    handleOpenProjectFile,
+    handleNewProject,
     selectedClipId,
     selectedClip,
     clips,
     project,
   ]);
 
-  // Handle project setup complete
-  const handleSetupComplete = useCallback((preferences: EditingPreferences) => {
-    setEditingPreferences(preferences);
-    if (preferences.cameras.length > 0) {
-      setCameras(preferences.cameras);
-    }
-    setSetupComplete(true);
-  }, [setEditingPreferences, setCameras, setSetupComplete]);
+  // QA Check handlers
+  const [showQAPanel, setShowQAPanel] = useState(false);
 
-  // Handle going back from setup
-  const handleSetupBack = useCallback(() => {
-    clearProject();
-  }, [clearProject]);
+  // Handle UI state loaded from project file
+  const handleUIStateLoaded = useCallback((uiState: {
+    timelineZoom?: number;
+    selectedClipId?: string | null;
+    currentTime?: number;
+    isPlaying?: boolean;
+    showQAPanel?: boolean;
+  }) => {
+    if (uiState.selectedClipId) {
+      setSelectedClipId(uiState.selectedClipId);
+    }
+    if (typeof uiState.currentTime === 'number' && videoRef.current) {
+      videoRef.current.currentTime = uiState.currentTime;
+      setCurrentTime(uiState.currentTime);
+    }
+    if (typeof uiState.showQAPanel === 'boolean') {
+      setShowQAPanel(uiState.showQAPanel);
+    }
+    console.log('[EditorView] UI state loaded from project file:', uiState);
+  }, []);
+
+  const handleRunQAChecks = useCallback(async () => {
+    if (!project) return;
+    
+    setQARunning(true);
+    try {
+      const result = await window.api.runQAChecks({
+        clips: clips.map(c => ({
+          id: c.id,
+          startTime: c.startTime + (c.trimStartOffset || 0),
+          endTime: c.endTime + (c.trimEndOffset || 0),
+          title: c.title,
+        })),
+        deadSpaces: deadSpaces.map(ds => ({
+          id: ds.id,
+          startTime: ds.startTime,
+          endTime: ds.endTime,
+          duration: ds.duration,
+          remove: ds.remove,
+        })),
+        transcript: transcript || undefined,
+        duration: project.duration,
+      });
+
+      if (result.success && result.issues) {
+        const qaIssues: QACheck[] = result.issues.map(issue => ({
+          id: issue.id,
+          type: issue.type as QACheck['type'],
+          severity: issue.severity,
+          timestamp: issue.timestamp,
+          message: issue.message,
+          autoFixable: issue.autoFixable,
+          fixed: false,
+        }));
+        setQAChecks(qaIssues);
+      }
+    } catch (err) {
+      console.error('QA check failed:', err);
+    } finally {
+      setQARunning(false);
+    }
+  }, [project, clips, deadSpaces, transcript, setQARunning, setQAChecks]);
+
+  const handleFixQAIssue = useCallback((checkId: string) => {
+    const check = qaChecks.find(c => c.id === checkId);
+    if (!check) return;
+
+    // Apply auto-fix based on issue type
+    if (check.type === 'silence' && check.timestamp !== undefined) {
+      // Find and mark the dead space for removal
+      const ds = deadSpaces.find(d => 
+        check.timestamp! >= d.startTime && check.timestamp! <= d.endTime
+      );
+      if (ds) {
+        updateDeadSpaceRemove(ds.id, true);
+      }
+    } else if (check.type === 'mid-word-cut' && check.timestamp !== undefined) {
+      // Find the clip and adjust its boundary
+      const clip = clips.find(c => 
+        Math.abs(c.startTime - check.timestamp!) < 0.5 ||
+        Math.abs(c.endTime - check.timestamp!) < 0.5
+      );
+      if (clip && transcript?.words) {
+        // Snap to nearest word boundary
+        const words = transcript.words;
+        let nearestBoundary = check.timestamp;
+        let minDistance = Infinity;
+        
+        for (const word of words) {
+          const startDist = Math.abs(word.start - check.timestamp!);
+          const endDist = Math.abs(word.end - check.timestamp!);
+          
+          if (startDist < minDistance) {
+            minDistance = startDist;
+            nearestBoundary = word.start;
+          }
+          if (endDist < minDistance) {
+            minDistance = endDist;
+            nearestBoundary = word.end;
+          }
+        }
+
+        // Adjust the clip trim
+        if (Math.abs(clip.startTime - check.timestamp!) < 0.5) {
+          updateClipTrim(clip.id, nearestBoundary - clip.startTime, clip.trimEndOffset);
+        } else if (Math.abs(clip.endTime - check.timestamp!) < 0.5) {
+          updateClipTrim(clip.id, clip.trimStartOffset, nearestBoundary - clip.endTime);
+        }
+      }
+    }
+
+    markQACheckFixed(checkId);
+  }, [qaChecks, deadSpaces, clips, transcript, updateDeadSpaceRemove, updateClipTrim, markQACheckFixed]);
+
+  const handleFixAllQAIssues = useCallback(() => {
+    const fixableIssues = qaChecks.filter(c => c.autoFixable && !c.fixed);
+    for (const issue of fixableIssues) {
+      handleFixQAIssue(issue.id);
+    }
+  }, [qaChecks, handleFixQAIssue]);
+
+  const handleJumpToQATimestamp = useCallback((timestamp: number) => {
+    if (videoRef.current) {
+      videoRef.current.currentTime = timestamp;
+      setCurrentTime(timestamp);
+    }
+  }, []);
+
+  // Handle AI effect application
+  const handleApplyAiEffect = useCallback(async (effect: string, clipId: string) => {
+    if (!project || !selectedClip) return;
+    
+    try {
+      const result = await window.api.applyAiEffect({
+        effect,
+        clipId,
+        clip: selectedClip,
+        projectPath: project.filePath,
+      });
+      
+      if (result.success) {
+        // Update clip with AI-enhanced properties
+        // This would typically update the clip in the store
+        console.log(`Applied ${effect} to clip ${clipId}`, result);
+      } else {
+        console.error(`Failed to apply ${effect}:`, result.error);
+      }
+    } catch (err) {
+      console.error(`Error applying AI effect ${effect}:`, err);
+    }
+  }, [project, selectedClip]);
+
+  // Handle standard effect application (video/audio/text)
+  const handleApplyEffect = useCallback(async (effectId: string, category: 'video' | 'audio' | 'text', clipId: string) => {
+    if (!project || !selectedClip) return;
+    
+    try {
+      const result = await window.api.applyAiEffect({
+        effect: `${category}-${effectId}`,
+        clipId,
+        clip: selectedClip,
+        projectPath: project.filePath,
+      });
+      
+      if (result.success) {
+        console.log(`Applied ${category} effect ${effectId} to clip ${clipId}`, result);
+      } else {
+        console.error(`Failed to apply ${category} effect ${effectId}:`, result.error);
+      }
+    } catch (err) {
+      console.error(`Error applying ${category} effect ${effectId}:`, err);
+    }
+  }, [project, selectedClip]);
+
+  // ========================================
+  // File Menu Handlers
+  // ========================================
+  
+  // New Project - clear current project
+  const handleNewProject = useCallback(() => {
+    if (project) {
+      const confirmed = window.confirm('Create a new project? Any unsaved changes will be lost.');
+      if (!confirmed) return;
+    }
+    useStore.getState().clearProject();
+    setProjectFilePath(null);
+    setSelectedClipId(null);
+  }, [project]);
+  
+  // Open Project (.podflow file)
+  const handleOpenProjectFile = useCallback(async () => {
+    try {
+      const result = await window.api.projectOpen();
+      if (result.canceled || !result.success) return;
+      
+      if (result.content && result.filePath) {
+        const projectFile = parseProjectFile(result.content);
+        const uiState = loadProjectFile(projectFile);
+        setProjectFilePath(result.filePath);
+        handleUIStateLoaded(uiState);
+      }
+    } catch (err) {
+      console.error('Failed to open project:', err);
+      setError('Failed to open project file');
+    }
+  }, [handleUIStateLoaded]);
+  
+  // Save Project
+  const handleSaveProject = useCallback(async () => {
+    if (!project) return;
+    
+    const projectFile = createProjectFile({
+      selectedClipId,
+      currentTime,
+      showQAPanel,
+    });
+    const json = serializeProjectFile(projectFile);
+    
+    let saveSuccess = false;
+    
+    if (projectFilePath) {
+      // Save to existing path
+      const result = await window.api.projectSave(projectFilePath, json);
+      if (result.success) {
+        console.log('[EditorView] Project saved to:', result.filePath);
+        saveSuccess = true;
+      } else {
+        console.error('[EditorView] Save failed:', result.error);
+      }
+    } else {
+      // No existing path, do Save As
+      const result = await window.api.projectSaveAs(json);
+      if (result.success && result.filePath) {
+        setProjectFilePath(result.filePath);
+        console.log('[EditorView] Project saved as:', result.filePath);
+        saveSuccess = true;
+      }
+    }
+    
+    // Clear auto-save after successful manual save
+    if (saveSuccess) {
+      const projectId = project.filePath.replace(/[^a-zA-Z0-9]/g, '_').slice(-50);
+      try {
+        await window.api.projectClearAutoSave(projectId);
+        console.log('[EditorView] Auto-save cleared after manual save');
+      } catch (err) {
+        console.error('[EditorView] Failed to clear auto-save:', err);
+      }
+    }
+  }, [project, projectFilePath, selectedClipId, currentTime, showQAPanel, setProjectFilePath]);
+  
+  // Save Project As
+  const handleSaveProjectAs = useCallback(async () => {
+    if (!project) return;
+    
+    const projectFile = createProjectFile({
+      selectedClipId,
+      currentTime,
+      showQAPanel,
+    });
+    const json = serializeProjectFile(projectFile);
+    
+    const result = await window.api.projectSaveAs(json);
+    if (result.success && result.filePath) {
+      setProjectFilePath(result.filePath);
+      console.log('[EditorView] Project saved as:', result.filePath);
+      
+      // Clear auto-save after successful save
+      const projectId = project.filePath.replace(/[^a-zA-Z0-9]/g, '_').slice(-50);
+      try {
+        await window.api.projectClearAutoSave(projectId);
+      } catch (err) {
+        console.error('[EditorView] Failed to clear auto-save:', err);
+      }
+    }
+  }, [project, selectedClipId, currentTime, showQAPanel, setProjectFilePath]);
+  
+  // Exit application
+  const handleExit = useCallback(() => {
+    window.close();
+  }, []);
+  
+  // ========================================
+  // View Menu Handlers
+  // ========================================
+  
+  const handleToggleProjectPanel = useCallback(() => {
+    setShowProjectPanel(prev => !prev);
+  }, []);
+  
+  const handleToggleEffectsPanel = useCallback(() => {
+    setShowEffectsPanel(prev => !prev);
+  }, []);
+  
+  const handleToggleQAPanel = useCallback(() => {
+    setShowQAPanel(prev => !prev);
+  }, []);
+  
+  const handleToggleChatPanel = useCallback(() => {
+    setShowChatPanel(prev => !prev);
+  }, []);
+  
+  // TODO: Implement zoom handlers (would need timeline zoom state)
+  const handleZoomIn = useCallback(() => {
+    console.log('Zoom in - not implemented yet');
+  }, []);
+  
+  const handleZoomOut = useCallback(() => {
+    console.log('Zoom out - not implemented yet');
+  }, []);
+  
+  const handleResetZoom = useCallback(() => {
+    console.log('Reset zoom - not implemented yet');
+  }, []);
+  
+  // Help Menu Handlers
+  const handleShowShortcuts = useCallback(() => {
+    alert('Keyboard Shortcuts:\n\nSpace - Play/Pause\nA - Accept clip\nR - Reject clip\nLeft/Right Arrow - Seek\nTab - Next clip\nShift+Tab - Previous clip\nCtrl+S - Save\nCtrl+Shift+S - Save As');
+  }, []);
+  
+  const handleShowAbout = useCallback(() => {
+    alert('PodFlow Studio\n\nAI-powered podcast clip detection and editing.\n\nVersion 1.0.0');
+  }, []);
+
+  // ========================================
+  // Chat Panel Callbacks (for tool execution)
+  // ========================================
+  
+  const handleChatSeekToTime = useCallback((time: number) => {
+    if (videoRef.current) {
+      videoRef.current.currentTime = time;
+      setCurrentTime(time);
+    }
+  }, []);
+  
+  const handleChatSelectClip = useCallback((clipId: string) => {
+    handleSelectClip(clipId);
+  }, [handleSelectClip]);
+  
+  const handleChatTrimClip = useCallback((clipId: string, trimStart: number, trimEnd: number) => {
+    updateClipTrim(clipId, trimStart, trimEnd);
+  }, [updateClipTrim]);
+  
+  const handleChatPlayVideo = useCallback(() => {
+    if (videoRef.current && videoRef.current.paused) {
+      videoRef.current.play();
+      setIsPlaying(true);
+    }
+  }, []);
+  
+  const handleChatPauseVideo = useCallback(() => {
+    if (videoRef.current && !videoRef.current.paused) {
+      videoRef.current.pause();
+      setIsPlaying(false);
+    }
+  }, []);
+  
+  const getChatCurrentTime = useCallback(() => currentTime, [currentTime]);
+  const getChatSelectedClipId = useCallback(() => selectedClipId, [selectedClipId]);
+  const getChatIsPlaying = useCallback(() => isPlaying, [isPlaying]);
 
   // Determine view state
   const hasProject = !!project;
   const hasClips = clips.length > 0;
-  const needsSetup = hasProject && !setupComplete;
 
   return (
-    <div className="h-screen flex flex-col bg-sz-bg text-sz-text overflow-hidden">
+    <div className="h-screen w-screen flex flex-col bg-sz-bg text-sz-text overflow-hidden">
       <Header 
         onSettingsClick={() => setShowSettings(true)}
+        // File menu
+        onNewProject={handleNewProject}
+        onOpenProject={handleOpenProjectFile}
+        onSave={handleSaveProject}
+        onSaveAs={handleSaveProjectAs}
+        onImportVideo={handleSelectFile}
+        onExit={handleExit}
+        recentProjects={recentProjects}
+        onOpenRecent={handleOpenRecent}
+        // Edit menu
+        onAcceptClip={handleAccept}
+        onRejectClip={handleReject}
+        hasSelectedClip={!!selectedClip}
+        // View menu
+        showQAPanel={showQAPanel}
+        onToggleQAPanel={handleToggleQAPanel}
+        showEffectsPanel={showEffectsPanel}
+        onToggleEffectsPanel={handleToggleEffectsPanel}
+        showProjectPanel={showProjectPanel}
+        onToggleProjectPanel={handleToggleProjectPanel}
+        showChatPanel={showChatPanel}
+        onToggleChatPanel={handleToggleChatPanel}
+        onZoomIn={handleZoomIn}
+        onZoomOut={handleZoomOut}
+        onResetZoom={handleResetZoom}
+        // Help menu
+        onShowShortcuts={handleShowShortcuts}
+        onShowAbout={handleShowAbout}
       />
 
-      <main className="flex-1 flex flex-col overflow-hidden">
+      <main className="flex-1 flex flex-col overflow-hidden min-h-0">
         {!hasProject ? (
           // Empty state - Drop zone
           <DropZone
@@ -454,77 +1095,136 @@ function EditorView() {
             onRemoveRecent={removeRecentProject}
             onFileDrop={handleFileDrop}
           />
-        ) : needsSetup ? (
-          // Project setup flow
-          <ProjectSetup
-            onComplete={handleSetupComplete}
-            onBack={handleSetupBack}
-            initialPreferences={editingPreferences || undefined}
-          />
         ) : (
-          // Editor view
-          <div className="flex-1 flex flex-col overflow-hidden">
-            {/* Video Preview */}
-            <div className="flex-shrink-0 p-4 pb-2">
-              <VideoPreview
-                ref={videoRef}
-                project={project}
-                selectedClip={selectedClip}
-                currentTime={currentTime}
-                isPlaying={isPlaying}
-                onTimeUpdate={handleTimeUpdate}
-                onPlayPause={handlePlayPause}
-                onPlayingChange={setIsPlaying}
-              />
-            </div>
-
-            {/* Quick Actions */}
-            {hasClips && selectedClip && (
-              <div className="flex-shrink-0 px-4 pb-2">
-                <QuickActions
-                  clip={selectedClip}
-                  onAccept={handleAccept}
-                  onReject={handleReject}
-                  onExport={() => handleExportClip(selectedClip)}
-                />
+          // Editor view - Three panel layout (Premiere Pro style)
+          <div className="flex-1 flex overflow-hidden min-h-0 w-full">
+            {/* Left Panel - Project/Media Browser */}
+            {/* Scales proportionally: 16% of width, clamped between 200-320px */}
+            {showProjectPanel && (
+              <div className="w-[16%] min-w-[200px] max-w-[320px] flex-shrink-0 h-full overflow-hidden">
+                <ProjectPanel onUIStateLoaded={handleUIStateLoaded} />
               </div>
             )}
 
-            {/* Timeline */}
-            <div className="flex-shrink-0 px-4 pb-2">
-              <Timeline
-                duration={project.duration}
-                currentTime={currentTime}
-                clips={clips}
-                selectedClipId={selectedClipId}
-                onSeek={handleTimelineSeek}
-                onSelectClip={handleSelectClip}
-                hasClips={hasClips}
-                onAnalyze={handleStartDetection}
-                isDetecting={isDetecting}
-              />
-            </div>
-
-            {/* Clip Strip */}
-            {hasClips && (
-              <div className="flex-1 min-h-0 px-4 pb-2 overflow-hidden">
-                <ClipStrip
-                  clips={clips}
-                  selectedClipId={selectedClipId}
-                  onSelectClip={handleSelectClip}
-                  onExportAll={handleExportAll}
-                />
-              </div>
-            )}
-
-            {/* Analyze prompt when no clips */}
-            {!hasClips && !isDetecting && (
-              <div className="flex-1 flex items-center justify-center">
-                <div className="text-center">
-                  <p className="text-sz-text-secondary mb-4">
-                    Video loaded. Click Analyze to find viral moments.
-                  </p>
+            {/* Center Panel - Video Preview, Timeline, Clips */}
+            <div className="flex-1 flex flex-col overflow-hidden min-w-0 min-h-0">
+              {/* Video Preview - constrained max-width for ultrawide */}
+              <div className="flex-shrink-0 p-4 pb-2">
+                <div className="max-w-[1200px] mx-auto">
+                  <VideoPreview
+                    ref={videoRef}
+                    project={project}
+                    selectedClip={selectedClip}
+                    currentTime={currentTime}
+                    isPlaying={isPlaying}
+                    onTimeUpdate={handleTimeUpdate}
+                    onPlayPause={handlePlayPause}
+                    onPlayingChange={setIsPlaying}
+                  />
                 </div>
+              </div>
+
+              {/* Quick Actions */}
+              {hasClips && selectedClip && (
+                <div className="flex-shrink-0 px-4 pb-2">
+                  <div className="max-w-[1200px] mx-auto">
+                    <QuickActions
+                      clip={selectedClip}
+                      onAccept={handleAccept}
+                      onReject={handleReject}
+                      onExport={() => handleExportClip(selectedClip)}
+                      onToggleQA={() => setShowQAPanel(!showQAPanel)}
+                      showQAPanel={showQAPanel}
+                      qaIssueCount={qaChecks.filter(c => !c.fixed).length}
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* Timeline */}
+              <div className="flex-shrink-0 px-4 pb-2">
+                <Timeline
+                  duration={project.duration}
+                  currentTime={currentTime}
+                  clips={clips}
+                  deadSpaces={deadSpaces}
+                  speakerSegments={speakerSegments}
+                  audioTracks={audioTracks}
+                  timelineGroups={timelineGroups}
+                  selectedClipId={selectedClipId}
+                  selectedClipIds={selectedClipIds}
+                  onSeek={handleTimelineSeek}
+                  onSelectClip={handleSelectClip}
+                  onMultiSelectClip={handleMultiSelectClip}
+                  onMoveClip={handleMoveClip}
+                  onSplitClip={handleSplitClip}
+                  onDuplicateClip={handleDuplicateClip}
+                  onDeleteClip={handleDeleteClip}
+                  onGroupClips={handleGroupClips}
+                  onUngroupClips={handleUngroupClips}
+                  onAddAudioTrack={handleAddAudioTrack}
+                  onRemoveAudioTrack={handleRemoveAudioTrack}
+                  onUpdateAudioTrack={handleUpdateAudioTrack}
+                  hasClips={hasClips}
+                  isDetecting={isDetecting}
+                  onAnalyze={handleStartDetection}
+                  sourceVideoName={project.fileName}
+                  thumbnailPath={project.thumbnailPath}
+                />
+              </div>
+
+              {/* Clip Strip + QA Panel */}
+              {hasClips && (
+                <div className="flex-1 min-h-0 px-4 pb-2 overflow-hidden flex gap-4">
+                  <div className={`flex-1 overflow-hidden ${showQAPanel ? 'w-2/3' : 'w-full'}`}>
+                    <ClipStrip
+                      clips={clips}
+                      selectedClipId={selectedClipId}
+                      onSelectClip={handleSelectClip}
+                      onExportAll={handleShowExportPreview}
+                    />
+                  </div>
+                  {showQAPanel && (
+                    <div className="w-1/3 max-w-sm">
+                      <QAPanel
+                        onRunChecks={handleRunQAChecks}
+                        onFixIssue={handleFixQAIssue}
+                        onFixAll={handleFixAllQAIssues}
+                        onJumpToTimestamp={handleJumpToQATimestamp}
+                        className="h-full"
+                      />
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Right Panel - Effects/Properties */}
+            {/* Scales proportionally: 18% of width, clamped between 220-400px */}
+            {showEffectsPanel && (
+              <div className="w-[18%] min-w-[220px] max-w-[400px] flex-shrink-0 h-full overflow-hidden">
+                <EffectsPanel 
+                  selectedClip={selectedClip} 
+                  onApplyAiEffect={handleApplyAiEffect}
+                  onApplyEffect={handleApplyEffect}
+                />
+              </div>
+            )}
+            
+            {/* Chat Panel - AI Assistant */}
+            {showChatPanel && (
+              <div className="w-[20%] min-w-[280px] max-w-[420px] flex-shrink-0 h-full overflow-hidden p-2">
+                <ChatPanel
+                  className="h-full"
+                  onSeekToTime={handleChatSeekToTime}
+                  onSelectClip={handleChatSelectClip}
+                  onTrimClip={handleChatTrimClip}
+                  onPlayVideo={handleChatPlayVideo}
+                  onPauseVideo={handleChatPauseVideo}
+                  getCurrentTime={getChatCurrentTime}
+                  getSelectedClipId={getChatSelectedClipId}
+                  getIsPlaying={getChatIsPlaying}
+                />
               </div>
             )}
           </div>
@@ -536,8 +1236,7 @@ function EditorView() {
         clips={clips}
         isDetecting={isDetecting}
         isExporting={isExporting}
-        onAnalyze={handleStartDetection}
-        onExportAll={handleExportAll}
+        onExportAll={handleShowExportPreview}
       />
 
       {/* Progress Overlay */}
@@ -553,6 +1252,16 @@ function EditorView() {
         isOpen={showSettings}
         onClose={() => setShowSettings(false)}
       />
+
+      {/* Export Preview Modal */}
+      {showExportPreview && (
+        <ExportPreviewModal
+          clips={clips}
+          exportSettings={exportSettings}
+          onExport={handleExportFromPreview}
+          onClose={() => setShowExportPreview(false)}
+        />
+      )}
     </div>
   );
 }

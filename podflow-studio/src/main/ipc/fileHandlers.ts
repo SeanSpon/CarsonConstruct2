@@ -122,6 +122,72 @@ ipcMain.handle('select-file', async () => {
   }
 });
 
+// Get ffmpeg path - similar to ffprobe
+function getFFmpegPath(): string | null {
+  // Method 1: Try ffmpeg-static package
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const ffmpegStatic = require('ffmpeg-static');
+    if (ffmpegStatic && typeof ffmpegStatic === 'string' && fs.existsSync(ffmpegStatic)) {
+      return ffmpegStatic;
+    }
+  } catch (e) {
+    // Not available
+  }
+
+  // Method 2: Check common Windows paths
+  const windowsPaths = [
+    'C:\\ffmpeg\\bin\\ffmpeg.exe',
+    'C:\\Program Files\\ffmpeg\\bin\\ffmpeg.exe',
+    path.join(process.env.LOCALAPPDATA || '', 'ffmpeg', 'bin', 'ffmpeg.exe'),
+  ];
+
+  for (const ffmpegPath of windowsPaths) {
+    if (fs.existsSync(ffmpegPath)) {
+      return ffmpegPath;
+    }
+  }
+
+  // Method 3: Check PATH
+  try {
+    const result = execSync('where ffmpeg', { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] });
+    const foundPath = result.trim().split('\n')[0];
+    if (foundPath && fs.existsSync(foundPath)) {
+      return foundPath;
+    }
+  } catch (e) {
+    // Not in PATH
+  }
+
+  return null;
+}
+
+// Generate video thumbnail
+async function generateThumbnail(filePath: string, outputPath: string, timeOffset = 5): Promise<boolean> {
+  const ffmpegPath = getFFmpegPath();
+  if (!ffmpegPath) return false;
+
+  return new Promise((resolve) => {
+    const ffmpeg = spawn(ffmpegPath, [
+      '-y',
+      '-ss', String(timeOffset),
+      '-i', filePath,
+      '-vframes', '1',
+      '-q:v', '2',
+      '-vf', 'scale=320:-1',
+      outputPath,
+    ]);
+
+    ffmpeg.on('close', (code) => {
+      resolve(code === 0 && fs.existsSync(outputPath));
+    });
+
+    ffmpeg.on('error', () => {
+      resolve(false);
+    });
+  });
+}
+
 // Validate video file with FFprobe
 console.log('[FileHandlers] Registering validate-file handler...');
 ipcMain.handle('validate-file', async (_event, filePath: string) => {
@@ -161,7 +227,7 @@ ipcMain.handle('validate-file', async (_event, filePath: string) => {
       errorOutput += data.toString();
     });
 
-    ffprobe.on('close', (code) => {
+    ffprobe.on('close', async (code) => {
       console.log('[FileHandlers] FFprobe exited with code:', code);
       if (code !== 0) {
         console.error('[FileHandlers] FFprobe error output:', errorOutput);
@@ -175,10 +241,12 @@ ipcMain.handle('validate-file', async (_event, filePath: string) => {
       try {
         const info = JSON.parse(output);
         const duration = parseFloat(info.format?.duration || '0');
-        const hasVideo = info.streams?.some((s: { codec_type: string }) => s.codec_type === 'video');
+        
+        // Find video stream
+        const videoStream = info.streams?.find((s: { codec_type: string }) => s.codec_type === 'video');
         const hasAudio = info.streams?.some((s: { codec_type: string }) => s.codec_type === 'audio');
 
-        if (!hasVideo) {
+        if (!videoStream) {
           resolve({ valid: false, error: 'File does not contain video' });
           return;
         }
@@ -188,10 +256,50 @@ ipcMain.handle('validate-file', async (_event, filePath: string) => {
           return;
         }
 
+        // Extract resolution and fps
+        const width = videoStream.width || 0;
+        const height = videoStream.height || 0;
+        const resolution = width && height ? `${width}x${height}` : 'Unknown';
+        
+        // Parse frame rate (can be "30/1" or "29.97" format)
+        let fps = 0;
+        if (videoStream.r_frame_rate) {
+          const parts = videoStream.r_frame_rate.split('/');
+          if (parts.length === 2) {
+            fps = Math.round(parseFloat(parts[0]) / parseFloat(parts[1]));
+          } else {
+            fps = Math.round(parseFloat(videoStream.r_frame_rate));
+          }
+        }
+
+        // Generate thumbnail
+        let thumbnailPath: string | undefined;
+        try {
+          const { app } = require('electron');
+          const thumbnailDir = path.join(app.getPath('userData'), 'thumbnails');
+          if (!fs.existsSync(thumbnailDir)) {
+            fs.mkdirSync(thumbnailDir, { recursive: true });
+          }
+          const thumbnailFile = path.join(thumbnailDir, `${path.basename(filePath, path.extname(filePath))}_thumb.jpg`);
+          const thumbOffset = Math.min(5, duration / 2); // 5 seconds in or halfway if short
+          const generated = await generateThumbnail(filePath, thumbnailFile, thumbOffset);
+          if (generated) {
+            thumbnailPath = thumbnailFile;
+          }
+        } catch (thumbErr) {
+          console.log('[FileHandlers] Thumbnail generation failed:', thumbErr);
+        }
+
         resolve({
           valid: true,
           duration,
           format: info.format?.format_name,
+          resolution,
+          width,
+          height,
+          fps,
+          thumbnailPath,
+          bitrate: info.format?.bit_rate ? parseInt(info.format.bit_rate) : undefined,
         });
       } catch (e) {
         resolve({

@@ -94,7 +94,7 @@ function QAPanel({
   };
 
   return (
-    <div className={`flex flex-col bg-sz-bg-secondary rounded-xl border border-sz-border ${className || ''}`}>
+    <div className={`flex flex-col bg-sz-bg-secondary rounded-xl border border-sz-border ${className || ''} no-select`}>
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-sz-border">
         <div className="flex items-center gap-3">
@@ -170,7 +170,7 @@ function QAPanel({
       </div>
 
       {/* Issues list */}
-      <div className="flex-1 overflow-y-auto">
+      <div className="flex-1 overflow-y-auto min-h-0">
         {qaChecks.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-8 text-center">
             <div className="w-12 h-12 rounded-full bg-sz-bg-tertiary flex items-center justify-center mb-3">
@@ -208,7 +208,7 @@ function QAPanel({
                         >
                           <Icon className={`w-4 h-4 mt-0.5 flex-shrink-0 ${config.textColor}`} />
                           
-                          <div className="flex-1 min-w-0">
+                          <div className="flex-1 min-w-0 allow-select">
                             <div className="flex items-center gap-2">
                               <span className={`text-sm font-medium ${issue.fixed ? 'line-through text-sz-text-muted' : 'text-sz-text'}`}>
                                 {issue.message}

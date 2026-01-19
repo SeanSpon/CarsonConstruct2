@@ -8,12 +8,15 @@ import type {
   DetectionSettings, 
   DetectionProgress,
   ExportSettings,
+  TransitionSettings,
   EditingPreferences,
   CameraInput,
   CameraCut,
   SpeakerSegment,
   AudioTrack,
   QACheck,
+  TimelineGroup,
+  AppliedEffect,
 } from '../types';
 
 interface RecentProject {
@@ -45,6 +48,9 @@ interface AppState {
   qaChecks: QACheck[];
   qaRunning: boolean;
   
+  // Timeline groups
+  timelineGroups: TimelineGroup[];
+  
   // Detection state
   isDetecting: boolean;
   detectionProgress: DetectionProgress | null;
@@ -64,8 +70,16 @@ interface AppState {
   exportProgress: { current: number; total: number; clipName: string } | null;
   lastExportDir: string | null;
   
+  // Preview state
+  isPreviewRendering: boolean;
+  previewProgress: { percent: number; message: string } | null;
+  previewFilePath: string | null;
+  
   // Recent projects (persisted)
   recentProjects: RecentProject[];
+  
+  // Session state (persisted for restoration)
+  lastRoute: string | null;
   
   // Actions - Project Setup
   setProject: (project: Project | null) => void;
@@ -97,6 +111,30 @@ interface AppState {
   setQARunning: (running: boolean) => void;
   markQACheckFixed: (checkId: string) => void;
   
+  // Actions - Timeline Groups
+  setTimelineGroups: (groups: TimelineGroup[]) => void;
+  addTimelineGroup: (group: TimelineGroup) => void;
+  removeTimelineGroup: (groupId: string) => void;
+  updateTimelineGroup: (groupId: string, updates: Partial<TimelineGroup>) => void;
+  groupClips: (clipIds: string[], groupName?: string) => void;
+  ungroupClips: (groupId: string) => void;
+  
+  // Actions - Clip editing
+  splitClipAtTime: (clipId: string, splitTime: number) => void;
+  duplicateClip: (clipId: string) => void;
+  deleteClip: (clipId: string) => void;
+  moveClip: (clipId: string, newStartTime: number) => void;
+  addClipEffect: (clipId: string, effect: AppliedEffect) => void;
+  removeClipEffect: (clipId: string, effectId: string) => void;
+  toggleClipEffect: (clipId: string, effectId: string) => void;
+  updateClipEffectParams: (clipId: string, effectId: string, params: Record<string, number | string | boolean>) => void;
+  
+  // Project file state
+  projectFilePath: string | null;
+  setProjectFilePath: (path: string | null) => void;
+  lastAutoSaveTime: number | null;
+  setLastAutoSaveTime: (time: number | null) => void;
+  
   // Actions - Detection
   setDetecting: (isDetecting: boolean) => void;
   setDetectionProgress: (progress: DetectionProgress | null) => void;
@@ -117,8 +155,15 @@ interface AppState {
   setExportProgress: (progress: { current: number; total: number; clipName: string } | null) => void;
   setLastExportDir: (dir: string | null) => void;
   
+  // Preview actions
+  setPreviewRendering: (isRendering: boolean) => void;
+  setPreviewProgress: (progress: { percent: number; message: string } | null) => void;
+  setPreviewFilePath: (filePath: string | null) => void;
+  
   addRecentProject: (project: RecentProject) => void;
   removeRecentProject: (filePath: string) => void;
+  
+  setLastRoute: (route: string | null) => void;
   
   reset: () => void;
 }
@@ -136,7 +181,12 @@ const defaultExportSettings: ExportSettings = {
   format: 'mp4',
   mode: 'fast',
   exportClips: true,
+  exportClipsCompilation: false,
   exportFullVideo: false,
+  transition: {
+    type: 'crossfade',
+    duration: 0.5,
+  },
 };
 
 export const useStore = create<AppState>()(
@@ -154,6 +204,7 @@ export const useStore = create<AppState>()(
       audioTracks: [],
       qaChecks: [],
       qaRunning: false,
+      timelineGroups: [],
       isDetecting: false,
       detectionProgress: null,
       detectionError: null,
@@ -165,7 +216,13 @@ export const useStore = create<AppState>()(
       isExporting: false,
       exportProgress: null,
       lastExportDir: null,
+      isPreviewRendering: false,
+      previewProgress: null,
+      previewFilePath: null,
       recentProjects: [],
+      lastRoute: null,
+      projectFilePath: null,
+      lastAutoSaveTime: null,
 
       // Project actions
       setProject: (project) => {
@@ -191,11 +248,13 @@ export const useStore = create<AppState>()(
         speakerSegments: [],
         audioTracks: [],
         qaChecks: [],
+        timelineGroups: [],
         clips: [],
         deadSpaces: [],
         transcript: null,
         detectionProgress: null,
         detectionError: null,
+        lastRoute: null,
       }),
       
       setSetupComplete: (setupComplete) => set({ setupComplete }),
@@ -264,6 +323,171 @@ export const useStore = create<AppState>()(
           c.id === checkId ? { ...c, fixed: true } : c
         ),
       })),
+      
+      // Timeline groups actions
+      setTimelineGroups: (timelineGroups) => set({ timelineGroups }),
+      
+      addTimelineGroup: (group) => set((state) => ({
+        timelineGroups: [...state.timelineGroups, group],
+      })),
+      
+      removeTimelineGroup: (groupId) => set((state) => ({
+        timelineGroups: state.timelineGroups.filter((g) => g.id !== groupId),
+        clips: state.clips.map((c) =>
+          c.groupId === groupId ? { ...c, groupId: undefined } : c
+        ),
+      })),
+      
+      updateTimelineGroup: (groupId, updates) => set((state) => ({
+        timelineGroups: state.timelineGroups.map((g) =>
+          g.id === groupId ? { ...g, ...updates } : g
+        ),
+      })),
+      
+      groupClips: (clipIds, groupName) => {
+        const groupId = `group_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+        const colors = ['#ef4444', '#f97316', '#eab308', '#22c55e', '#14b8a6', '#3b82f6', '#8b5cf6', '#ec4899'];
+        const color = colors[Math.floor(Math.random() * colors.length)];
+        
+        set((state) => ({
+          timelineGroups: [...state.timelineGroups, {
+            id: groupId,
+            name: groupName || `Group ${state.timelineGroups.length + 1}`,
+            color,
+            itemIds: clipIds,
+          }],
+          clips: state.clips.map((c) =>
+            clipIds.includes(c.id) ? { ...c, groupId } : c
+          ),
+        }));
+      },
+      
+      ungroupClips: (groupId) => set((state) => ({
+        timelineGroups: state.timelineGroups.filter((g) => g.id !== groupId),
+        clips: state.clips.map((c) =>
+          c.groupId === groupId ? { ...c, groupId: undefined } : c
+        ),
+      })),
+      
+      // Clip editing actions
+      splitClipAtTime: (clipId, splitTime) => set((state) => {
+        const clip = state.clips.find((c) => c.id === clipId);
+        if (!clip) return state;
+        
+        // Ensure split time is within clip bounds
+        const effectiveStart = clip.startTime + clip.trimStartOffset;
+        const effectiveEnd = clip.endTime + clip.trimEndOffset;
+        if (splitTime <= effectiveStart || splitTime >= effectiveEnd) return state;
+        
+        const newClipId = `clip_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+        
+        // First part: original clip with adjusted end
+        const firstPart: Clip = {
+          ...clip,
+          endTime: splitTime,
+          trimEndOffset: 0,
+          duration: splitTime - clip.startTime - clip.trimStartOffset,
+        };
+        
+        // Second part: new clip starting at split point
+        const secondPart: Clip = {
+          ...clip,
+          id: newClipId,
+          startTime: splitTime,
+          trimStartOffset: 0,
+          duration: effectiveEnd - splitTime,
+          title: clip.title ? `${clip.title} (2)` : undefined,
+        };
+        
+        return {
+          clips: state.clips.flatMap((c) =>
+            c.id === clipId ? [firstPart, secondPart] : [c]
+          ).sort((a, b) => a.startTime - b.startTime),
+        };
+      }),
+      
+      duplicateClip: (clipId) => set((state) => {
+        const clip = state.clips.find((c) => c.id === clipId);
+        if (!clip) return state;
+        
+        const newClipId = `clip_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+        const newClip: Clip = {
+          ...clip,
+          id: newClipId,
+          startTime: clip.endTime + 0.1, // Place right after original
+          endTime: clip.endTime + 0.1 + clip.duration,
+          title: clip.title ? `${clip.title} (copy)` : undefined,
+          status: 'pending',
+        };
+        
+        return {
+          clips: [...state.clips, newClip].sort((a, b) => a.startTime - b.startTime),
+        };
+      }),
+      
+      deleteClip: (clipId) => set((state) => ({
+        clips: state.clips.filter((c) => c.id !== clipId),
+      })),
+      
+      moveClip: (clipId, newStartTime) => set((state) => {
+        const clip = state.clips.find((c) => c.id === clipId);
+        if (!clip) return state;
+        
+        const duration = clip.endTime - clip.startTime;
+        return {
+          clips: state.clips.map((c) =>
+            c.id === clipId
+              ? { ...c, startTime: newStartTime, endTime: newStartTime + duration }
+              : c
+          ).sort((a, b) => a.startTime - b.startTime),
+        };
+      }),
+      
+      // Project file state actions
+      setProjectFilePath: (projectFilePath) => set({ projectFilePath }),
+      setLastAutoSaveTime: (lastAutoSaveTime) => set({ lastAutoSaveTime }),
+      
+      addClipEffect: (clipId, effect) => set((state) => ({
+        clips: state.clips.map((c) =>
+          c.id === clipId
+            ? { ...c, appliedEffects: [...(c.appliedEffects || []), effect] }
+            : c
+        ),
+      })),
+      
+      removeClipEffect: (clipId, effectId) => set((state) => ({
+        clips: state.clips.map((c) =>
+          c.id === clipId
+            ? { ...c, appliedEffects: (c.appliedEffects || []).filter((e) => e.id !== effectId) }
+            : c
+        ),
+      })),
+      
+      toggleClipEffect: (clipId, effectId) => set((state) => ({
+        clips: state.clips.map((c) =>
+          c.id === clipId
+            ? {
+                ...c,
+                appliedEffects: (c.appliedEffects || []).map((e) =>
+                  e.id === effectId ? { ...e, enabled: !e.enabled } : e
+                ),
+              }
+            : c
+        ),
+      })),
+      
+      updateClipEffectParams: (clipId, effectId, params) => set((state) => ({
+        clips: state.clips.map((c) =>
+          c.id === clipId
+            ? {
+                ...c,
+                appliedEffects: (c.appliedEffects || []).map((e) =>
+                  e.id === effectId ? { ...e, parameters: { ...e.parameters, ...params } } : e
+                ),
+              }
+            : c
+        ),
+      })),
 
       // Detection actions
       setDetecting: (isDetecting) => set({ isDetecting }),
@@ -330,6 +554,13 @@ export const useStore = create<AppState>()(
       setExportProgress: (exportProgress) => set({ exportProgress }),
       
       setLastExportDir: (lastExportDir) => set({ lastExportDir }),
+      
+      // Preview actions
+      setPreviewRendering: (isPreviewRendering) => set({ isPreviewRendering }),
+      
+      setPreviewProgress: (previewProgress) => set({ previewProgress }),
+      
+      setPreviewFilePath: (previewFilePath) => set({ previewFilePath }),
 
       // Recent projects
       addRecentProject: (project) => set((state) => {
@@ -345,6 +576,9 @@ export const useStore = create<AppState>()(
         recentProjects: state.recentProjects.filter((p) => p.filePath !== filePath),
       })),
 
+      // Session state
+      setLastRoute: (lastRoute) => set({ lastRoute }),
+
       // Reset
       reset: () => set({
         project: null,
@@ -358,6 +592,7 @@ export const useStore = create<AppState>()(
         audioTracks: [],
         qaChecks: [],
         qaRunning: false,
+        timelineGroups: [],
         isDetecting: false,
         detectionProgress: null,
         detectionError: null,
@@ -366,6 +601,9 @@ export const useStore = create<AppState>()(
         transcript: null,
         isExporting: false,
         exportProgress: null,
+        isPreviewRendering: false,
+        previewProgress: null,
+        previewFilePath: null,
       }),
     }),
     {
@@ -377,6 +615,21 @@ export const useStore = create<AppState>()(
         lastExportDir: state.lastExportDir,
         // Persist last editing preferences for quick start
         editingPreferences: state.editingPreferences,
+        // Persist session state for restoration
+        project: state.project,
+        clips: state.clips,
+        deadSpaces: state.deadSpaces,
+        transcript: state.transcript,
+        setupComplete: state.setupComplete,
+        cameras: state.cameras,
+        cameraCuts: state.cameraCuts,
+        speakerSegments: state.speakerSegments,
+        audioTracks: state.audioTracks,
+        qaChecks: state.qaChecks,
+        timelineGroups: state.timelineGroups,
+        lastRoute: state.lastRoute,
+        // Project file state
+        projectFilePath: state.projectFilePath,
       }),
     }
   )

@@ -77,9 +77,9 @@ const VideoPreview = forwardRef<HTMLVideoElement, VideoPreviewProps>(
     }, [selectedClip?.id]);
 
     return (
-      <div className="flex flex-col items-center">
+      <div className="flex flex-col no-select">
         {/* Video container */}
-        <div className="relative w-full max-w-3xl bg-black rounded-sz-lg overflow-hidden border border-sz-border">
+        <div className="relative w-full bg-black rounded-sz-lg overflow-hidden border border-sz-border shadow-lg">
           <div className="aspect-video">
             <video
               ref={videoRef}
@@ -92,63 +92,84 @@ const VideoPreview = forwardRef<HTMLVideoElement, VideoPreviewProps>(
             />
           </div>
 
-          {/* Selected clip indicator */}
-          {selectedClip && (
-            <div className="absolute top-3 left-3 px-2 py-1 bg-black/80 rounded text-xs text-sz-text backdrop-blur-sm">
-              <span className="text-sz-text-muted">Clip: </span>
-              <span className="font-medium">{selectedClip.title || `Clip ${selectedClip.id.split('_')[1]}`}</span>
-            </div>
-          )}
+          {/* Overlay info */}
+          <div className="absolute inset-0 pointer-events-none">
+            {/* Selected clip indicator */}
+            {selectedClip && (
+              <div className="absolute top-3 left-3 px-3 py-1.5 bg-black/90 rounded-md text-xs text-sz-text backdrop-blur-sm border border-sz-border/50">
+                <span className="text-sz-text-muted">Clip: </span>
+                <span className="font-semibold">{selectedClip.title || `Clip ${selectedClip.id.split('_')[1]}`}</span>
+              </div>
+            )}
 
-          {/* Time display */}
-          <div className="absolute bottom-3 right-3 px-2 py-1 bg-black/80 rounded text-xs font-mono text-sz-text backdrop-blur-sm">
-            {formatTimestamp(currentTime)} / {formatTimestamp(project.duration)}
+            {/* Time display */}
+            <div className="absolute bottom-3 right-3 px-3 py-1.5 bg-black/90 rounded-md text-xs font-mono text-sz-text backdrop-blur-sm border border-sz-border/50">
+              <span className="text-sz-text">{formatTimestamp(currentTime)}</span>
+              <span className="text-sz-text-muted"> / </span>
+              <span className="text-sz-text-muted">{formatTimestamp(project.duration)}</span>
+            </div>
+
+            {/* Resolution badge */}
+            {project.resolution && (
+              <div className="absolute top-3 right-3 px-2 py-1 bg-black/90 rounded-md text-[10px] text-sz-text-muted backdrop-blur-sm border border-sz-border/50">
+                {project.resolution}
+                {project.fps && ` @ ${project.fps}fps`}
+              </div>
+            )}
           </div>
         </div>
 
-        {/* Controls */}
-        <div className="flex items-center gap-2 mt-3">
-          <IconButton
-            icon={<SkipBack className="w-4 h-4" />}
-            variant="ghost"
-            size="sm"
-            tooltip="Skip back 5s"
-            onClick={handleSkipBack}
-          />
-          <button
-            onClick={onPlayPause}
-            className="w-10 h-10 rounded-full bg-sz-accent hover:bg-sz-accent-hover flex items-center justify-center transition-colors"
-          >
-            {isPlaying ? (
-              <Pause className="w-5 h-5 text-sz-bg" />
-            ) : (
-              <Play className="w-5 h-5 text-sz-bg ml-0.5" />
-            )}
-          </button>
-          <IconButton
-            icon={<SkipForward className="w-4 h-4" />}
-            variant="ghost"
-            size="sm"
-            tooltip="Skip forward 5s"
-            onClick={handleSkipForward}
-          />
-          
-          <div className="w-px h-5 bg-sz-border mx-2" />
-          
-          <IconButton
-            icon={isMuted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
-            variant="ghost"
-            size="sm"
-            tooltip={isMuted ? "Unmute" : "Mute"}
-            onClick={handleToggleMute}
-          />
-          <IconButton
-            icon={<Maximize2 className="w-4 h-4" />}
-            variant="ghost"
-            size="sm"
-            tooltip="Fullscreen"
-            onClick={handleFullscreen}
-          />
+        {/* Enhanced Controls */}
+        <div className="mt-3 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <IconButton
+              icon={<SkipBack className="w-4 h-4" />}
+              variant="ghost"
+              size="sm"
+              tooltip="Skip back 5s (Shift+←)"
+              onClick={handleSkipBack}
+            />
+            <button
+              onClick={(e) => {
+                e.preventDefault();
+                onPlayPause();
+              }}
+              className="w-10 h-10 rounded-full bg-sz-accent hover:bg-sz-accent-hover flex items-center justify-center transition-colors shadow-md"
+            >
+              {isPlaying ? (
+                <Pause className="w-5 h-5 text-sz-bg" />
+              ) : (
+                <Play className="w-5 h-5 text-sz-bg ml-0.5" />
+              )}
+            </button>
+            <IconButton
+              icon={<SkipForward className="w-4 h-4" />}
+              variant="ghost"
+              size="sm"
+              tooltip="Skip forward 5s (Shift+→)"
+              onClick={handleSkipForward}
+            />
+            
+            <div className="w-px h-5 bg-sz-border mx-2" />
+            
+            <IconButton
+              icon={isMuted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
+              variant="ghost"
+              size="sm"
+              tooltip={isMuted ? "Unmute (M)" : "Mute (M)"}
+              onClick={handleToggleMute}
+            />
+          </div>
+
+          <div className="flex items-center gap-2">
+            <IconButton
+              icon={<Maximize2 className="w-4 h-4" />}
+              variant="ghost"
+              size="sm"
+              tooltip="Fullscreen (F)"
+              onClick={handleFullscreen}
+            />
+          </div>
         </div>
       </div>
     );

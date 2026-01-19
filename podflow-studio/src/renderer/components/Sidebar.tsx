@@ -1,4 +1,4 @@
-import { memo, useMemo, useState } from 'react';
+import { memo, useMemo, useState, useEffect } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
 import { 
   Home, 
@@ -20,13 +20,20 @@ const navItems = [
 
 function Sidebar() {
   const location = useLocation();
-  const { project, clips, deadSpaces } = useStore();
+  const { project, clips, deadSpaces, setLastRoute } = useStore();
   const [isCollapsed, setIsCollapsed] = useState(false);
 
   const { acceptedClips, deadSpacesToRemove } = useMemo(() => ({
     acceptedClips: clips.filter(c => c.status === 'accepted').length,
     deadSpacesToRemove: deadSpaces.filter(ds => ds.remove).length,
   }), [clips, deadSpaces]);
+
+  // Track route changes for session restoration
+  useEffect(() => {
+    if (project && location.pathname !== '/') {
+      setLastRoute(location.pathname);
+    }
+  }, [location.pathname, project, setLastRoute]);
 
   // Don't show sidebar on home page when no project is loaded
   const isHomePage = location.pathname === '/';

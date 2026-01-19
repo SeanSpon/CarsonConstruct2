@@ -1,3 +1,27 @@
+"""
+Clip Translator Module
+
+Converts ClipCard → MeaningCard using AI providers.
+Supports multiple backends: OpenAI, Gemini, Anthropic, and local models.
+
+The translator analyzes clip metadata (patterns, scores, transcript) and
+produces human-understandable meaning: category, summary, title candidates,
+quality assessment, and flags.
+
+Usage:
+    from ai.translator import translate_clip
+    from ai.schemas import ClipCard
+    
+    # With API key (uses OpenAI by default)
+    meaning = translate_clip(clip_card, context_pack, api_key="sk-...")
+    
+    # With specific provider
+    meaning = translate_clip(clip_card, context_pack, provider="gemini", api_key="...")
+    
+    # Without API key (uses fallback heuristics)
+    meaning = translate_clip(clip_card, context_pack)
+"""
+
 import json
 import re
 from dataclasses import asdict
@@ -7,12 +31,14 @@ from .schemas import ClipCard, MeaningCard, validate_meaningcard
 
 
 def _truncate(text: str, max_chars: int) -> str:
+    """Truncate text to max_chars, breaking at word boundary."""
     if len(text) <= max_chars:
         return text
     return text[:max_chars].rsplit(" ", 1)[0] + "..."
 
 
 def _extract_json(text: str) -> Optional[Dict[str, Any]]:
+    """Extract JSON from potentially markdown-wrapped response."""
     cleaned = text.strip()
     if cleaned.startswith("```"):
         parts = cleaned.split("```")
@@ -31,6 +57,7 @@ def _extract_json(text: str) -> Optional[Dict[str, Any]]:
 
 
 def _build_prompt(clip_card: ClipCard, context_pack: Dict[str, Any]) -> str:
+    """Build the translation prompt."""
     clip_payload = {
         "id": clip_card.id,
         "start": clip_card.start,
@@ -74,6 +101,7 @@ def _build_prompt(clip_card: ClipCard, context_pack: Dict[str, Any]) -> str:
 def _build_repair_prompt(
     clip_card: ClipCard, context_pack: Dict[str, Any], raw_response: str
 ) -> str:
+    """Build a prompt to repair malformed JSON response."""
     return (
         "Repair the following response into strict MeaningCard JSON.\n"
         "Return ONLY valid JSON with the required keys and no extra keys.\n\n"
@@ -84,6 +112,7 @@ def _build_repair_prompt(
 
 
 def _first_sentence(text: str) -> str:
+    """Extract first sentence from text."""
     match = re.search(r"[.!?]", text)
     if match:
         return text[: match.end()].strip()
@@ -91,6 +120,7 @@ def _first_sentence(text: str) -> str:
 
 
 def _limit_words(text: str, max_words: int) -> str:
+    """Limit text to max_words."""
     words = text.split()
     if len(words) <= max_words:
         return text.strip()
@@ -98,18 +128,29 @@ def _limit_words(text: str, max_words: int) -> str:
 
 
 def _fallback_meaningcard(clip_card: ClipCard, context_pack: Dict[str, Any]) -> MeaningCard:
+    """
+    Generate a MeaningCard using heuristic rules when AI is unavailable.
+    
+    This provides a reasonable baseline without requiring API calls,
+    ensuring the app remains functional offline or without API keys.
+    """
     transcript = clip_card.transcript.strip()
     constraints = context_pack.get("constraints", {})
     min_seconds = constraints.get("min_seconds")
     max_seconds = constraints.get("max_seconds")
+    
+    # Check duration constraints
     duration_ok = True
     if isinstance(min_seconds, (int, float)) and clip_card.duration < float(min_seconds):
         duration_ok = False
     if isinstance(max_seconds, (int, float)) and clip_card.duration > float(max_seconds):
         duration_ok = False
+    
+    # Check for complete thought (ends with punctuation)
     ends_with_punct = bool(transcript) and transcript[-1] in ".!?"
     complete_thought = bool(transcript) and ends_with_punct and duration_ok
 
+    # Map patterns to categories
     category_map = {
         "laughter": "funny",
         "debate": "hot_take",
@@ -122,6 +163,7 @@ def _fallback_meaningcard(clip_card: ClipCard, context_pack: Dict[str, Any]) -> 
             category = category_map[pattern]
             break
 
+    # Generate summary and hook from transcript
     if transcript:
         summary = _first_sentence(transcript)
         summary = _limit_words(summary, 28)
@@ -130,6 +172,7 @@ def _fallback_meaningcard(clip_card: ClipCard, context_pack: Dict[str, Any]) -> 
         summary = f"{category.title()} clip candidate."
         hook_text = f"{category.title()} moment worth reviewing"
 
+    # Generate title candidates
     title_seed = hook_text if transcript else summary
     title_seed = _limit_words(title_seed, 10)
     title_candidates = [
@@ -139,6 +182,7 @@ def _fallback_meaningcard(clip_card: ClipCard, context_pack: Dict[str, Any]) -> 
     if transcript:
         title_candidates.append(_limit_words(summary, 10))
 
+    # Determine flags
     flags = []
     if not transcript:
         flags.append("no_transcript")
@@ -164,36 +208,110 @@ def translate_clip(
     context_pack: Dict[str, Any],
     model: str = "gpt-4o-mini",
     api_key: Optional[str] = None,
+    provider: str = "openai",
 ) -> MeaningCard:
-    if api_key:
+    """
+    Translate a ClipCard into a MeaningCard using AI.
+    
+    Args:
+        clip_card: The clip metadata to analyze
+        context_pack: Platform/niche context and constraints
+        model: Model name to use (provider-specific)
+        api_key: API key for the provider
+        provider: Provider to use ("openai", "gemini", "anthropic", "local")
+        
+    Returns:
+        MeaningCard with semantic analysis of the clip
+        
+    Note:
+        If no API key is provided or AI fails, falls back to
+        heuristic-based translation that still produces usable results.
+    """
+    if api_key or provider == "local":
         try:
-            from openai import OpenAI
-
-            client = OpenAI(api_key=api_key)
+            # Use the provider abstraction
+            from .providers import get_provider, AIProviderError
+            
+            ai_provider = get_provider(provider, api_key=api_key)
+            
+            # Map legacy model names to provider-appropriate defaults
+            effective_model = model
+            if provider != "openai" and model.startswith("gpt-"):
+                # Use provider's default model instead of GPT model
+                effective_model = ai_provider.default_model
+            
             prompt = _build_prompt(clip_card, context_pack)
-            response = client.chat.completions.create(
-                model=model,
-                messages=[{"role": "user", "content": prompt}],
+            
+            # First attempt
+            result = ai_provider.complete(
+                prompt=prompt,
+                schema={"type": "object"},  # Signal we want JSON
+                model=effective_model,
                 temperature=0.1,
                 max_tokens=500,
             )
-            raw = response.choices[0].message.content or ""
-            parsed = _extract_json(raw)
+            
+            parsed = result.parsed_json
+            if parsed is None:
+                parsed = _extract_json(result.content)
+            
             if parsed is not None:
                 return validate_meaningcard(parsed)
-
-            repair_prompt = _build_repair_prompt(clip_card, context_pack, raw)
-            repair = client.chat.completions.create(
-                model=model,
-                messages=[{"role": "user", "content": repair_prompt}],
+            
+            # Repair attempt if first failed
+            repair_prompt = _build_repair_prompt(clip_card, context_pack, result.content)
+            repair_result = ai_provider.complete(
+                prompt=repair_prompt,
+                schema={"type": "object"},
+                model=effective_model,
                 temperature=0.1,
                 max_tokens=500,
             )
-            repaired_raw = repair.choices[0].message.content or ""
-            repaired = _extract_json(repaired_raw)
+            
+            repaired = repair_result.parsed_json
+            if repaired is None:
+                repaired = _extract_json(repair_result.content)
+            
             if repaired is not None:
                 return validate_meaningcard(repaired)
-        except Exception:
+                
+        except ImportError:
+            # Provider module not available, try legacy OpenAI
             pass
+        except Exception:
+            # Any error, fall back to heuristics
+            pass
+        
+        # Legacy OpenAI fallback for backward compatibility
+        if provider == "openai" and api_key:
+            try:
+                from openai import OpenAI
+
+                client = OpenAI(api_key=api_key)
+                prompt = _build_prompt(clip_card, context_pack)
+                response = client.chat.completions.create(
+                    model=model,
+                    messages=[{"role": "user", "content": prompt}],
+                    temperature=0.1,
+                    max_tokens=500,
+                )
+                raw = response.choices[0].message.content or ""
+                parsed = _extract_json(raw)
+                if parsed is not None:
+                    return validate_meaningcard(parsed)
+
+                repair_prompt = _build_repair_prompt(clip_card, context_pack, raw)
+                repair = client.chat.completions.create(
+                    model=model,
+                    messages=[{"role": "user", "content": repair_prompt}],
+                    temperature=0.1,
+                    max_tokens=500,
+                )
+                repaired_raw = repair.choices[0].message.content or ""
+                repaired = _extract_json(repaired_raw)
+                if repaired is not None:
+                    return validate_meaningcard(repaired)
+            except Exception:
+                pass
 
     return _fallback_meaningcard(clip_card, context_pack)

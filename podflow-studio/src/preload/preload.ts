@@ -77,8 +77,13 @@ contextBridge.exposeInMainWorld('api', {
     ipcRenderer.invoke('select-output-dir'),
 
   // Detection
-  startDetection: (projectId: string, filePath: string, settings: DetectionSettings): Promise<{ success: boolean; error?: string }> =>
-    ipcRenderer.invoke('start-detection', { projectId, filePath, settings }),
+  startDetection: (
+    projectId: string,
+    filePath: string,
+    settings: DetectionSettings,
+    durationSeconds?: number,
+  ): Promise<{ success: boolean; error?: string; queued?: boolean }> =>
+    ipcRenderer.invoke('start-detection', { projectId, filePath, settings, durationSeconds }),
   
   cancelDetection: (projectId: string): Promise<{ success: boolean; error?: string }> =>
     ipcRenderer.invoke('cancel-detection', projectId),
@@ -95,6 +100,12 @@ contextBridge.exposeInMainWorld('api', {
   
   openFolder: (path: string): Promise<{ success: boolean; error?: string }> =>
     ipcRenderer.invoke('open-folder', path),
+
+  saveClipProject: (jobId: string, clipId: string, payload: unknown): Promise<{ success: boolean; path?: string; error?: string }> =>
+    ipcRenderer.invoke('save-clip-project', { jobId, clipId, payload }),
+
+  loadClipProject: (jobId: string, clipId: string): Promise<{ success: boolean; payload?: unknown; error?: string }> =>
+    ipcRenderer.invoke('load-clip-project', { jobId, clipId }),
 
   // Event listeners
   onDetectionProgress: (callback: (data: DetectionProgress) => void) => {
@@ -135,7 +146,12 @@ declare global {
       selectFile: () => Promise<FileInfo | null>;
       validateFile: (filePath: string) => Promise<FileValidation>;
       selectOutputDir: () => Promise<string | null>;
-      startDetection: (projectId: string, filePath: string, settings: DetectionSettings) => Promise<{ success: boolean; error?: string }>;
+      startDetection: (
+        projectId: string,
+        filePath: string,
+        settings: DetectionSettings,
+        durationSeconds?: number,
+      ) => Promise<{ success: boolean; error?: string; queued?: boolean }>;
       cancelDetection: (projectId: string) => Promise<{ success: boolean; error?: string }>;
       exportClips: (data: {
         sourceFile: string;
@@ -145,6 +161,8 @@ declare global {
         settings: ExportSettings;
       }) => Promise<{ success: boolean; outputDir?: string; error?: string }>;
       openFolder: (path: string) => Promise<{ success: boolean; error?: string }>;
+      saveClipProject: (jobId: string, clipId: string, payload: unknown) => Promise<{ success: boolean; path?: string; error?: string }>;
+      loadClipProject: (jobId: string, clipId: string) => Promise<{ success: boolean; payload?: unknown; error?: string }>;
       onDetectionProgress: (callback: (data: DetectionProgress) => void) => () => void;
       onDetectionComplete: (callback: (data: DetectionResult) => void) => () => void;
       onDetectionError: (callback: (data: DetectionError) => void) => () => void;

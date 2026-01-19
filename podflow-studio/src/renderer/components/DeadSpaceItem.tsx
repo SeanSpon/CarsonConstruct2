@@ -1,84 +1,78 @@
-import { Play, Trash2, Undo2 } from 'lucide-react';
+import { memo, useCallback } from 'react';
+import { Clock, Trash2, Undo2 } from 'lucide-react';
 import type { DeadSpace } from '../types';
 import { formatTimestamp } from '../types';
 import { useStore } from '../stores/store';
+import { Button, Badge } from './ui';
 
 interface DeadSpaceItemProps {
   deadSpace: DeadSpace;
 }
 
-export default function DeadSpaceItem({ deadSpace }: DeadSpaceItemProps) {
+function DeadSpaceItem({ deadSpace }: DeadSpaceItemProps) {
   const { updateDeadSpaceRemove } = useStore();
 
-  const handleToggle = () => {
+  const handleToggle = useCallback(() => {
     updateDeadSpaceRemove(deadSpace.id, !deadSpace.remove);
-  };
+  }, [deadSpace.id, deadSpace.remove, updateDeadSpaceRemove]);
 
   return (
-    <div 
+    <div
       className={`
-        flex items-center gap-4 p-4 rounded-lg border transition-colors
-        ${deadSpace.remove 
-          ? 'bg-red-500/5 border-red-500/20' 
-          : 'bg-zinc-900 border-zinc-800'
+        flex items-center gap-4 p-3 rounded-sz border transition-all
+        ${deadSpace.remove
+          ? 'border-sz-danger/30 bg-sz-danger-muted/30'
+          : 'border-sz-border bg-sz-bg-secondary'
         }
       `}
     >
-      {/* Status indicator */}
-      <div 
+      {/* Icon */}
+      <div
         className={`
-          w-3 h-3 rounded-full flex-shrink-0
-          ${deadSpace.remove ? 'bg-red-500' : 'bg-zinc-600'}
+          w-9 h-9 rounded-sz flex items-center justify-center flex-shrink-0
+          ${deadSpace.remove ? 'bg-sz-danger-muted' : 'bg-sz-bg-tertiary'}
         `}
-      />
+      >
+        <Clock
+          className={`w-4 h-4 ${deadSpace.remove ? 'text-sz-danger' : 'text-sz-text-muted'}`}
+        />
+      </div>
 
-      {/* Time info */}
+      {/* Info */}
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2">
-          <span className="font-mono text-sm text-zinc-300">
-            {formatTimestamp(deadSpace.startTime)}
+          <span className="text-sm font-medium text-sz-text tabular-nums">
+            {formatTimestamp(deadSpace.startTime)} – {formatTimestamp(deadSpace.endTime)}
           </span>
-          <span className="text-zinc-600">→</span>
-          <span className="font-mono text-sm text-zinc-300">
-            {formatTimestamp(deadSpace.endTime)}
-          </span>
+          <Badge
+            variant={deadSpace.remove ? 'danger' : 'muted'}
+            size="sm"
+          >
+            {deadSpace.duration.toFixed(1)}s
+          </Badge>
         </div>
-        <p className="text-xs text-zinc-500 mt-0.5">
-          {deadSpace.duration.toFixed(1)}s of silence
+        <p className="text-xs text-sz-text-muted mt-0.5">
+          {deadSpace.remove ? 'Will be removed' : 'Will be kept'}
         </p>
       </div>
 
-      {/* Preview button (placeholder - would need video player integration) */}
-      <button 
-        className="p-2 hover:bg-zinc-800 rounded-lg transition-colors"
-        title="Preview"
-      >
-        <Play className="w-4 h-4 text-zinc-500" />
-      </button>
-
-      {/* Toggle button */}
-      <button
+      {/* Action button */}
+      <Button
+        variant={deadSpace.remove ? 'ghost' : 'danger'}
+        size="sm"
         onClick={handleToggle}
-        className={`
-          flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors
-          ${deadSpace.remove
-            ? 'bg-red-500/20 text-red-400 hover:bg-red-500/30'
-            : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700'
-          }
-        `}
+        leftIcon={
+          deadSpace.remove ? (
+            <Undo2 className="w-3.5 h-3.5" />
+          ) : (
+            <Trash2 className="w-3.5 h-3.5" />
+          )
+        }
       >
-        {deadSpace.remove ? (
-          <>
-            <Trash2 className="w-4 h-4" />
-            Remove
-          </>
-        ) : (
-          <>
-            <Undo2 className="w-4 h-4" />
-            Keep
-          </>
-        )}
-      </button>
+        {deadSpace.remove ? 'Keep' : 'Remove'}
+      </Button>
     </div>
   );
 }
+
+export default memo(DeadSpaceItem);

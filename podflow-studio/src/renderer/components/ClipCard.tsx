@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { Check, X, Minus, Plus, Play, Flame } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { Check, X, Minus, Plus, Play, Flame, Sparkles } from 'lucide-react';
 import type { Clip } from '../types';
 import { formatTimestamp, getScoreLabel, getScoreColor } from '../types';
 import { useStore } from '../stores/store';
@@ -11,7 +12,8 @@ interface ClipCardProps {
 }
 
 export default function ClipCard({ clip, videoPath }: ClipCardProps) {
-  const { updateClipStatus, updateClipTrim } = useStore();
+  const navigate = useNavigate();
+  const { updateClipStatus, updateClipTrim, lastJobId } = useStore();
   const [isPlaying, setIsPlaying] = useState(false);
 
   const handleAccept = () => {
@@ -44,6 +46,14 @@ export default function ClipCard({ clip, videoPath }: ClipCardProps) {
 
   const scoreLabel = getScoreLabel(clip.finalScore);
   const scoreColor = getScoreColor(clip.finalScore);
+  const handleReview = () => {
+    if (!lastJobId) {
+      window.alert('Please run detection before opening Review Mode.');
+      return;
+    }
+    navigate(`/review/${clip.id}?job=${lastJobId}`);
+  };
+
   const completeThought = clip.completeThought ?? clip.isComplete;
   const cleanEdges = Boolean(clip.startsClean && clip.endsClean);
   const qualityMultiplier = clip.qualityMultiplier ?? clip.aiQualityMultiplier;
@@ -238,6 +248,13 @@ export default function ClipCard({ clip, videoPath }: ClipCardProps) {
 
         {/* Action buttons */}
         <div className="flex gap-2">
+          <button
+            onClick={handleReview}
+            className="flex-1 py-2.5 rounded-lg font-medium text-sm flex items-center justify-center gap-2 transition-colors bg-zinc-800 hover:bg-zinc-700 text-zinc-200"
+          >
+            <Sparkles className="w-4 h-4" />
+            Review
+          </button>
           <button
             onClick={handleAccept}
             className={`

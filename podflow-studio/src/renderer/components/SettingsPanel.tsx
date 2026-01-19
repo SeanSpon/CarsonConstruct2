@@ -1,11 +1,13 @@
 import { useState } from 'react';
 import { Settings, ChevronDown, ChevronUp, Sparkles, Key } from 'lucide-react';
 import { useStore } from '../stores/store';
+import { estimateAiCost, formatCost } from '../types';
 
 export default function SettingsPanel() {
-  const { settings, updateSettings } = useStore();
+  const { settings, updateSettings, project } = useStore();
   const [isExpanded, setIsExpanded] = useState(true);
   const [showApiKeyInput, setShowApiKeyInput] = useState(false);
+  const costEstimate = project ? estimateAiCost(project.duration, settings.targetCount) : null;
 
   return (
     <div className="bg-zinc-900 rounded-xl border border-zinc-800 overflow-hidden">
@@ -126,7 +128,12 @@ export default function SettingsPanel() {
                   <span className="font-medium text-zinc-200">AI Enhancement</span>
                 </div>
                 <p className="text-xs text-zinc-500 mt-0.5">
-                  Generate titles, validate quality (~$0.50/video)
+                  Generate titles, validate quality
+                  {costEstimate && (
+                    <span className="ml-2 text-zinc-400">
+                      • Est. {formatCost(costEstimate.total)}
+                    </span>
+                  )}
                 </p>
               </div>
             </label>

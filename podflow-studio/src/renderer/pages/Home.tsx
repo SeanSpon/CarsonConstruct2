@@ -1,37 +1,38 @@
-import { useState } from 'react';
+import { useState, useCallback, memo, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { FileVideo, Upload, Loader2, AlertCircle, Sparkles, Clock, Trash2, FolderOpen } from 'lucide-react';
+import { FileVideo, Upload, Clock, Trash2, Target, Scissors, Package, ArrowRight, Sparkles } from 'lucide-react';
 import { useStore } from '../stores/store';
 import { formatFileSize, formatDuration } from '../types';
+import { Button, LoadingState } from '../components/ui';
 
-export default function Home() {
+function Home() {
   const navigate = useNavigate();
-  const { 
-    project, 
-    setProject, 
-    clearProject, 
-    recentProjects, 
-    removeRecentProject 
+  const {
+    project,
+    setProject,
+    clearProject,
+    recentProjects,
+    removeRecentProject,
   } = useStore();
-  
+
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [isDragOver, setIsDragOver] = useState(false);
 
-  const handleSelectFile = async () => {
+  const handleSelectFile = useCallback(async () => {
     setIsLoading(true);
     setError(null);
 
     try {
       const file = await window.api.selectFile();
-      
+
       if (!file) {
         setIsLoading(false);
         return;
       }
 
-      // Validate the file
       const validation = await window.api.validateFile(file.path);
-      
+
       if (!validation.valid) {
         setError(validation.error || 'Invalid video file');
         setIsLoading(false);
@@ -49,15 +50,15 @@ export default function Home() {
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [setProject]);
 
-  const handleOpenRecent = async (filePath: string) => {
+  const handleOpenRecent = useCallback(async (filePath: string) => {
     setIsLoading(true);
     setError(null);
 
     try {
       const validation = await window.api.validateFile(filePath);
-      
+
       if (!validation.valid) {
         setError('File no longer exists or is invalid');
         removeRecentProject(filePath);
@@ -66,12 +67,11 @@ export default function Home() {
       }
 
       const fileName = filePath.split(/[\\/]/).pop() || 'Unknown';
-      
-      // Get file size - we'll estimate from duration if not available
+
       setProject({
         filePath,
         fileName,
-        size: 0, // Size will be re-read if needed
+        size: 0,
         duration: validation.duration || 0,
       });
     } catch (err) {
@@ -79,178 +79,266 @@ export default function Home() {
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [removeRecentProject, setProject]);
 
-  const handleAnalyze = () => {
+  const handleAnalyze = useCallback(() => {
     if (project) {
       navigate('/clips');
     }
-  };
+  }, [project, navigate]);
 
-  const handleClear = () => {
+  const handleClear = useCallback(() => {
     clearProject();
     setError(null);
-  };
+  }, [clearProject]);
+
+  // Navigate to clips page if project is already loaded
+  useEffect(() => {
+    if (project) {
+      // Small delay to show the selected file before navigating
+    }
+  }, [project, navigate]);
 
   return (
-    <div className="min-h-full flex flex-col items-center justify-center p-8">
-      {/* Hero Section */}
-      <div className="text-center mb-10">
-        <div className="flex items-center justify-center gap-3 mb-4">
-          <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-violet-500 to-fuchsia-600 flex items-center justify-center">
-            <Sparkles className="w-6 h-6 text-white" />
-          </div>
-        </div>
-        <h1 className="text-3xl font-bold mb-2">
-          Welcome to <span className="text-violet-400">PodFlow Studio</span>
-        </h1>
-        <p className="text-zinc-400 text-lg max-w-md mx-auto">
-          AI-powered clip detection for podcasters. Find viral moments, remove dead space, export clean clips.
-        </p>
-      </div>
-
-      {/* Main Content */}
-      <div className="w-full max-w-2xl">
+    <div className="min-h-full flex flex-col items-center justify-center p-8 bg-sz-bg">
+      <div className="w-full max-w-xl">
         {!project ? (
           <>
-            {/* File Selection */}
+            {/* Logo & Brand */}
+            <div className="text-center mb-10">
+              <div className="flex items-center justify-center gap-0 mb-4">
+                <span className="text-3xl font-bold text-sz-text tracking-wide">SEE</span>
+                <span className="mx-2 px-2.5 py-1 bg-sz-accent rounded text-sm font-bold text-white tracking-wide">
+                  STUDIO
+                </span>
+                <span className="text-3xl font-bold text-sz-text tracking-wide">ZEE</span>
+              </div>
+              <h2 className="text-xl font-semibold text-sz-text mb-2">Clip Studios</h2>
+              <p className="text-sz-text-secondary text-sm">
+                AI-powered clip detection for content creators
+              </p>
+            </div>
+
+            {/* Drop Zone */}
             <button
               onClick={handleSelectFile}
               disabled={isLoading}
+              onDragOver={(e) => {
+                e.preventDefault();
+                setIsDragOver(true);
+              }}
+              onDragLeave={() => setIsDragOver(false)}
+              onDrop={(e) => {
+                e.preventDefault();
+                setIsDragOver(false);
+                // Handle file drop
+              }}
               className={`
-                w-full border-2 border-dashed rounded-2xl p-10 text-center 
-                transition-all duration-200 cursor-pointer mb-6
-                ${isLoading 
-                  ? 'border-zinc-700 bg-zinc-900/50 cursor-wait' 
-                  : 'border-zinc-700 hover:border-violet-500 hover:bg-violet-500/5 bg-zinc-900/30'
+                w-full border-2 border-dashed rounded-sz-lg p-10 text-center 
+                transition-all duration-200 cursor-pointer group
+                ${isLoading
+                  ? 'border-sz-border bg-sz-bg-secondary cursor-wait'
+                  : isDragOver
+                    ? 'border-sz-accent bg-sz-accent-muted'
+                    : 'border-sz-border-light hover:border-sz-accent/50 hover:bg-sz-bg-secondary bg-sz-bg'
                 }
               `}
             >
               {isLoading ? (
                 <div className="flex flex-col items-center gap-4">
-                  <Loader2 className="w-12 h-12 text-violet-500 animate-spin" />
-                  <p className="text-zinc-300">Reading file...</p>
+                  <LoadingState message="Reading file..." size="lg" />
                 </div>
               ) : (
                 <div className="flex flex-col items-center gap-4">
-                  <div className="w-16 h-16 rounded-full bg-zinc-800 flex items-center justify-center">
-                    <FileVideo className="w-8 h-8 text-zinc-400" />
+                  <div className={`
+                    w-14 h-14 rounded-sz-lg flex items-center justify-center transition-all duration-200
+                    ${isDragOver ? 'bg-sz-accent text-sz-bg' : 'bg-sz-bg-tertiary text-sz-text-muted group-hover:bg-sz-bg-hover group-hover:text-sz-accent'}
+                  `}>
+                    <FileVideo className="w-7 h-7" />
                   </div>
                   <div>
-                    <p className="text-xl font-medium text-zinc-200">Select your podcast video</p>
-                    <p className="text-sm text-zinc-500 mt-2">MP4, MOV, WEBM, MKV supported</p>
+                    <p className="text-base font-medium text-sz-text mb-1">
+                      {isDragOver ? 'Drop your video here' : 'Drop your video or click to browse'}
+                    </p>
+                    <p className="text-xs text-sz-text-muted">
+                      MP4, MOV, WEBM, MKV supported
+                    </p>
                   </div>
-                  <div className="mt-2 px-6 py-3 bg-violet-600 hover:bg-violet-500 rounded-lg font-medium text-white transition-colors">
-                    <Upload className="w-4 h-4 inline-block mr-2" />
-                    Choose File
+                  <div className="mt-2 px-5 py-2 bg-sz-accent hover:bg-sz-accent-hover rounded-sz font-medium text-sz-bg text-sm transition-colors flex items-center gap-2">
+                    <Upload className="w-4 h-4" />
+                    Select File
                   </div>
                 </div>
               )}
             </button>
 
+            {/* Error */}
+            {error && (
+              <div className="mt-4 bg-sz-danger-muted border border-sz-danger/30 rounded-sz p-3">
+                <p className="text-sm text-sz-danger">{error}</p>
+              </div>
+            )}
+
             {/* Recent Projects */}
             {recentProjects.length > 0 && (
-              <div className="mt-8">
-                <h2 className="text-sm font-semibold text-zinc-400 uppercase tracking-wider mb-3 flex items-center gap-2">
-                  <Clock className="w-4 h-4" />
-                  Recent Projects
-                </h2>
-                <div className="space-y-2">
+              <div className="mt-10">
+                <div className="flex items-center gap-2 mb-3">
+                  <Clock className="w-4 h-4 text-sz-text-muted" />
+                  <span className="text-xs font-medium text-sz-text-muted uppercase tracking-wider">
+                    Recent Projects
+                  </span>
+                </div>
+                <div className="space-y-1.5">
                   {recentProjects.slice(0, 5).map((recent) => (
-                    <div
+                    <RecentProjectItem
                       key={recent.filePath}
-                      className="flex items-center gap-3 p-3 rounded-lg bg-zinc-900 hover:bg-zinc-800 transition-colors group"
-                    >
-                      <div className="w-10 h-10 rounded-lg bg-zinc-800 flex items-center justify-center flex-shrink-0">
-                        <FileVideo className="w-5 h-5 text-zinc-500" />
-                      </div>
-                      <button
-                        onClick={() => handleOpenRecent(recent.filePath)}
-                        className="flex-1 text-left min-w-0"
-                      >
-                        <p className="text-sm font-medium text-zinc-200 truncate">
-                          {recent.fileName}
-                        </p>
-                        <p className="text-xs text-zinc-500">
-                          {formatDuration(recent.duration)} • {new Date(recent.lastOpened).toLocaleDateString()}
-                        </p>
-                      </button>
-                      <button
-                        onClick={() => removeRecentProject(recent.filePath)}
-                        className="p-2 opacity-0 group-hover:opacity-100 hover:bg-zinc-700 rounded transition-all"
-                      >
-                        <Trash2 className="w-4 h-4 text-zinc-500" />
-                      </button>
-                    </div>
+                      recent={recent}
+                      onOpen={handleOpenRecent}
+                      onRemove={removeRecentProject}
+                    />
                   ))}
                 </div>
               </div>
             )}
+
+            {/* Features */}
+            <div className="mt-16 grid grid-cols-3 gap-6 text-center">
+              <FeatureCard
+                icon={<Target className="w-5 h-5" />}
+                title="Find Clips"
+                description="AI detection"
+              />
+              <FeatureCard
+                icon={<Scissors className="w-5 h-5" />}
+                title="Auto Edit"
+                description="Remove dead space"
+              />
+              <FeatureCard
+                icon={<Package className="w-5 h-5" />}
+                title="Export"
+                description="Ready-to-post clips"
+              />
+            </div>
           </>
         ) : (
-          /* Selected File Display */
-          <div className="border border-zinc-800 rounded-2xl p-6 bg-zinc-900/50">
-            <div className="flex items-start gap-4">
-              <div className="w-14 h-14 rounded-xl bg-violet-500/10 flex items-center justify-center flex-shrink-0">
-                <FileVideo className="w-7 h-7 text-violet-400" />
+          /* Selected File Card */
+          <div className="animate-sz-fade-in">
+            {/* Logo */}
+            <div className="text-center mb-8">
+              <div className="flex items-center justify-center gap-0 mb-4">
+                <span className="text-lg font-bold text-sz-text tracking-wide">SEE</span>
+                <span className="mx-1.5 px-2 py-0.5 bg-sz-accent rounded text-xs font-bold text-white tracking-wide">
+                  STUDIO
+                </span>
+                <span className="text-lg font-bold text-sz-text tracking-wide">ZEE</span>
               </div>
-              <div className="flex-1 min-w-0">
-                <h3 className="font-semibold text-zinc-100 truncate">{project.fileName}</h3>
-                <div className="flex items-center gap-4 mt-1 text-sm text-zinc-400">
-                  {project.size > 0 && <span>{formatFileSize(project.size)}</span>}
-                  <span>•</span>
-                  <span>{formatDuration(project.duration)}</span>
+              <h2 className="text-xl font-semibold text-sz-text">Ready to Analyze</h2>
+            </div>
+
+            {/* File Card */}
+            <div className="bg-sz-bg-secondary border border-sz-border rounded-sz-lg p-5">
+              <div className="flex items-start gap-4">
+                <div className="w-12 h-12 rounded-sz bg-sz-accent-muted flex items-center justify-center flex-shrink-0">
+                  <FileVideo className="w-6 h-6 text-sz-accent" />
                 </div>
+                <div className="flex-1 min-w-0">
+                  <h3 className="font-medium text-sz-text truncate">{project.fileName}</h3>
+                  <div className="flex items-center gap-3 mt-1 text-sm text-sz-text-secondary">
+                    {project.size > 0 && <span>{formatFileSize(project.size)}</span>}
+                    {project.size > 0 && <span className="text-sz-border-light">•</span>}
+                    <span>{formatDuration(project.duration)}</span>
+                  </div>
+                </div>
+                <Button variant="ghost" size="sm" onClick={handleClear}>
+                  Change
+                </Button>
               </div>
-              <button
-                onClick={handleClear}
-                className="text-zinc-500 hover:text-zinc-300 text-sm px-3 py-1 hover:bg-zinc-800 rounded"
+
+              {/* Analyze Button */}
+              <Button
+                variant="primary"
+                size="lg"
+                fullWidth
+                onClick={handleAnalyze}
+                rightIcon={<ArrowRight className="w-4 h-4" />}
+                className="mt-6"
               >
-                Change
-              </button>
+                <Sparkles className="w-4 h-4" />
+                Start Analysis
+              </Button>
             </div>
 
-            {/* Analyze button */}
-            <button
-              onClick={handleAnalyze}
-              className="w-full mt-6 py-4 bg-violet-600 hover:bg-violet-500 rounded-xl font-semibold text-white text-lg transition-colors flex items-center justify-center gap-2"
-            >
-              <Sparkles className="w-5 h-5" />
-              Start Analysis
-            </button>
+            {/* Quick tip */}
+            <p className="text-center text-xs text-sz-text-muted mt-6">
+              Tip: You can adjust detection settings on the next screen
+            </p>
           </div>
         )}
-
-        {/* Error display */}
-        {error && (
-          <div className="mt-4 p-4 bg-red-500/10 border border-red-500/20 rounded-xl flex items-start gap-3">
-            <AlertCircle className="w-5 h-5 text-red-400 flex-shrink-0 mt-0.5" />
-            <div>
-              <p className="text-red-400 font-medium">Error</p>
-              <p className="text-red-300/80 text-sm mt-1">{error}</p>
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* Feature highlights */}
-      <div className="mt-16 grid grid-cols-3 gap-8 text-center max-w-2xl">
-        <div>
-          <div className="text-3xl mb-2">🎯</div>
-          <h3 className="font-semibold text-zinc-200">Smart Detection</h3>
-          <p className="text-sm text-zinc-500">3 viral patterns + AI</p>
-        </div>
-        <div>
-          <div className="text-3xl mb-2">✂️</div>
-          <h3 className="font-semibold text-zinc-200">Auto Edit</h3>
-          <p className="text-sm text-zinc-500">Remove dead space</p>
-        </div>
-        <div>
-          <div className="text-3xl mb-2">📦</div>
-          <h3 className="font-semibold text-zinc-200">Clean Export</h3>
-          <p className="text-sm text-zinc-500">Ready to post clips</p>
-        </div>
       </div>
     </div>
   );
 }
+
+// Feature card component
+interface FeatureCardProps {
+  icon: React.ReactNode;
+  title: string;
+  description: string;
+}
+
+const FeatureCard = memo(function FeatureCard({ icon, title, description }: FeatureCardProps) {
+  return (
+    <div className="group">
+      <div className="w-10 h-10 mx-auto rounded-sz bg-sz-bg-tertiary border border-sz-border flex items-center justify-center mb-3 text-sz-text-muted group-hover:border-sz-accent/30 group-hover:text-sz-accent transition-all duration-200">
+        {icon}
+      </div>
+      <h3 className="text-sm font-medium text-sz-text mb-0.5">{title}</h3>
+      <p className="text-xs text-sz-text-muted">{description}</p>
+    </div>
+  );
+});
+
+// Memoized recent project item
+interface RecentProjectItemProps {
+  recent: {
+    filePath: string;
+    fileName: string;
+    duration: number;
+    lastOpened: number;
+  };
+  onOpen: (filePath: string) => void;
+  onRemove: (filePath: string) => void;
+}
+
+const RecentProjectItem = memo(function RecentProjectItem({
+  recent,
+  onOpen,
+  onRemove,
+}: RecentProjectItemProps) {
+  return (
+    <div className="flex items-center gap-3 p-2.5 rounded-sz bg-sz-bg-secondary hover:bg-sz-bg-tertiary transition-colors group border border-transparent hover:border-sz-border">
+      <div className="w-9 h-9 rounded-sz bg-sz-bg-tertiary group-hover:bg-sz-bg-hover flex items-center justify-center flex-shrink-0 transition-colors">
+        <FileVideo className="w-4 h-4 text-sz-text-muted group-hover:text-sz-accent transition-colors" />
+      </div>
+      <button
+        onClick={() => onOpen(recent.filePath)}
+        className="flex-1 text-left min-w-0"
+      >
+        <p className="text-sm text-sz-text truncate">
+          {recent.fileName}
+        </p>
+        <p className="text-xs text-sz-text-muted">
+          {formatDuration(recent.duration)} • {new Date(recent.lastOpened).toLocaleDateString()}
+        </p>
+      </button>
+      <button
+        onClick={() => onRemove(recent.filePath)}
+        className="p-1.5 opacity-0 group-hover:opacity-100 hover:bg-sz-bg-hover rounded-sz transition-all"
+      >
+        <Trash2 className="w-3.5 h-3.5 text-sz-text-muted hover:text-sz-danger" />
+      </button>
+    </div>
+  );
+});
+
+export default memo(Home);

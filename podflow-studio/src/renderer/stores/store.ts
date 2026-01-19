@@ -20,6 +20,8 @@ interface RecentProject {
 interface AppState {
   // Current project
   project: Project | null;
+  currentJobId: string | null;
+  lastJobId: string | null;
   
   // Detection state
   isDetecting: boolean;
@@ -46,6 +48,8 @@ interface AppState {
   // Actions
   setProject: (project: Project | null) => void;
   clearProject: () => void;
+  setCurrentJobId: (jobId: string | null) => void;
+  setLastJobId: (jobId: string | null) => void;
   
   setDetecting: (isDetecting: boolean) => void;
   setDetectionProgress: (progress: DetectionProgress | null) => void;
@@ -93,6 +97,8 @@ export const useStore = create<AppState>()(
     (set, get) => ({
       // Initial state
       project: null,
+      currentJobId: null,
+      lastJobId: null,
       isDetecting: false,
       detectionProgress: null,
       detectionError: null,
@@ -121,6 +127,8 @@ export const useStore = create<AppState>()(
       
       clearProject: () => set({
         project: null,
+        currentJobId: null,
+        lastJobId: null,
         clips: [],
         deadSpaces: [],
         transcript: null,
@@ -130,6 +138,9 @@ export const useStore = create<AppState>()(
 
       // Detection actions
       setDetecting: (isDetecting) => set({ isDetecting }),
+
+      setCurrentJobId: (currentJobId) => set({ currentJobId }),
+      setLastJobId: (lastJobId) => set({ lastJobId }),
       
       setDetectionProgress: (detectionProgress) => set({ 
         detectionProgress,
@@ -208,6 +219,8 @@ export const useStore = create<AppState>()(
       // Reset
       reset: () => set({
         project: null,
+        currentJobId: null,
+        lastJobId: null,
         isDetecting: false,
         detectionProgress: null,
         detectionError: null,

@@ -1,14 +1,16 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo, useCallback, memo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Play, AlertCircle, Check, X, Filter, ArrowRight } from 'lucide-react';
+import { Play, Check, X, Filter, ArrowRight, Sparkles, Search } from 'lucide-react';
 import { useStore } from '../stores/store';
-import SettingsPanel from '../components/SettingsPanel';
-import ProgressBar from '../components/ProgressBar';
-import ClipCard from '../components/ClipCard';
+import { PageHeader } from '../components/layout';
+import { Button, EmptyState, ErrorState, ProgressLoader, Badge } from '../components/ui';
+import { SettingsPanel } from '../components/settings';
+import { ClipCard } from '../components/clip';
+import { estimateAiCost, formatCost } from '../types';
 
 type FilterStatus = 'all' | 'pending' | 'accepted' | 'rejected';
 
-export default function ClipFinder() {
+function ClipFinder() {
   const navigate = useNavigate();
   const {
     project,
@@ -19,6 +21,8 @@ export default function ClipFinder() {
     settings,
     setDetecting,
     setDetectionError,
+    setCurrentJobId,
+    currentJobId,
   } = useStore();
 
   const [filterStatus, setFilterStatus] = useState<FilterStatus>('all');
@@ -31,18 +35,33 @@ export default function ClipFinder() {
     }
   }, [project, navigate]);
 
-  const handleStartDetection = async () => {
+  const handleStartDetection = useCallback(async () => {
     if (!project) return;
 
     setDetecting(true);
     setDetectionError(null);
     setHasStartedDetection(true);
 
+    if (settings.useAiEnhancement && project.duration > 0) {
+      const estimate = estimateAiCost(project.duration, settings.targetCount);
+      const confirmed = window.confirm(
+        `Estimated AI cost: ${formatCost(estimate.total)} (Whisper ${formatCost(estimate.whisperCost)} + GPT ${formatCost(estimate.gptCost)}). Continue?`
+      );
+      if (!confirmed) {
+        setDetecting(false);
+        return;
+      }
+    }
+
+    const jobId = `job_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    setCurrentJobId(jobId);
+
     try {
       const result = await window.api.startDetection(
-        `project_${Date.now()}`,
+        jobId,
         project.filePath,
-        settings
+        settings,
+        project.duration
       );
 
       if (!result.success) {
@@ -52,134 +71,129 @@ export default function ClipFinder() {
       setDetectionError(String(err));
       setDetecting(false);
     }
-  };
+  }, [project, settings, setDetecting, setDetectionError, setCurrentJobId]);
 
-  const handleCancelDetection = async () => {
-    await window.api.cancelDetection(`project_${Date.now()}`);
+  const handleCancelDetection = useCallback(async () => {
+    if (!currentJobId) return;
+    await window.api.cancelDetection(currentJobId);
     setDetecting(false);
-  };
+  }, [currentJobId, setDetecting]);
 
-  // Filter clips
-  const filteredClips = clips.filter((clip) => {
-    if (filterStatus === 'all') return true;
-    return clip.status === filterStatus;
-  });
+  // Memoized filter calculations
+  const { filteredClips, acceptedCount, rejectedCount, pendingCount } = useMemo(() => {
+    const accepted = clips.filter((c) => c.status === 'accepted').length;
+    const rejected = clips.filter((c) => c.status === 'rejected').length;
+    const pending = clips.filter((c) => c.status === 'pending').length;
 
-  const acceptedCount = clips.filter((c) => c.status === 'accepted').length;
-  const rejectedCount = clips.filter((c) => c.status === 'rejected').length;
-  const pendingCount = clips.filter((c) => c.status === 'pending').length;
+    const filtered = clips.filter((clip) => {
+      if (filterStatus === 'all') return true;
+      return clip.status === filterStatus;
+    });
+
+    return {
+      filteredClips: filtered,
+      acceptedCount: accepted,
+      rejectedCount: rejected,
+      pendingCount: pending,
+    };
+  }, [clips, filterStatus]);
 
   if (!project) return null;
 
-  // Show initial state (no detection started yet)
   const showInitialState = !hasStartedDetection && clips.length === 0 && !isDetecting;
 
   return (
-    <div className="min-h-full">
-      {/* Header */}
-      <header className="sticky top-0 z-10 bg-zinc-950/95 backdrop-blur border-b border-zinc-800">
-        <div className="px-6 py-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <h1 className="text-xl font-bold text-zinc-100">Clip Finder</h1>
-              <p className="text-sm text-zinc-500">{project.fileName}</p>
-            </div>
-
-            {/* Action buttons */}
-            <div className="flex items-center gap-3">
-              {clips.length > 0 && !isDetecting && (
-                <>
-                  <button
-                    onClick={handleStartDetection}
-                    className="px-4 py-2 text-sm text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 rounded-lg transition-colors"
-                  >
-                    Re-analyze
-                  </button>
-                  <button
-                    onClick={() => navigate('/edit')}
-                    className="flex items-center gap-2 px-4 py-2 bg-violet-600 hover:bg-violet-500 text-white rounded-lg font-medium transition-colors"
-                  >
-                    Continue to Edit
-                    <ArrowRight className="w-4 h-4" />
-                  </button>
-                </>
-              )}
-            </div>
+    <div className="min-h-full bg-sz-bg flex flex-col">
+      <PageHeader
+        title="Find Clips"
+        subtitle={project.fileName}
+        icon={<Search className="w-4 h-4" />}
+        actions={
+          clips.length > 0 && !isDetecting ? (
+            <>
+              <Button variant="ghost" size="sm" onClick={handleStartDetection}>
+                Re-analyze
+              </Button>
+              <Button
+                variant="primary"
+                size="sm"
+                rightIcon={<ArrowRight className="w-4 h-4" />}
+                onClick={() => navigate('/edit')}
+              >
+                Continue to Edit
+              </Button>
+            </>
+          ) : null
+        }
+      >
+        {/* Filter tabs */}
+        {clips.length > 0 && (
+          <div className="flex items-center gap-1 mt-4">
+            <FilterTab
+              active={filterStatus === 'all'}
+              onClick={() => setFilterStatus('all')}
+              label="All"
+              count={clips.length}
+            />
+            <FilterTab
+              active={filterStatus === 'accepted'}
+              onClick={() => setFilterStatus('accepted')}
+              label="Accepted"
+              count={acceptedCount}
+              variant="success"
+            />
+            <FilterTab
+              active={filterStatus === 'rejected'}
+              onClick={() => setFilterStatus('rejected')}
+              label="Rejected"
+              count={rejectedCount}
+              variant="danger"
+            />
+            <FilterTab
+              active={filterStatus === 'pending'}
+              onClick={() => setFilterStatus('pending')}
+              label="Pending"
+              count={pendingCount}
+            />
           </div>
+        )}
+      </PageHeader>
 
-          {/* Stats bar */}
-          {clips.length > 0 && (
-            <div className="flex items-center gap-6 mt-4">
-              <button
-                onClick={() => setFilterStatus('all')}
-                className={`flex items-center gap-2 text-sm ${
-                  filterStatus === 'all' ? 'text-violet-400' : 'text-zinc-400 hover:text-zinc-300'
-                }`}
-              >
-                <Filter className="w-4 h-4" />
-                All ({clips.length})
-              </button>
-              <button
-                onClick={() => setFilterStatus('accepted')}
-                className={`flex items-center gap-2 text-sm ${
-                  filterStatus === 'accepted' ? 'text-emerald-400' : 'text-zinc-400 hover:text-zinc-300'
-                }`}
-              >
-                <Check className="w-4 h-4" />
-                Accepted ({acceptedCount})
-              </button>
-              <button
-                onClick={() => setFilterStatus('rejected')}
-                className={`flex items-center gap-2 text-sm ${
-                  filterStatus === 'rejected' ? 'text-red-400' : 'text-zinc-400 hover:text-zinc-300'
-                }`}
-              >
-                <X className="w-4 h-4" />
-                Rejected ({rejectedCount})
-              </button>
-              <button
-                onClick={() => setFilterStatus('pending')}
-                className={`flex items-center gap-2 text-sm ${
-                  filterStatus === 'pending' ? 'text-zinc-200' : 'text-zinc-400 hover:text-zinc-300'
-                }`}
-              >
-                Pending ({pendingCount})
-              </button>
-            </div>
-          )}
-        </div>
-      </header>
-
-      {/* Main content */}
-      <div className="p-6">
-        {/* Initial state - show settings and start button */}
+      <div className="flex-1 p-6 overflow-auto">
+        {/* Initial state - Settings */}
         {showInitialState && (
-          <div className="max-w-xl mx-auto space-y-6">
+          <div className="max-w-lg mx-auto space-y-6 animate-sz-fade-in">
             <div className="text-center mb-8">
-              <h2 className="text-2xl font-bold text-zinc-100 mb-2">Find Viral Clips</h2>
-              <p className="text-zinc-400">
-                Configure detection settings and start the analysis
+              <div className="w-14 h-14 mx-auto rounded-sz-lg bg-sz-accent-muted border border-sz-accent/20 flex items-center justify-center mb-4">
+                <Sparkles className="w-7 h-7 text-sz-accent" />
+              </div>
+              <h2 className="text-xl font-semibold text-sz-text mb-2">Find Viral Clips</h2>
+              <p className="text-sm text-sz-text-secondary">
+                Configure settings and let AI find the best moments
               </p>
             </div>
 
             <SettingsPanel />
 
-            <button
+            <Button
+              variant="primary"
+              size="lg"
+              fullWidth
               onClick={handleStartDetection}
-              className="w-full py-4 bg-violet-600 hover:bg-violet-500 rounded-xl font-semibold text-white text-lg transition-colors flex items-center justify-center gap-2"
+              leftIcon={<Play className="w-5 h-5" />}
             >
-              <Play className="w-5 h-5" />
-              Find Clips
-            </button>
+              Start Analysis
+            </Button>
           </div>
         )}
 
         {/* Detection in progress */}
         {isDetecting && detectionProgress && (
-          <div className="max-w-xl mx-auto">
-            <ProgressBar
+          <div className="max-w-lg mx-auto animate-sz-fade-in">
+            <ProgressLoader
               percent={detectionProgress.percent}
               message={detectionProgress.message}
+              subMessage="This may take a few minutes for longer videos"
               onCancel={handleCancelDetection}
             />
           </div>
@@ -187,26 +201,18 @@ export default function ClipFinder() {
 
         {/* Error state */}
         {detectionError && !isDetecting && (
-          <div className="max-w-xl mx-auto mb-6">
-            <div className="p-4 bg-red-500/10 border border-red-500/20 rounded-xl flex items-start gap-3">
-              <AlertCircle className="w-5 h-5 text-red-400 flex-shrink-0 mt-0.5" />
-              <div>
-                <p className="text-red-400 font-medium">Detection Failed</p>
-                <p className="text-red-300/80 text-sm mt-1">{detectionError}</p>
-                <button
-                  onClick={handleStartDetection}
-                  className="mt-3 px-4 py-2 bg-red-500/20 hover:bg-red-500/30 text-red-400 rounded-lg text-sm transition-colors"
-                >
-                  Try Again
-                </button>
-              </div>
-            </div>
+          <div className="max-w-lg mx-auto mb-6 animate-sz-fade-in">
+            <ErrorState
+              title="Detection Failed"
+              message={detectionError}
+              onRetry={handleStartDetection}
+            />
           </div>
         )}
 
         {/* Clips grid */}
         {clips.length > 0 && !isDetecting && (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 animate-sz-fade-in">
             {filteredClips.map((clip) => (
               <ClipCard key={clip.id} clip={clip} videoPath={project.filePath} />
             ))}
@@ -215,33 +221,73 @@ export default function ClipFinder() {
 
         {/* Empty state after filtering */}
         {clips.length > 0 && filteredClips.length === 0 && (
-          <div className="text-center py-16">
-            <p className="text-zinc-400">No clips match the current filter</p>
-            <button
-              onClick={() => setFilterStatus('all')}
-              className="mt-2 text-violet-400 hover:text-violet-300"
-            >
-              Show all clips
-            </button>
-          </div>
+          <EmptyState
+            title="No clips match this filter"
+            action={{
+              label: 'Show all clips',
+              onClick: () => setFilterStatus('all'),
+              variant: 'secondary',
+            }}
+          />
         )}
 
         {/* No clips found state */}
         {hasStartedDetection && clips.length === 0 && !isDetecting && !detectionError && (
-          <div className="text-center py-16">
-            <p className="text-zinc-400 mb-2">No clips detected</p>
-            <p className="text-zinc-500 text-sm mb-4">
-              Try adjusting the settings and run detection again
-            </p>
-            <button
-              onClick={() => setHasStartedDetection(false)}
-              className="px-4 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-lg"
-            >
-              Adjust Settings
-            </button>
-          </div>
+          <EmptyState
+            title="No clips detected"
+            description="Try adjusting the settings and run detection again"
+            action={{
+              label: 'Adjust Settings',
+              onClick: () => setHasStartedDetection(false),
+              variant: 'secondary',
+            }}
+          />
         )}
       </div>
     </div>
   );
 }
+
+// Filter tab component
+interface FilterTabProps {
+  active: boolean;
+  onClick: () => void;
+  label: string;
+  count: number;
+  variant?: 'default' | 'success' | 'danger';
+}
+
+const FilterTab = memo(function FilterTab({
+  active,
+  onClick,
+  label,
+  count,
+  variant = 'default',
+}: FilterTabProps) {
+  const variantStyles = {
+    default: active ? 'text-sz-text bg-sz-bg-hover' : 'text-sz-text-secondary hover:text-sz-text',
+    success: active ? 'text-sz-success bg-sz-success-muted' : 'text-sz-text-secondary hover:text-sz-success',
+    danger: active ? 'text-sz-danger bg-sz-danger-muted' : 'text-sz-text-secondary hover:text-sz-danger',
+  };
+
+  return (
+    <button
+      onClick={onClick}
+      className={`
+        flex items-center gap-2 px-3 py-1.5 rounded-sz text-sm font-medium
+        transition-colors duration-sz-fast
+        ${variantStyles[variant]}
+      `}
+    >
+      {label}
+      <span className={`
+        text-xs px-1.5 py-0.5 rounded
+        ${active ? 'bg-sz-bg' : 'bg-sz-bg-hover'}
+      `}>
+        {count}
+      </span>
+    </button>
+  );
+});
+
+export default memo(ClipFinder);

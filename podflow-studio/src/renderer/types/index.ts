@@ -102,6 +102,12 @@ export interface DetectionProgress {
   message: string;
 }
 
+export interface AiCostEstimate {
+  whisperCost: number;
+  gptCost: number;
+  total: number;
+}
+
 // Utility functions
 export function formatDuration(seconds: number): string {
   const hours = Math.floor(seconds / 3600);
@@ -147,4 +153,16 @@ export function getScoreColor(score: number): string {
   if (score >= 70) return 'text-blue-400';
   if (score >= 60) return 'text-yellow-400';
   return 'text-zinc-400';
+}
+
+export function estimateAiCost(durationSeconds: number, targetCount: number): AiCostEstimate {
+  const minutes = durationSeconds / 60;
+  const whisperCost = minutes * 0.006;
+  const gptCost = targetCount * 0.002;
+  const total = whisperCost + gptCost;
+  return { whisperCost, gptCost, total };
+}
+
+export function formatCost(amount: number): string {
+  return `$${amount.toFixed(2)}`;
 }

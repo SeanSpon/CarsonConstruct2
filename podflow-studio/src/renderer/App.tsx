@@ -1,15 +1,9 @@
-import { HashRouter, Routes, Route } from 'react-router-dom';
 import { useEffect } from 'react';
-import Sidebar from './components/Sidebar';
-import StatusBar from './components/StatusBar';
-import Home from './pages/Home';
-import ClipFinder from './pages/ClipFinder';
-import AutoEdit from './pages/AutoEdit';
-import Export from './pages/Export';
+import { EditorView } from './components/editor';
 import { useStore } from './stores/store';
 import type { Clip, DeadSpace, Transcript } from './types';
 
-function AppContent() {
+function App() {
   const { 
     setDetectionProgress, 
     setDetectionError, 
@@ -17,12 +11,16 @@ function AppContent() {
     setExportProgress,
     setExporting,
     setLastExportDir,
+    currentJobId,
+    setCurrentJobId,
+    setLastJobId,
   } = useStore();
 
   // Set up IPC listeners
   useEffect(() => {
     // Detection progress
     const unsubProgress = window.api.onDetectionProgress((data) => {
+      if (currentJobId && data.projectId !== currentJobId) return;
       setDetectionProgress({
         percent: data.progress,
         message: data.message,
@@ -31,6 +29,7 @@ function AppContent() {
 
     // Detection complete
     const unsubComplete = window.api.onDetectionComplete((data) => {
+      if (currentJobId && data.projectId !== currentJobId) return;
       const clips = (data.clips as Clip[]).map((clip, index) => ({
         ...clip,
         id: clip.id || `clip_${index + 1}`,
@@ -46,11 +45,15 @@ function AppContent() {
       }));
 
       setResults(clips, deadSpaces, data.transcript as Transcript | null);
+      setCurrentJobId(null);
+      setLastJobId(data.projectId);
     });
 
     // Detection error
     const unsubError = window.api.onDetectionError((data) => {
+      if (currentJobId && data.projectId !== currentJobId) return;
       setDetectionError(data.error);
+      setCurrentJobId(null);
     });
 
     // Export progress
@@ -78,30 +81,19 @@ function AppContent() {
       unsubExportProgress();
       unsubExportComplete();
     };
-  }, [setDetectionProgress, setDetectionError, setResults, setExportProgress, setExporting, setLastExportDir]);
+  }, [
+    setDetectionProgress,
+    setDetectionError,
+    setResults,
+    setExportProgress,
+    setExporting,
+    setLastExportDir,
+    currentJobId,
+    setCurrentJobId,
+    setLastJobId,
+  ]);
 
-  return (
-    <div className="h-screen flex flex-col bg-zinc-950 text-zinc-100">
-      <div className="flex flex-1 overflow-hidden">
-        <Sidebar />
-        <main className="flex-1 overflow-auto">
-          <Routes>
-            <Route path="/" element={<Home />} />
-            <Route path="/clips" element={<ClipFinder />} />
-            <Route path="/edit" element={<AutoEdit />} />
-            <Route path="/export" element={<Export />} />
-          </Routes>
-        </main>
-      </div>
-      <StatusBar />
-    </div>
-  );
+  return <EditorView />;
 }
 
-export default function App() {
-  return (
-    <HashRouter>
-      <AppContent />
-    </HashRouter>
-  );
-}
+export default App;

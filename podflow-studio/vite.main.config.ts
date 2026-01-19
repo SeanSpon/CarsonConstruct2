@@ -4,7 +4,11 @@ import { defineConfig } from 'vite';
 export default defineConfig({
   build: {
     rollupOptions: {
-      external: ['electron'],
+      external: [
+        'electron',
+        'ffprobe-static',
+        '@ffprobe-installer/ffprobe',
+      ],
     },
   },
   resolve: {

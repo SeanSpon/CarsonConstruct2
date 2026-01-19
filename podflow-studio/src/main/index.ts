@@ -1,4 +1,4 @@
-import { app, BrowserWindow } from 'electron';
+import { app, BrowserWindow, protocol, net } from 'electron';
 import path from 'node:path';
 import { setMainWindow } from './window';
 
@@ -6,9 +6,23 @@ import { setMainWindow } from './window';
 import './ipc/fileHandlers';
 import './ipc/detectionHandlers';
 import './ipc/exportHandlers';
+import './ipc/reviewHandlers';
 
 declare const MAIN_WINDOW_VITE_DEV_SERVER_URL: string;
 declare const MAIN_WINDOW_VITE_NAME: string;
+
+// Register custom protocol for serving local video files
+protocol.registerSchemesAsPrivileged([
+  {
+    scheme: 'local-video',
+    privileges: {
+      secure: true,
+      supportFetchAPI: true,
+      stream: true,
+      bypassCSP: true,
+    },
+  },
+]);
 
 const createWindow = () => {
   console.log('Creating main window...');
@@ -24,6 +38,7 @@ const createWindow = () => {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false,
+      webSecurity: false, // Allow loading local file:// URLs for video preview
     },
   });
 
@@ -61,6 +76,15 @@ const createWindow = () => {
 
 app.on('ready', () => {
   console.log('App ready event fired');
+
+  // Register protocol handler for local video files
+  protocol.handle('local-video', (request) => {
+    // URL format: local-video://C:/path/to/file.mp4
+    const filePath = decodeURIComponent(request.url.replace('local-video://', ''));
+    console.log('[Protocol] Serving local video:', filePath);
+    return net.fetch(`file://${filePath}`);
+  });
+
   createWindow();
 });
 

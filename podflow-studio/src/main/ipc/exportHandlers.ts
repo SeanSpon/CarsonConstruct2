@@ -4,6 +4,18 @@ import path from 'path';
 import fs from 'fs';
 import { getMainWindow } from '../window';
 
+// Use bundled ffmpeg for reliability (no system dependency)
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+let ffmpegPath: string;
+try {
+  // ffmpeg-static provides the path to a bundled ffmpeg binary
+  ffmpegPath = require('ffmpeg-static') as string;
+} catch {
+  // Fallback to system ffmpeg if bundled version not available
+  ffmpegPath = 'ffmpeg';
+}
+console.log('[Export] Using FFmpeg at:', ffmpegPath);
+
 interface ExportClip {
   id: string;
   startTime: number;
@@ -158,7 +170,7 @@ function exportSingleClip(
 
     args.push(outputFile);
 
-    const ffmpeg = spawn('ffmpeg', args);
+    const ffmpeg = spawn(ffmpegPath, args, { windowsHide: true });
     let errorOutput = '';
 
     ffmpeg.stderr.on('data', (data) => {
@@ -202,7 +214,7 @@ function exportWithDeadSpacesRemoved(
 
     if (spacesToRemove.length === 0) {
       // No dead spaces to remove, just copy the file
-      const ffmpeg = spawn('ffmpeg', ['-y', '-i', sourceFile, '-c', 'copy', outputFile]);
+      const ffmpeg = spawn(ffmpegPath, ['-y', '-i', sourceFile, '-c', 'copy', outputFile], { windowsHide: true });
       
       ffmpeg.on('close', (code) => {
         if (code === 0) resolve();
@@ -262,7 +274,7 @@ function exportWithDeadSpacesRemoved(
 
     args.push(outputFile);
 
-    const ffmpeg = spawn('ffmpeg', args);
+    const ffmpeg = spawn(ffmpegPath, args, { windowsHide: true });
     let errorOutput = '';
 
     ffmpeg.stderr.on('data', (data) => {
@@ -284,9 +296,22 @@ function exportWithDeadSpacesRemoved(
 // Open folder in file explorer
 ipcMain.handle('open-folder', async (_event, folderPath: string) => {
   try {
-    await shell.openPath(folderPath);
+    // Check if it's a file or directory
+    const stat = fs.statSync(folderPath);
+    if (stat.isDirectory()) {
+      await shell.openPath(folderPath);
+    } else {
+      // If it's a file, show it in folder (highlights the file)
+      shell.showItemInFolder(folderPath);
+    }
     return { success: true };
   } catch (err) {
-    return { success: false, error: String(err) };
+    // Fallback to just opening the path
+    try {
+      await shell.openPath(folderPath);
+      return { success: true };
+    } catch (e) {
+      return { success: false, error: String(e) };
+    }
   }
 });

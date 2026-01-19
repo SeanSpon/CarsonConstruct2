@@ -23,12 +23,13 @@ This project consists of **two complementary Electron applications** for podcast
 - **Processing Time:** ~30-60 seconds for 1-hour podcast
 - **Cost:** $0 per video
 
-### 2. **PodFlow Studio** (AI-Enhanced, Comprehensive)
+### 2. **PodFlow Studio** (AI-Enhanced, Comprehensive) - **Active Development**
 - **Purpose:** Production-grade clip finder with AI semantic understanding
 - **Target Users:** Professional creators/agencies willing to pay for accuracy
 - **Key Features:** Payoff + Monologue + Laughter + Debate detectors, feature cache, VAD boundary snapping, speech gate, clipworthiness ensemble scoring, Whisper transcription + Translator/Thinker meaning cards + caching
 - **Processing Time:** ~2-5 minutes for 1-hour podcast
 - **Cost:** ~$0.50 per video (Whisper + GPT API calls)
+- **Brand:** SEE STUDIO ZEE - Clip Studios
 
 Both applications share the same core architecture with different feature sets.
 
@@ -42,10 +43,24 @@ Both applications share the same core architecture with different feature sets.
 ┌─────────────────────────────────────────────────────────────────┐
 │                        USER INTERFACE                            │
 │                     (Electron + React + TS)                      │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐          │
-│  │  File Select │  │  Processing  │  │    Review    │          │
-│  │     Page     │→ │     Page     │→ │     Page     │          │
-│  └──────────────┘  └──────────────┘  └──────────────┘          │
+│  ┌──────────────────────────────────────────────────────────┐   │
+│  │                    EditorView (Single Page)               │   │
+│  │  ┌────────────┐  ┌────────────┐  ┌────────────────────┐ │   │
+│  │  │   Header   │  │  Settings  │  │  Progress Overlay  │ │   │
+│  │  └────────────┘  │   Drawer   │  └────────────────────┘ │   │
+│  │  ┌─────────────────────────────────────────────────────┐│   │
+│  │  │           Drop Zone / Video Preview                  ││   │
+│  │  └─────────────────────────────────────────────────────┘│   │
+│  │  ┌─────────────────────────────────────────────────────┐│   │
+│  │  │   Quick Actions  │  Timeline with Clip Markers      ││   │
+│  │  └─────────────────────────────────────────────────────┘│   │
+│  │  ┌─────────────────────────────────────────────────────┐│   │
+│  │  │                    Clip Strip                        ││   │
+│  │  └─────────────────────────────────────────────────────┘│   │
+│  │  ┌─────────────────────────────────────────────────────┐│   │
+│  │  │                    Status Bar                        ││   │
+│  │  └─────────────────────────────────────────────────────┘│   │
+│  └──────────────────────────────────────────────────────────┘   │
 │                          ↕ IPC (contextBridge)                   │
 └─────────────────────────────────────────────────────────────────┘
                               ↓
@@ -54,8 +69,14 @@ Both applications share the same core architecture with different feature sets.
 │  ┌─────────────────┐  ┌──────────────┐  ┌──────────────┐       │
 │  │ File Handlers   │  │  Detection   │  │   Export     │       │
 │  │ - Video select  │  │  Handlers    │  │  Handlers    │       │
-│  │ - File info     │  │ - Spawn Py   │  │ - FFmpeg     │       │
+│  │ - File validate │  │ - Spawn Py   │  │ - FFmpeg     │       │
+│  │ - FFprobe       │  │ - Job queue  │  │ - Progress   │       │
 │  └─────────────────┘  └──────────────┘  └──────────────┘       │
+│  ┌─────────────────┐  ┌──────────────┐                         │
+│  │ Review Handlers │  │  Job Store   │                         │
+│  │ - Save/Load     │  │ - Persist    │                         │
+│  │ - Clip projects │  │ - Cache mgmt │                         │
+│  └─────────────────┘  └──────────────┘                         │
 │                          ↕ Child Process (spawn)                 │
 └─────────────────────────────────────────────────────────────────┘
                               ↓
@@ -105,63 +126,85 @@ Both applications share the same core architecture with different feature sets.
 
 ### Technology Stack
 - **Framework:** React 19.2.3 + TypeScript 4.5.4
-- **Routing:** React Router DOM 7.12.0 (HashRouter for Electron)
 - **State Management:** Zustand 5.0.10 (with persist middleware for settings)
-- **Styling:** Tailwind CSS 4.1.18 (Clipper) / 3.4.1 (PodFlow)
+- **Styling:** Tailwind CSS 3.4.1 with custom SeeZee design system (`sz-*` classes)
 - **Icons:** Lucide React 0.562.0
 - **Build Tool:** Vite 5.4.21
 
+### PodFlow Studio - Single Page Architecture (EditorView)
+
+The application uses a **single-page EditorView** design rather than page-based routing:
+
+```
+EditorView
+├── Header (logo, settings button)
+├── Main Content
+│   ├── DropZone (when no project loaded)
+│   │   ├── File upload button
+│   │   └── Recent projects list
+│   └── Editor (when project loaded)
+│       ├── VideoPreview (video player with controls)
+│       ├── QuickActions (Accept/Reject/Export buttons)
+│       ├── Timeline (seekable with clip markers)
+│       └── ClipStrip (scrollable clip thumbnails)
+├── StatusBar (project info, clip counts, action buttons)
+├── ProgressOverlay (during detection)
+└── SettingsDrawer (slide-in panel)
+```
+
+### Keyboard Shortcuts
+| Key | Action |
+|-----|--------|
+| `Space` | Play/pause video |
+| `←` / `→` | Seek 1 second |
+| `Shift+←` / `Shift+→` | Seek 5 seconds |
+| `A` | Accept selected clip |
+| `R` | Reject selected clip |
+| `E` | Export selected clip |
+| `Ctrl/Cmd+E` | Export all accepted clips |
+| `Tab` / `Shift+Tab` | Navigate between clips |
+
 ### State Architecture (Zustand Store)
 
-**Clipper Studio Store:**
+**PodFlow Studio Store:**
 ```typescript
 {
-  // File metadata
-  filePath: string | null
-  fileName: string | null
-  fileSize: number
-  fileDuration: number
+  // Current project
+  project: Project | null           // { filePath, fileName, duration, size }
+  currentJobId: string | null       // Active detection job ID
+  lastJobId: string | null          // Last completed job ID
   
   // Detection state
   isDetecting: boolean
-  detectionProgress: { step: string, progress: number, message: string } | null
+  detectionProgress: { percent: number, message: string } | null
   detectionError: string | null
   
   // Results
-  clips: DetectedClip[]  // All detected clips with scores
-  waveform: number[]     // Visualization data (1000 points)
+  clips: Clip[]                     // Detected clips with scores and status
+  deadSpaces: DeadSpace[]           // Silence regions for auto-edit
+  transcript: Transcript | null     // Whisper output with word timestamps
   
-  // Export state
-  isExporting: boolean
-  exportProgress: { current: number, total: number } | null
-}
-```
-
-**PodFlow Studio Store (Extended):**
-```typescript
-{
-  // + All Clipper fields
-  
-  // Additional results
-  deadSpaces: DeadSpace[]      // Silence regions for auto-edit
-  transcript: Transcript | null // Whisper output with word timestamps
-  
-  // Settings (persisted)
+  // Settings (persisted to localStorage)
   settings: {
-    targetCount: number          // Number of clips to find (default: 10)
-    minDuration: number          // Min clip length in seconds (default: 15)
-    maxDuration: number          // Max clip length in seconds (default: 90)
-    skipIntro: number            // Skip first N seconds (default: 90)
-    skipOutro: number            // Skip last N seconds (default: 60)
-    useAiEnhancement: boolean    // Enable Whisper + GPT (default: true)
+    targetCount: number             // Number of clips to find (default: 10)
+    minDuration: number             // Min clip length in seconds (default: 15)
+    maxDuration: number             // Max clip length in seconds (default: 90)
+    skipIntro: number               // Skip first N seconds (default: 90)
+    skipOutro: number               // Skip last N seconds (default: 60)
+    useAiEnhancement: boolean       // Enable Whisper + GPT (default: true)
   }
   
-  exportSettings: {
+  exportSettings: {                 // (persisted)
     format: 'mp4' | 'mov'
     mode: 'fast' | 'accurate'
     exportClips: boolean
     exportFullVideo: boolean
   }
+  
+  // Export state
+  isExporting: boolean
+  exportProgress: { current: number, total: number, clipName: string } | null
+  lastExportDir: string | null      // (persisted)
   
   // Recent projects (persisted)
   recentProjects: Array<{
@@ -173,48 +216,99 @@ Both applications share the same core architecture with different feature sets.
 }
 ```
 
-### UI Pages Flow
+### UI Component System
 
-#### Clipper Studio:
-1. **SelectFile** → Upload/select video → Extract metadata
-2. **Processing** → Real-time progress updates → Pattern detection
-3. **Review** → Clip cards with scores → Trim/filter/export
+**Design System:** Custom "SeeZee" theme with `sz-*` Tailwind classes:
+- `sz-bg`, `sz-bg-secondary`, `sz-bg-tertiary`, `sz-bg-hover`
+- `sz-text`, `sz-text-secondary`, `sz-text-muted`
+- `sz-accent`, `sz-accent-hover`, `sz-accent-muted`
+- `sz-border`, `sz-border-light`
+- `sz-success`, `sz-danger`, `sz-warning`
+- `rounded-sz`, `rounded-sz-lg`
+- `duration-sz-fast`
 
-#### PodFlow Studio:
-1. **Home** → Recent projects + New project + Settings
-2. **ClipFinder** → Detection + Results grid + Score breakdown
-3. **AutoEdit** → Dead space timeline + Toggle remove/keep
-4. **Export** → Format selection + Export progress
+**UI Primitives (`components/ui/`):**
+- `Button` - Primary/secondary/ghost/danger variants with loading states
+- `Card` - Container with header/content/footer sections
+- `Input`, `NumberInput` - Form inputs
+- `Toggle` - Switch component
+- `Badge` - Pattern/status/score badges
+- `LoadingState`, `ProgressLoader` - Loading indicators
+- `EmptyState`, `ErrorState`, `SuccessState`, `InfoState` - State displays
+- `IconButton` - Icon-only buttons
+- `Modal`, `SlideInPanel` - Overlay components
+
+**Layout Components (`components/layout/`):**
+- `PageLayout`, `CenteredPage`, `EditorLayout` - Page structures
+- `PageHeader`, `PanelHeader`, `PanelSection` - Header components
+
+**Editor Components (`components/editor/`):**
+- `EditorView` - Main application container
+- `Header` - Top bar with logo and settings
+- `DropZone` - File upload and recent projects
+- `VideoPreview` - Video player with controls
+- `Timeline` - Seekable timeline with clip markers
+- `ClipStrip` - Horizontal clip thumbnail strip
+- `QuickActions` - Accept/reject/export buttons
+- `ProgressOverlay` - Detection progress modal
+- `SettingsDrawer` - Slide-in settings panel
+- `StatusBar` - Bottom status bar
+
+### Legacy Code (Not Currently Used)
+
+The following files exist but are **not actively used** in the current EditorView architecture:
+- `pages/Home.tsx`, `pages/ClipFinder.tsx`, `pages/AutoEdit.tsx`, `pages/Export.tsx`, `pages/Review.tsx`
+- `components/Sidebar.tsx` (references React Router which is not used)
+
+These may be removed or repurposed in future updates.
 
 ### IPC Communication Pattern
 
 **Renderer → Main (invoke):**
 ```typescript
-// File selection
-window.api.selectVideoFile() → { path, name, size, duration }
+// File operations
+window.api.selectFile() → { path, name, size } | null
+window.api.validateFile(filePath) → { valid, duration?, format?, error? }
+window.api.selectOutputDir() → string | null
 
-// Start detection
-window.api.startDetection(filePath, settings) → { success, error? }
+// Detection (with job queue support)
+window.api.startDetection(projectId, filePath, settings, durationSeconds?) 
+  → { success, error?, queued? }
+window.api.cancelDetection(projectId) → { success, error? }
 
-// Export clips
-window.api.exportClips(clips, settings) → { success, outputDir, error? }
+// Export
+window.api.exportClips({ sourceFile, clips, deadSpaces, outputDir, settings })
+  → { success, outputDir?, error? }
+window.api.openFolder(path) → { success, error? }
+
+// Clip project persistence
+window.api.saveClipProject(jobId, clipId, payload) → { success, path?, error? }
+window.api.loadClipProject(jobId, clipId) → { success, payload?, error? }
 ```
 
 **Main → Renderer (send):**
 ```typescript
-// Progress updates (streaming)
-detection-progress → { progress: 0-100, message: string }
+// Progress updates (throttled: max 10/s, step changes pass immediately)
+detection-progress → { projectId, progress: 0-100, message: string }
 
 // Results
-detection-complete → { clips: Clip[], deadSpaces?: DeadSpace[], transcript?: Transcript }
+detection-complete → { projectId, clips: Clip[], deadSpaces: DeadSpace[], transcript: Transcript | null }
 
 // Errors
-detection-error → { error: string }
+detection-error → { projectId, error: string }
 
 // Export progress
-export-progress → { current: number, total: number, clipName: string }
-export-complete → { success: boolean, outputDir: string }
+export-progress → { current: number, total: number, clipName: string, type: 'clip' | 'full' }
+export-complete → { success: boolean, outputDir: string, clipCount?, errors? }
 ```
+
+### Job Queue System
+
+Detection jobs are queued when another job is already running:
+- `activeJobId` tracks the currently running job
+- `jobQueue` holds pending jobs
+- When a job completes, the next queued job starts automatically
+- Jobs can be cancelled (removed from queue or killed if active)
 
 ### 🔍 **RESEARCH QUESTIONS - Frontend Layer:**
 
@@ -256,77 +350,149 @@ export-complete → { success: boolean, outputDir: string }
 - **Build:** Electron Forge 7.11.1
 - **IPC:** contextBridge + ipcMain/ipcRenderer
 - **Child Process:** Node.js spawn for Python scripts
+- **FFmpeg:** ffmpeg-static (bundled), ffprobe via @ffprobe-installer/ffprobe
 
 ### IPC Handlers Architecture
 
 **1. File Handlers (`src/main/ipc/fileHandlers.ts`):**
 ```typescript
 // File selection with native dialog
-ipcMain.handle('select-video-file') → 
-  - electron.dialog.showOpenDialog()
-  - Validate file format (.mp4, .mov, .avi, .mkv)
-  - Extract metadata (FFprobe or file stats)
-  - Return { path, name, size, duration }
+ipcMain.handle('select-file') → 
+  - electron.dialog.showOpenDialog({ filters: ['mp4', 'mov', 'webm', 'mkv', 'avi'] })
+  - Return { path, name, size }
+
+// File validation with FFprobe
+ipcMain.handle('validate-file', filePath) →
+  - getFFprobePath() (multi-method detection)
+  - spawn ffprobe with -show_format -show_streams
+  - Return { valid, duration, format, error? }
 
 // Directory selection for exports
-ipcMain.handle('select-output-directory') →
-  - electron.dialog.showOpenDialog({ properties: ['openDirectory'] })
+ipcMain.handle('select-output-dir') →
+  - electron.dialog.showOpenDialog({ properties: ['openDirectory', 'createDirectory'] })
 ```
 
 **2. Detection Handlers (`src/main/ipc/detectionHandlers.ts`):**
 ```typescript
-// Spawn Python detector process
-ipcMain.handle('start-detection', (event, { projectId, filePath, settings }) →
-  1. Find Python script path (development vs production)
-  2. Serialize settings to JSON
-  3. spawn('python', [detectorScript, filePath, settingsJson])
-  4. Parse stdout for PROGRESS/RESULT/ERROR messages
-  5. Throttle progress IPC (max 10/s, step changes pass immediately)
-  6. Forward to renderer via webContents.send()
+// Spawn Python detector process with job queue
+ipcMain.handle('start-detection', (event, { projectId, filePath, settings, durationSeconds }) →
+  1. Check if another job is active → queue if so
+  2. Hash input file for cache key
+  3. Create job in JobStore with steps: detect, transcribe, ai_enrich
+  4. spawn('python', [detectorScript, filePath, settingsJson])
+  5. Parse stdout for PROGRESS/RESULT/ERROR messages
+  6. Throttle progress IPC (100ms min interval, 1% min delta, step changes pass)
+  7. Update JobStore step statuses based on progress messages
+  8. On complete: start next queued job
 
-// Kill running detection
+// Cancel detection (queued or active)
 ipcMain.handle('cancel-detection', (projectId) →
-  - process.kill('SIGTERM')
-  - Clean up activeProcesses Map
+  - Remove from queue if queued
+  - Kill process if active
+  - Update JobStore status to 'canceled'
 ```
 
 **3. Export Handlers (`src/main/ipc/exportHandlers.ts`):**
 ```typescript
 // Export individual clips or full video
-ipcMain.handle('export-clips', (clips, outputDir, settings) →
+ipcMain.handle('export-clips', ({ sourceFile, clips, deadSpaces, outputDir, settings }) →
   1. For each clip:
      - Calculate FFmpeg timecode with trim offsets
      - Fast mode: -c copy (stream copy, no re-encode)
      - Accurate mode: -c:v libx264 -c:a aac (re-encode)
+     - Fallback: retry with accurate mode if fast fails
+     - Write metadata sidecar JSON
   2. For full video with dead space removal:
      - Build complex filter_complex with concat
-  3. Progress tracking via FFmpeg stderr parsing
-  4. Export metadata JSON (titles, scores, timestamps)
+     - setpts/asetpts for timestamp reset
+  3. Progress tracking via export-progress events
+
+// Open folder in system file explorer
+ipcMain.handle('open-folder', folderPath) →
+  - shell.openPath() or shell.showItemInFolder()
+```
+
+**4. Review Handlers (`src/main/ipc/reviewHandlers.ts`):**
+```typescript
+// Persist clip project edits
+ipcMain.handle('save-clip-project', { jobId, clipId, payload }) →
+  - Save to userData/jobs/{jobId}/clips/{clipId}.json
+
+ipcMain.handle('load-clip-project', { jobId, clipId }) →
+  - Load from userData/jobs/{jobId}/clips/{clipId}.json
+```
+
+**5. Job Store (`src/main/jobs/jobStore.ts`):**
+```typescript
+// Persistent job tracking
+class JobStore {
+  create(job: Job)           // Create new job record
+  update(jobId, updates)     // Update job status/error
+  updateStep(jobId, stepName, updates)  // Update step status/message
+  get(jobId): Job | null     // Get job by ID
+  list(): Job[]              // List all jobs
+}
+
+interface Job {
+  id: string
+  inputPath: string
+  inputHash: string
+  status: 'queued' | 'running' | 'done' | 'failed' | 'canceled'
+  createdAt: number
+  updatedAt: number
+  steps: Array<{ name: string, status: string, message?: string, updatedAt: number }>
+  costEstimate?: { whisperCost, gptCost, total }
+  outputs?: { cacheDir, detectionsCache, transcriptCache, aiCache }
+  error?: string
+}
 ```
 
 ### Process Communication Flow
 
-**Clipper Studio:**
+**PodFlow Studio (EditorView Workflow):**
 ```
 Renderer → Main → Python → Main → Renderer
 
-1. User clicks "Detect Clips"
-2. Renderer: startDetection(filePath)
-3. Main: spawn('python', ['detector.py', filePath])
-4. Python: Writes JSON to stdout
-   - {"type": "progress", "progress": 30, "message": "Detecting payoffs..."}
-   - {"type": "complete", "clips": [...], "waveform": [...]}
-5. Main: Parses JSON, sends IPC to renderer
-6. Renderer: Updates Zustand store, re-renders UI
+1. User drops/selects video file
+2. Renderer: window.api.selectFile() + window.api.validateFile()
+3. Main: FFprobe extracts duration, validates video/audio streams
+4. Renderer: Updates store.project, shows video preview
+
+5. User clicks "Analyze" (in Timeline or StatusBar)
+6. Renderer: window.api.startDetection(jobId, filePath, settings, duration)
+7. Main: Creates job in JobStore, spawns Python
+8. Python: Writes to stdout:
+   - "PROGRESS:20:Extracting audio..."
+   - "PROGRESS:40:Detecting payoffs..."
+   - "PROGRESS:60:Running AI enhancement..."
+   - "RESULT:{clips:[...], deadSpaces:[...], transcript:{...}}"
+9. Main: Parses stdout, sends throttled IPC events
+10. Renderer: Updates store, displays clips in ClipStrip
+
+11. User reviews clips (accept/reject with A/R keys)
+12. User exports: window.api.selectOutputDir() + window.api.exportClips()
+13. Main: Spawns FFmpeg for each clip, sends progress events
+14. Renderer: Shows progress in UI, enables "Open Folder" on complete
 ```
 
-**PodFlow Studio (with AI):**
+**Detection Pipeline (Python):**
 ```
-Same as above, but Python script:
-1. Runs algorithm detectors (fast, ~60s)
-2. Calls OpenAI Whisper API (slow, ~90s for 1hr audio)
-3. Calls GPT-4o-mini for each clip (fast, ~10s total)
-4. Returns enhanced clips with AI metadata
+detector.py execution flow:
+1. Extract audio → FFmpeg to 22.05kHz mono WAV
+2. Load features → librosa (RMS, centroid, flatness, ZCR, onset)
+3. Build VAD segments → webrtcvad with fallback
+4. Run pattern detectors:
+   - Payoff (silence → spike)
+   - Monologue (sustained high energy)
+   - Laughter (burst clusters)
+   - Debate (rapid turn-taking)
+5. Apply clipworthiness scoring (hard gates + soft scores)
+6. Snap to VAD boundaries
+7. [Optional] AI Enhancement:
+   - Whisper transcription (~90s for 1hr)
+   - Translator: clip → MeaningCard
+   - Thinker: select top N with dedupe
+8. Output RESULT JSON
 ```
 
 ### 🔍 **RESEARCH QUESTIONS - Main Process Layer:**
@@ -368,7 +534,11 @@ Same as above, but Python script:
 ### Technology Stack
 - **Audio Analysis:** librosa 0.10.1 (STFT, RMS, spectral features)
 - **Numerical Computing:** numpy 1.26.3, scipy 1.12.0
-- **AI (PodFlow only):** openai 1.12.0 (Whisper + GPT-4o-mini)
+- **AI Providers (PodFlow only):**
+  - OpenAI: openai 1.12.0 (GPT-4o, GPT-4o-mini, Whisper)
+  - Google Gemini: google-generativeai 0.4.0 (1.5 Pro, 1.5 Flash)
+  - Anthropic: anthropic 0.18.0 (Claude 3.5 Sonnet, Opus, Haiku)
+  - Local: ollama 0.1.6 (Llama 3, Mistral, Phi, etc.)
 - **Audio I/O:** soundfile 0.12.1
 - **Video Processing:** FFmpeg (subprocess calls)
 - **VAD:** webrtcvad (speech segmentation, boundary snapping)
@@ -659,6 +829,53 @@ def run_ai_enhancement(candidates, transcript, settings):
 - **Thinker:** Selects the best N clips with dedupe, constraints, and optional AI reasoning
 - **Orchestrator:** Handles caching, fallbacks, and final score updates
 - **Fallbacks:** No API key or AI errors → deterministic heuristics + algorithmic ranking
+
+#### 3. **Multi-Provider AI Layer** (`ai/providers/`)
+
+The AI enhancement layer supports multiple providers through a unified abstraction:
+
+```python
+# Provider factory - switch providers without changing code
+from ai.providers import get_provider
+
+# OpenAI (GPT-4o, GPT-4o-mini, Whisper)
+provider = get_provider("openai", api_key="sk-...")
+
+# Google Gemini (1.5 Pro, 1.5 Flash - has free tier!)
+provider = get_provider("gemini", api_key="...")
+
+# Anthropic Claude (3.5 Sonnet, Opus, Haiku)
+provider = get_provider("anthropic", api_key="...")
+
+# Local (Ollama - Llama 3, Mistral, etc.) - FREE, OFFLINE, PRIVATE
+provider = get_provider("local")
+
+# Unified interface
+result = provider.complete(prompt="...", schema={"type": "object"})
+transcript = provider.transcribe("audio.wav")
+```
+
+**Architecture:**
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                     get_provider() Factory                       │
+└───────────────────────────┬─────────────────────────────────────┘
+                            │
+    ┌───────────────────────┼───────────────────────────────┐
+    │           │           │           │           │       │
+    ▼           ▼           ▼           ▼           ▼       ▼
+ OpenAI     Gemini    Anthropic     Local      Custom   Future
+Provider   Provider   Provider   Provider   Provider  Providers
+```
+
+**Benefits:**
+- **Flexibility:** A/B test different models
+- **Cost Control:** Switch to cheaper providers or local models
+- **Privacy:** Run completely offline with Ollama
+- **Redundancy:** Fall back to other providers if one fails
+- **Future-Proof:** Easy to add new providers (Mistral, Cohere, etc.)
+
+**Documentation:** See `docs/AI_PROVIDERS.md` for full usage guide.
 
 ### Evaluation Harness (Precision@K)
 
@@ -1553,6 +1770,20 @@ ffmpeg -i input.mp4 -i logo.png -filter_complex "overlay=W-w-10:10" output.mp4
 
 ---
 
-*Last Updated: 2026-01-18*  
-*Version: 1.0*  
+*Last Updated: 2026-01-19*  
+*Version: 1.1*  
 *Authors: Architecture documentation generated for Carson Construct 2 project*
+
+---
+
+## 📝 Changelog
+
+### v1.1 (2026-01-19)
+- **Major Architecture Change:** PodFlow Studio migrated from page-based routing to single-page EditorView
+- Updated UI component system documentation with SeeZee design system
+- Added keyboard shortcuts documentation
+- Added Job Store and job queue system documentation
+- Added Review Handlers for clip project persistence
+- Documented legacy code (unused pages and Sidebar)
+- Enhanced IPC documentation with new endpoints
+- Updated process communication flow diagrams

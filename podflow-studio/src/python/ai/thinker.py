@@ -1,3 +1,29 @@
+"""
+Clip Selector (Thinker) Module
+
+Selects the best set of clips from enriched candidates using AI.
+Implements deduplication, gap constraints, and preference balancing.
+
+Supports multiple backends: OpenAI, Gemini, Anthropic, and local models.
+
+The thinker takes enriched clips (with MeaningCard data) and selects
+the optimal subset based on:
+- Quality scores and multipliers
+- Content diversity (deduplication by summary similarity)
+- Temporal spacing (minimum gap between clips)
+- Duration constraints
+- Complete thought preference
+
+Usage:
+    from ai.thinker import select_best_set
+    
+    # With AI
+    decision = select_best_set(enriched_clips, context_pack, target_n=10, api_key="...")
+    
+    # Without AI (deterministic fallback)
+    decision = select_best_set(enriched_clips, context_pack, target_n=10)
+"""
+
 import json
 import re
 from dataclasses import asdict
@@ -10,6 +36,7 @@ DEFAULT_DEDUPE_THRESHOLD = 0.6
 
 
 def _extract_json(text: str) -> Optional[Dict[str, Any]]:
+    """Extract JSON from potentially markdown-wrapped response."""
     cleaned = text.strip()
     if cleaned.startswith("```"):
         parts = cleaned.split("```")
@@ -28,10 +55,12 @@ def _extract_json(text: str) -> Optional[Dict[str, Any]]:
 
 
 def _tokenize(text: str) -> List[str]:
+    """Tokenize text for similarity comparison."""
     return re.findall(r"[a-z0-9']+", text.lower())
 
 
 def _overlap_ratio(a: str, b: str) -> float:
+    """Calculate token overlap ratio between two texts."""
     a_tokens = set(_tokenize(a))
     b_tokens = set(_tokenize(b))
     if not a_tokens or not b_tokens:
@@ -41,6 +70,7 @@ def _overlap_ratio(a: str, b: str) -> float:
 
 
 def _score_clip(clip: Dict[str, Any], prefer_complete: bool) -> float:
+    """Score a clip for ranking, with optional complete thought bonus."""
     base = float(clip.get("finalScore", clip.get("algorithmScore", 0.0)))
     complete = clip.get("completeThought")
     if prefer_complete:
@@ -52,6 +82,7 @@ def _score_clip(clip: Dict[str, Any], prefer_complete: bool) -> float:
 
 
 def _duration_ok(clip: Dict[str, Any], constraints: Dict[str, Any]) -> bool:
+    """Check if clip meets duration constraints."""
     min_seconds = constraints.get("min_seconds")
     max_seconds = constraints.get("max_seconds")
     duration = float(clip.get("duration", 0.0))
@@ -63,6 +94,7 @@ def _duration_ok(clip: Dict[str, Any], constraints: Dict[str, Any]) -> bool:
 
 
 def _min_gap_ok(clip: Dict[str, Any], selected: List[Dict[str, Any]], min_gap: float) -> bool:
+    """Check if clip meets minimum gap constraint from selected clips."""
     if min_gap <= 0:
         return True
     start = float(clip.get("startTime", 0.0))
@@ -78,6 +110,12 @@ def _select_with_rules(
     dedupe_threshold: float,
     min_gap: float,
 ) -> Tuple[List[Dict[str, Any]], List[str]]:
+    """
+    Select clips applying deduplication and gap constraints.
+    
+    Returns:
+        Tuple of (selected_clips, notes)
+    """
     selected: List[Dict[str, Any]] = []
     summaries: List[str] = []
     notes: List[str] = []
@@ -110,26 +148,37 @@ def _fallback_selection(
     context_pack: Dict[str, Any],
     target_n: int,
 ) -> FinalDecision:
+    """
+    Deterministic clip selection without AI.
+    
+    Uses scoring, deduplication, and gap constraints to select clips.
+    Progressively relaxes constraints if not enough clips are found.
+    """
     constraints = context_pack.get("constraints", {})
     prefer_complete = bool(constraints.get("prefer_complete_thought", True))
     min_gap = float(constraints.get("min_gap_seconds", 30.0))
     dedupe_threshold = float(constraints.get("dedupe_threshold", DEFAULT_DEDUPE_THRESHOLD))
 
+    # Filter by duration first
     filtered = [clip for clip in enriched_clips if _duration_ok(clip, constraints)]
     notes = []
     if len(filtered) < target_n:
         filtered = list(enriched_clips)
         notes.append("duration_constraints_relaxed")
 
+    # Sort by score
     scored = sorted(filtered, key=lambda c: _score_clip(c, prefer_complete), reverse=True)
 
+    # Try strict selection
     selected, relax_notes = _select_with_rules(scored, target_n, dedupe_threshold, min_gap)
     notes.extend(relax_notes)
 
+    # Relax deduplication if needed
     if len(selected) < target_n:
         selected, relax_notes = _select_with_rules(scored, target_n, 1.0, min_gap)
         notes.extend(relax_notes)
 
+    # Relax gap constraint if needed
     if len(selected) < target_n:
         selected, relax_notes = _select_with_rules(scored, target_n, 1.0, 0.0)
         notes.extend(relax_notes)
@@ -159,6 +208,7 @@ def _build_prompt(
     context_pack: Dict[str, Any],
     target_n: int,
 ) -> str:
+    """Build the selection prompt for AI."""
     payload = []
     for clip in enriched_clips:
         payload.append(
@@ -189,32 +239,97 @@ def select_best_set(
     target_n: int,
     model: str = "gpt-4o-mini",
     api_key: Optional[str] = None,
+    provider: str = "openai",
 ) -> FinalDecision:
-    if api_key:
+    """
+    Select the best set of clips from enriched candidates.
+    
+    Args:
+        enriched_clips: Clips with MeaningCard data applied
+        context_pack: Platform/niche context and constraints
+        target_n: Number of clips to select
+        model: Model name to use (provider-specific)
+        api_key: API key for the provider
+        provider: Provider to use ("openai", "gemini", "anthropic", "local")
+        
+    Returns:
+        FinalDecision with selected_ids, ranking, and global_notes
+        
+    Note:
+        If AI fails or is unavailable, uses deterministic selection
+        that still produces good results based on scores and constraints.
+    """
+    if api_key or provider == "local":
         try:
-            from openai import OpenAI
-
+            # Use the provider abstraction
+            from .providers import get_provider, AIProviderError
+            
+            ai_provider = get_provider(provider, api_key=api_key)
+            
+            # Map legacy model names to provider-appropriate defaults
+            effective_model = model
+            if provider != "openai" and model.startswith("gpt-"):
+                effective_model = ai_provider.default_model
+            
+            # Pre-filter to top candidates to reduce prompt size
             top_candidates = sorted(
                 enriched_clips,
                 key=lambda c: float(c.get("finalScore", c.get("algorithmScore", 0.0))),
                 reverse=True,
             )[:15]
-
-            client = OpenAI(api_key=api_key)
+            
             prompt = _build_prompt(top_candidates, context_pack, target_n)
-            response = client.chat.completions.create(
-                model=model,
-                messages=[{"role": "user", "content": prompt}],
+            
+            result = ai_provider.complete(
+                prompt=prompt,
+                schema={"type": "object"},
+                model=effective_model,
                 temperature=0.1,
                 max_tokens=500,
             )
-            raw = response.choices[0].message.content or ""
-            parsed = _extract_json(raw)
+            
+            parsed = result.parsed_json
+            if parsed is None:
+                parsed = _extract_json(result.content)
+            
             if parsed is not None:
                 decision = validate_finaldecision(parsed)
                 if len(decision.selected_ids) == target_n:
                     return decision
-        except Exception:
+                    
+        except ImportError:
+            # Provider module not available, try legacy OpenAI
             pass
+        except Exception:
+            # Any error, fall back to deterministic
+            pass
+        
+        # Legacy OpenAI fallback for backward compatibility
+        if provider == "openai" and api_key:
+            try:
+                from openai import OpenAI
+
+                top_candidates = sorted(
+                    enriched_clips,
+                    key=lambda c: float(c.get("finalScore", c.get("algorithmScore", 0.0))),
+                    reverse=True,
+                )[:15]
+
+                client = OpenAI(api_key=api_key)
+                prompt = _build_prompt(top_candidates, context_pack, target_n)
+                response = client.chat.completions.create(
+                    model=model,
+                    messages=[{"role": "user", "content": prompt}],
+                    temperature=0.1,
+                    max_tokens=500,
+                )
+                raw = response.choices[0].message.content or ""
+                parsed = _extract_json(raw)
+                if parsed is not None:
+                    decision = validate_finaldecision(parsed)
+                    if len(decision.selected_ids) == target_n:
+                        return decision
+            except Exception:
+                pass
 
     return _fallback_selection(enriched_clips, context_pack, target_n)

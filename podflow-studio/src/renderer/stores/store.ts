@@ -248,8 +248,8 @@ const defaultSettings: DetectionSettings = {
   targetCount: 10,
   minDuration: 15,
   maxDuration: 90,
-  skipIntro: 90,
-  skipOutro: 60,
+  skipIntro: 30,  // Reduced from 90s for flexibility with shorter videos
+  skipOutro: 30,  // Reduced from 60s for flexibility with shorter videos
   useAiEnhancement: true,
 };
 

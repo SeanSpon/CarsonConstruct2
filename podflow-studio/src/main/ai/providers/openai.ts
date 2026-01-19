@@ -134,6 +134,13 @@ export class OpenAIProvider extends AIProvider {
     }
     
     try {
+      // Log request for debugging
+      console.log('[OpenAIProvider] Request:', {
+        model,
+        hasTools: !!(request.tools && request.tools.length > 0),
+        toolCount: request.tools?.length || 0,
+      });
+      
       const response = await fetch('https://api.openai.com/v1/chat/completions', {
         method: 'POST',
         headers: {
@@ -145,6 +152,7 @@ export class OpenAIProvider extends AIProvider {
       
       if (!response.ok) {
         const errorText = await response.text();
+        console.error('[OpenAIProvider] API Error:', response.status, errorText);
         
         if (response.status === 401) {
           throw new AuthenticationError('Invalid OpenAI API key', this.name);
@@ -159,6 +167,13 @@ export class OpenAIProvider extends AIProvider {
       const data = await response.json();
       const choice = data.choices?.[0];
       
+      // Log response for debugging
+      console.log('[OpenAIProvider] Response:', {
+        finish_reason: choice?.finish_reason,
+        hasToolCalls: !!(choice?.message?.tool_calls?.length),
+        toolCallCount: choice?.message?.tool_calls?.length || 0,
+      });
+      
       if (!choice) {
         throw new AIProviderError('No response from OpenAI', this.name);
       }
@@ -167,11 +182,14 @@ export class OpenAIProvider extends AIProvider {
       const toolCalls = choice.message?.tool_calls?.map((tc: {
         id: string;
         function: { name: string; arguments: string };
-      }) => ({
-        id: tc.id,
-        name: tc.function.name,
-        arguments: JSON.parse(tc.function.arguments || '{}'),
-      }));
+      }) => {
+        console.log('[OpenAIProvider] Parsing tool call:', tc.function.name);
+        return {
+          id: tc.id,
+          name: tc.function.name,
+          arguments: JSON.parse(tc.function.arguments || '{}'),
+        };
+      });
       
       return {
         success: true,

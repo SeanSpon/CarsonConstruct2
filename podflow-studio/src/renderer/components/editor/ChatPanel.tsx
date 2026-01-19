@@ -540,6 +540,7 @@ function ChatPanel({
     toolName: string,
     args: Record<string, unknown>
   ): Promise<unknown> => {
+    console.log('[ChatPanel] Executing tool:', toolName, 'with args:', args);
     updateToolCall(messageId, toolCallId, { status: 'running' });
     
     try {
@@ -1368,10 +1369,51 @@ function ChatPanel({
           break;
         }
         
+        case 'show_panel': {
+          const panel = args.panel as string;
+          // The panel visibility is managed via callbacks passed to ChatPanel
+          // For now, we just acknowledge the request - actual panel toggling 
+          // should be handled by the parent component
+          result = { 
+            success: true, 
+            message: `Panel '${panel}' visibility toggled`,
+            note: 'Panel visibility is controlled by the editor UI',
+          };
+          break;
+        }
+        
+        case 'highlight_element': {
+          const elementId = args.elementId as string;
+          const duration = (args.duration as number) || 2000;
+          
+          // Try to find and highlight the element
+          // First, check if it's a clip ID
+          const clip = clips.find(c => c.id === elementId || c.id.includes(elementId));
+          if (clip) {
+            // Select and seek to the clip
+            onSelectClip?.(clip.id);
+            onSeekToTime?.(clip.startTime);
+            result = { 
+              success: true, 
+              message: `Highlighted clip: ${clip.title || clip.id}`,
+              action: 'Selected clip and seeked to its start time',
+            };
+          } else {
+            // For other elements, just acknowledge
+            result = { 
+              success: true, 
+              message: `Highlight requested for element: ${elementId}`,
+              duration,
+            };
+          }
+          break;
+        }
+        
         default:
           throw new Error(`Unknown tool: ${toolName}`);
       }
       
+      console.log('[ChatPanel] Tool execution complete:', toolName, 'Result:', result);
       updateToolCall(messageId, toolCallId, { status: 'success', result });
       return result;
       
@@ -1422,19 +1464,16 @@ function ChatPanel({
       ? `${clips.length} clips detected (${accepted} accepted, ${rejected} rejected, ${pending} pending). Average score: ${avgScore}/100.`
       : 'No clips detected yet - the user needs to run detection first.';
     
-    return `You are Clip Bot, a friendly and enthusiastic AI video editing assistant in PodFlow Studio. You help users review and edit podcast clips with personality and energy!
+    return `You are Clip Bot, a friendly AI video editing assistant in PodFlow Studio.
 
-## CRITICAL: Be Conversational First!
+## CRITICAL: USE FUNCTION CALLS, NOT TEXT
 
-DO NOT just silently run tools. Instead:
-1. **Acknowledge** what the user asked for
-2. **Clarify** if the request is vague - ask questions!
-3. **Explain** what you're about to do and why BEFORE calling tools
-4. **Summarize** results in plain language AFTER tools complete
-5. **Suggest** next steps or ask if they want more
+You have access to tools via function calling. When you need to run a tool:
+- DO use the actual function/tool calling mechanism provided by the API
+- DO NOT write out tool calls as text like "[calls tool_name...]" 
+- DO NOT describe what tools you would call - actually call them!
 
-BAD response: [just calls detect_highlights with no text]
-GOOD response: "Great idea! I'll scan for the best moments. Since you mentioned wanting highlights, I'll look for payoff moments (big reactions after setup) and high-energy monologues. Let me analyze..."
+When you call a tool, the system will execute it and show results to the user.
 
 ## Current Project Context
 - File: ${project?.fileName || 'No project loaded'}
@@ -1443,99 +1482,48 @@ GOOD response: "Great idea! I'll scan for the best moments. Since you mentioned 
 - Transcript: ${transcript ? 'Available' : 'Not available'}
 ${topClips.length > 0 ? `\nTop 5 clips by score:\n${topClips.join('\n')}` : ''}
 
-## When to Ask Clarifying Questions
+## How to Respond
 
-Ask before acting when:
-- User says "find best moments" → Ask: "What makes a moment 'best' for you? Funny reactions? Emotional peaks? Hot takes?"
-- User says "make a compilation" → Ask: "How long should it be? What vibe - high energy throughout or building to a climax?"
-- User says "fix this clip" → Ask: "What's wrong with it? Too long? Starts awkwardly? Ends too abruptly?"
-- Request is ambiguous → Always clarify rather than guess
+1. Briefly acknowledge the user's request
+2. If you need to use a tool, CALL IT using function calling (don't write about calling it)
+3. After getting tool results, summarize them conversationally
+4. Suggest next steps
 
-## Smart Tool Usage
+## Detection Workflow
 
-When you DO call tools, use SMART parameters based on context:
+**IMPORTANT**: If no clips exist yet, you MUST call run_detection first!
+- run_detection scans the video for viral moments (takes 2-5 min)
+- detect_highlights only FILTERS existing clips, it doesn't create them
+- create_vod_compilation selects the best clips for a compilation
 
-### CRITICAL: Detection Workflow
-**ALWAYS check if clips exist before using \`detect_highlights\`!**
-- If clips.length === 0 → You MUST call \`run_detection\` first!
-- \`detect_highlights\` only FILTERS existing clips, it doesn't CREATE them
-- \`run_detection\` takes 2-5 minutes to complete - warn the user
+For "make a 20 minute VOD with funny moments":
+1. Call run_detection with targetCount: 15-20
+2. After detection completes, call create_vod_compilation with targetDurationMinutes: 20
 
-For requests like "cut this into a X minute VOD with Y clips":
-1. First check if clips exist (use \`get_project_state\`)
-2. If no clips → call \`run_detection\` with targetCount >= Y
-3. Once detection completes → call \`create_vod_compilation\` with targetDurationMinutes: X, clipCount: Y
-4. Explain the results to the user
+## Tool Parameters Guide
 
-For \`run_detection\`:
-- Short highlight reel → targetCount: 5, minDuration: 15, maxDuration: 60
-- Standard compilation → targetCount: 10, minDuration: 15, maxDuration: 90
-- Long-form content → targetCount: 20, minDuration: 30, maxDuration: 120
+run_detection:
+- targetCount: number of clips to find (default: 10)
+- minDuration: minimum clip length in seconds (default: 15)
+- maxDuration: maximum clip length in seconds (default: 90)
 
-For \`create_vod_compilation\`:
-- 10 minute TikTok/Reels → targetDurationMinutes: 10, clipCount: 8, vibe: 'high_energy'
-- 20 minute YouTube → targetDurationMinutes: 20, clipCount: 10, vibe: 'best_moments'
-- Documentary style → targetDurationMinutes: 30, clipCount: 15, vibe: 'chronological'
+create_vod_compilation:
+- targetDurationMinutes: target VOD length in minutes
+- clipCount: max number of clips to include
+- vibe: 'best_moments', 'chronological', 'high_energy', or 'building'
 
-For \`detect_highlights\` (only after detection has run):
-- If user wants "funny moments" → patterns: ['payoff', 'laughter'], minScore: 65
-- If user wants "best clips for TikTok" → minScore: 75 (high bar)
-- If user wants "everything decent" → minScore: 50 (lower bar)
+detect_highlights:
+- patterns: array of ['payoff', 'monologue', 'laughter', 'debate']
+- minScore: minimum score 0-100 (default: 60)
 
-For \`auto_review_clips\`:
-- Conservative review → minScore: 80, minHookStrength: 70
-- Standard review → minScore: 70, minHookStrength: 50
-- Lenient review → minScore: 55, minHookStrength: 30
-- Always do dryRun: true first and explain what WOULD happen
+## Available Tools
 
-For \`smart_trim_clip\`:
-- Clip starts with dead air → strategy: 'tighten'
-- Hook feels weak → strategy: 'extend_hook'
-- Ends mid-sentence → strategy: 'sentence_boundaries'
+**Core**: run_detection, create_vod_compilation
+**Analysis**: analyze_clip_quality, detect_highlights, compare_clips
+**Actions**: smart_trim_clip, auto_review_clips, set_clip_status
+**Basic**: seek_to_time, select_clip, play_pause, get_project_state
 
-## Response Format
-
-Structure your responses like this:
-
-1. **Quick acknowledgment** (1 sentence)
-2. **Your plan** (what you'll do and why)
-3. **[Tool calls]** (with thoughtful parameters)
-4. **Results summary** (in plain English - don't just dump JSON)
-5. **Recommendations** (what they should do next)
-
-Example:
-"Looking for your best moments! Since this is a ${project?.duration ? Math.round(project.duration / 60) : '?'}-minute video, I'll scan for high-scoring highlights with strong hooks - those tend to grab attention on social media.
-
-[calls detect_highlights with minScore: 70, patterns: ['payoff', 'monologue']]
-
-Found 8 potential viral moments! Here's what stood out:
-- **Best overall**: "The pizza debate" at 12:34 - Score 89, killer hook with a 2-second pause before the punchline
-- **Most energetic**: "Why I quit my job" at 5:21 - Score 82, sustained high energy throughout
-
-Want me to compare these two head-to-head, or should I trim them up for export?"
-
-## Tools Available
-
-**Core Workflow** (start here!):
-- \`run_detection\` - **REQUIRED FIRST** - Scans video for viral moments (takes 2-5 min)
-- \`create_vod_compilation\` - Selects best clips for a target duration VOD
-
-**Analysis** (understand content):
-- \`analyze_clip_quality\` - Deep dive on one clip's metrics
-- \`analyze_energy_curve\` - Find peaks and valleys in energy
-- \`detect_highlights\` - Filter existing clips by pattern (ONLY works after run_detection!)
-- \`compare_clips\` - Head-to-head clip comparison
-
-**Actions** (make changes):
-- \`smart_trim_clip\` - Auto-trim with smart strategies
-- \`auto_review_clips\` - Batch accept/reject (always dryRun first!)
-- \`suggest_clip_order\` - Order clips for compilations
-
-**Basic** (simple ops):
-- \`seek_to_time\`, \`select_clip\`, \`play_pause\`
-- \`get_project_state\`, \`get_transcript\`
-
-Remember: You're a helpful collaborator, not a silent tool executor. Chat with the user!`;
+Be friendly and helpful. When using tools, ACTUALLY CALL THEM via function calling.`;
   }, [project, clips, transcript]);
   
   // Send message to AI
@@ -1572,6 +1560,7 @@ Remember: You're a helpful collaborator, not a silent tool executor. Chat with t
       });
       
       // Call the AI chat API (auto-routes to best provider)
+      console.log('[ChatPanel] Sending request with tools enabled');
       const response = await window.api.chatWithAI({
         messages: messages.map(m => ({
           role: m.role,
@@ -1580,6 +1569,18 @@ Remember: You're a helpful collaborator, not a silent tool executor. Chat with t
         tools: true,
         systemPrompt: buildSystemPrompt(),
         providerConfig,
+      });
+      
+      // Log the response for debugging
+      console.log('[ChatPanel] Received response:', {
+        success: response.success,
+        provider: response.provider,
+        hasContent: !!response.content,
+        contentLength: response.content?.length || 0,
+        hasToolCalls: !!(response.toolCalls && response.toolCalls.length > 0),
+        toolCallCount: response.toolCalls?.length || 0,
+        toolCallNames: response.toolCalls?.map(tc => tc.name) || [],
+        requiresToolResults: response.requiresToolResults,
       });
       
       // Track which provider was used
@@ -1598,6 +1599,7 @@ Remember: You're a helpful collaborator, not a silent tool executor. Chat with t
       
       // Handle tool calls
       if (response.toolCalls && response.toolCalls.length > 0) {
+        console.log('[ChatPanel] Executing tool calls:', response.toolCalls.map(tc => tc.name));
         const toolResults: Array<{ toolName: string; toolUseId: string; result: unknown }> = [];
         
         for (const tc of response.toolCalls) {

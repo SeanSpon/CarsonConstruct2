@@ -134,6 +134,13 @@ export class GeminiProvider extends AIProvider {
     }
     
     try {
+      // Log request for debugging
+      console.log('[GeminiProvider] Request:', {
+        model,
+        hasTools: !!(request.tools && request.tools.length > 0),
+        toolCount: request.tools?.length || 0,
+      });
+      
       const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${this.apiKey}`;
       
       const response = await fetch(url, {
@@ -146,6 +153,7 @@ export class GeminiProvider extends AIProvider {
       
       if (!response.ok) {
         const errorText = await response.text();
+        console.error('[GeminiProvider] API Error:', response.status, errorText);
         
         if (response.status === 401 || response.status === 403) {
           throw new AuthenticationError('Invalid Google API key', this.name);
@@ -160,6 +168,16 @@ export class GeminiProvider extends AIProvider {
       const data = await response.json();
       
       const candidate = data.candidates?.[0];
+      
+      // Log response for debugging  
+      console.log('[GeminiProvider] Response:', {
+        finishReason: candidate?.finishReason,
+        partsCount: candidate?.content?.parts?.length || 0,
+        partTypes: candidate?.content?.parts?.map((p: { text?: string; functionCall?: unknown }) => 
+          p.text ? 'text' : p.functionCall ? 'functionCall' : 'unknown'
+        ) || [],
+      });
+      
       if (!candidate) {
         throw new AIProviderError('No response from Gemini', this.name);
       }
@@ -173,6 +191,7 @@ export class GeminiProvider extends AIProvider {
           content += part.text;
         }
         if (part.functionCall) {
+          console.log('[GeminiProvider] Found functionCall:', part.functionCall.name);
           toolCalls.push({
             id: `gemini_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
             name: part.functionCall.name,
@@ -181,8 +200,13 @@ export class GeminiProvider extends AIProvider {
         }
       }
       
-      // Check if stopped for function calling
-      const requiresToolResults = candidate.finishReason === 'STOP' && toolCalls.length > 0;
+      // Check if stopped for function calling - Gemini uses different finish reasons
+      // FUNCTION_CALL is the actual finish reason when tools are called
+      const requiresToolResults = (candidate.finishReason === 'STOP' || candidate.finishReason === 'FUNCTION_CALL') && toolCalls.length > 0;
+      
+      if (toolCalls.length > 0) {
+        console.log('[GeminiProvider] Parsed tool calls:', toolCalls.map(tc => tc.name));
+      }
       
       return {
         success: true,

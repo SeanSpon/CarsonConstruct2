@@ -115,6 +115,14 @@ export class AnthropicProvider extends AIProvider {
     }
     
     try {
+      // Log request for debugging
+      console.log('[AnthropicProvider] Request:', {
+        model,
+        hasTools: !!(request.tools && request.tools.length > 0),
+        toolCount: request.tools?.length || 0,
+        toolNames: request.tools?.map(t => t.name) || [],
+      });
+      
       const response = await fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST',
         headers: {
@@ -127,6 +135,7 @@ export class AnthropicProvider extends AIProvider {
       
       if (!response.ok) {
         const errorText = await response.text();
+        console.error('[AnthropicProvider] API Error:', response.status, errorText);
         
         if (response.status === 401) {
           throw new AuthenticationError('Invalid Anthropic API key', this.name);
@@ -140,6 +149,12 @@ export class AnthropicProvider extends AIProvider {
       
       const data = await response.json();
       
+      // Log raw response for debugging
+      console.log('[AnthropicProvider] Response:', {
+        stop_reason: data.stop_reason,
+        contentTypes: data.content?.map((b: { type: string }) => b.type) || [],
+      });
+      
       // Parse response
       let content = '';
       let thinking = '';
@@ -152,6 +167,7 @@ export class AnthropicProvider extends AIProvider {
           } else if (block.type === 'thinking') {
             thinking += block.thinking;
           } else if (block.type === 'tool_use') {
+            console.log('[AnthropicProvider] Found tool_use:', block.name, block.input);
             toolCalls.push({
               id: block.id,
               name: block.name,
@@ -159,6 +175,11 @@ export class AnthropicProvider extends AIProvider {
             });
           }
         }
+      }
+      
+      // Log parsed tool calls
+      if (toolCalls.length > 0) {
+        console.log('[AnthropicProvider] Parsed tool calls:', toolCalls.map(tc => tc.name));
       }
       
       return {

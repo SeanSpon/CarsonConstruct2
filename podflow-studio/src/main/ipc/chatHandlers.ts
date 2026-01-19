@@ -97,42 +97,6 @@ const TOOL_DEFINITIONS = [
       required: ['clipIds'],
     },
   },
-  {
-    name: 'run_detection',
-    description: 'Start the AI clip detection pipeline to find viral moments in the video. This must be run before you can find/filter highlights. Use this when the user wants to analyze their video for clips.',
-    input_schema: {
-      type: 'object',
-      properties: {
-        targetCount: { type: 'number', description: 'Target number of clips to find (default: 10)' },
-        minDuration: { type: 'number', description: 'Minimum clip duration in seconds (default: 15)' },
-        maxDuration: { type: 'number', description: 'Maximum clip duration in seconds (default: 90)' },
-        skipIntro: { type: 'number', description: 'Seconds to skip at start (default: 90)' },
-        skipOutro: { type: 'number', description: 'Seconds to skip at end (default: 60)' },
-      },
-    },
-  },
-  {
-    name: 'create_vod_compilation',
-    description: 'Create a VOD (video on demand) compilation from accepted clips. Arranges clips in optimal order with optional transitions.',
-    input_schema: {
-      type: 'object',
-      properties: {
-        targetDuration: { type: 'number', description: 'Target duration for compilation in minutes (e.g. 20 for 20 minutes)' },
-        maxClips: { type: 'number', description: 'Maximum number of clips to include' },
-        orderStrategy: { 
-          type: 'string', 
-          enum: ['energy_arc', 'chronological', 'best_first', 'topic_clusters'],
-          description: 'How to order clips (default: energy_arc)' 
-        },
-        transitionType: {
-          type: 'string',
-          enum: ['none', 'crossfade', 'dip-to-black'],
-          description: 'Transition between clips (default: crossfade)'
-        },
-        transitionDuration: { type: 'number', description: 'Transition duration in seconds (default: 0.5)' },
-      },
-    },
-  },
   // ========================================
   // ACTION TOOLS
   // ========================================
@@ -180,30 +144,30 @@ const TOOL_DEFINITIONS = [
   },
   {
     name: 'run_detection',
-    description: 'Run the AI detection pipeline to scan the video and find viral-worthy moments. This MUST be called before detect_highlights if no clips exist yet. Takes several minutes to complete.',
+    description: 'Start the AI clip detection pipeline to find viral moments in the video. This must be run before you can find/filter highlights. Use this when the user wants to analyze their video for clips.',
     input_schema: {
       type: 'object',
       properties: {
         targetCount: { type: 'number', description: 'Target number of clips to find (default: 10)' },
         minDuration: { type: 'number', description: 'Minimum clip duration in seconds (default: 15)' },
         maxDuration: { type: 'number', description: 'Maximum clip duration in seconds (default: 90)' },
-        skipIntro: { type: 'number', description: 'Seconds to skip at video start (default: 90)' },
-        skipOutro: { type: 'number', description: 'Seconds to skip at video end (default: 60)' },
+        skipIntro: { type: 'number', description: 'Seconds to skip at start (default: 30)' },
+        skipOutro: { type: 'number', description: 'Seconds to skip at end (default: 30)' },
       },
     },
   },
   {
     name: 'create_vod_compilation',
-    description: 'Select and accept the best clips to create a VOD compilation of a target duration. Auto-selects clips and sets their status to accepted.',
+    description: 'Create a VOD (video on demand) compilation from detected clips. Selects the best clips to match target duration and arranges them optimally.',
     input_schema: {
       type: 'object',
       properties: {
-        targetDurationMinutes: { type: 'number', description: 'Target VOD duration in minutes (default: 20)' },
-        clipCount: { type: 'number', description: 'Maximum number of clips to include (default: 10)' },
+        targetDurationMinutes: { type: 'number', description: 'Target VOD duration in minutes (e.g. 20 for 20 minutes)' },
+        clipCount: { type: 'number', description: 'Maximum number of clips to include' },
         vibe: { 
           type: 'string', 
           enum: ['best_moments', 'chronological', 'high_energy', 'building'],
-          description: 'How to order the clips: best_moments (interspersed), chronological, high_energy (best first), building (save best for end)',
+          description: 'How to order clips: best_moments (interspersed), chronological, high_energy (best first), building (save best for end)' 
         },
         includeTransitions: { type: 'boolean', description: 'Include crossfade transitions (default: true)' },
       },
@@ -400,6 +364,7 @@ export function registerChatHandlers(): void {
     const route = router.getChatProvider();
     
     if (!route) {
+      console.error('[ChatHandlers] No AI provider available');
       return { 
         success: false, 
         error: 'No AI provider available. Please configure an API key in Settings.' 
@@ -407,6 +372,7 @@ export function registerChatHandlers(): void {
     }
 
     console.log(`[ChatHandlers] Using provider: ${route.providerName}`);
+    console.log(`[ChatHandlers] Tools enabled: ${!!tools}, Tool count: ${tools ? TOOL_DEFINITIONS.length : 0}`);
 
     try {
       const completionRequest: CompletionRequest = {
@@ -418,9 +384,21 @@ export function registerChatHandlers(): void {
       
       if (tools) {
         completionRequest.tools = TOOL_DEFINITIONS;
+        console.log('[ChatHandlers] Passing tools to provider:', TOOL_DEFINITIONS.map(t => t.name));
       }
 
       const response = await route.provider.complete(completionRequest);
+      
+      // Log the response details
+      console.log('[ChatHandlers] Response received:', {
+        success: response.success,
+        hasContent: !!response.content,
+        contentLength: response.content?.length || 0,
+        hasToolCalls: !!(response.toolCalls && response.toolCalls.length > 0),
+        toolCallCount: response.toolCalls?.length || 0,
+        toolCallNames: response.toolCalls?.map(tc => tc.name) || [],
+        requiresToolResults: response.requiresToolResults,
+      });
 
       return {
         success: response.success,

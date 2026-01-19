@@ -409,12 +409,12 @@ function MessageDisplay({
         {/* Message content */}
         {message.content && (
           <div className={`
-            inline-block px-3 py-2.5 rounded-lg max-w-full
+            inline-block px-3 py-2.5 rounded-lg max-w-full select-text
             ${isUser 
               ? 'bg-sz-accent text-white' 
               : 'bg-sz-bg-secondary/80 text-sz-text border border-sz-border/50'}
           `}>
-            <div className="text-sm whitespace-pre-wrap break-words leading-relaxed">
+            <div className="text-sm whitespace-pre-wrap break-words leading-relaxed select-text">
               {message.content}
               {message.isStreaming && (
                 <span className="inline-block w-1.5 h-4 bg-cyan-400 animate-pulse ml-0.5 rounded-sm" />
@@ -834,172 +834,6 @@ function ChatPanel({
           break;
         }
         
-        case 'run_detection': {
-          if (!project) {
-            throw new Error('No project loaded. Please load a video file first.');
-          }
-          
-          const targetCount = (args.targetCount as number) || 10;
-          const minDuration = (args.minDuration as number) || 15;
-          const maxDuration = (args.maxDuration as number) || 90;
-          const skipIntro = (args.skipIntro as number) || 90;
-          const skipOutro = (args.skipOutro as number) || 60;
-          
-          // Update settings
-          updateSettings({
-            targetCount,
-            minDuration,
-            maxDuration,
-            skipIntro,
-            skipOutro,
-          });
-          
-          // Start detection via IPC
-          setDetecting(true);
-          
-          const projectId = `chat_${Date.now()}`;
-          const detectionResult = await window.api.startDetection(
-            projectId,
-            project.filePath,
-            {
-              ...detectionSettings,
-              targetCount,
-              minDuration,
-              maxDuration,
-              skipIntro,
-              skipOutro,
-            },
-            project.duration
-          );
-          
-          if (!detectionResult.success) {
-            setDetecting(false);
-            throw new Error(detectionResult.error || 'Detection failed to start');
-          }
-          
-          result = {
-            success: true,
-            status: 'started',
-            message: `Detection started! Looking for ~${targetCount} clips (${minDuration}-${maxDuration}s each) in your ${Math.round(project.duration / 60)} minute video.`,
-            settings: {
-              targetCount,
-              minDuration,
-              maxDuration,
-              skipIntro,
-              skipOutro,
-            },
-            note: 'Detection is running in the background. Results will appear in the clips panel when ready.',
-          };
-          break;
-        }
-        
-        case 'create_vod_compilation': {
-          const targetDurationMinutes = (args.targetDuration as number) || 20;
-          const maxClips = (args.maxClips as number) || 10;
-          const orderStrategy = (args.orderStrategy as string) || 'energy_arc';
-          const transitionType = (args.transitionType as 'none' | 'crossfade' | 'dip-to-black') || 'crossfade';
-          const transitionDuration = (args.transitionDuration as number) || 0.5;
-          
-          // Get accepted clips or best pending clips
-          let availableClips = clips.filter(c => c.status === 'accepted');
-          if (availableClips.length === 0) {
-            // Auto-accept top clips if none accepted
-            availableClips = [...clips]
-              .sort((a, b) => b.finalScore - a.finalScore)
-              .slice(0, maxClips);
-          }
-          
-          if (availableClips.length === 0) {
-            throw new Error('No clips available. Run detection first to find clips.');
-          }
-          
-          // Calculate target duration in seconds
-          const targetDurationSeconds = targetDurationMinutes * 60;
-          
-          // Select clips to fit target duration
-          let selectedClips: typeof availableClips = [];
-          let totalDuration = 0;
-          
-          // Sort by strategy
-          let orderedClips: typeof availableClips;
-          switch (orderStrategy) {
-            case 'chronological':
-              orderedClips = [...availableClips].sort((a, b) => a.startTime - b.startTime);
-              break;
-            case 'best_first':
-              orderedClips = [...availableClips].sort((a, b) => b.finalScore - a.finalScore);
-              break;
-            case 'topic_clusters':
-              orderedClips = [...availableClips].sort((a, b) => {
-                if (a.category !== b.category) return (a.category || '').localeCompare(b.category || '');
-                return b.finalScore - a.finalScore;
-              });
-              break;
-            case 'energy_arc':
-            default:
-              // Start medium, build to peak, end strong
-              const sorted = [...availableClips].sort((a, b) => b.finalScore - a.finalScore);
-              const third = Math.ceil(sorted.length / 3);
-              const high = sorted.slice(0, third);
-              const mid = sorted.slice(third, third * 2);
-              const low = sorted.slice(third * 2);
-              orderedClips = [...mid, ...low.reverse(), ...high];
-              break;
-          }
-          
-          // Select clips until we hit target duration or max clips
-          for (const clip of orderedClips) {
-            if (selectedClips.length >= maxClips) break;
-            const clipDuration = clip.duration - (clip.trimStartOffset || 0) + (clip.trimEndOffset || 0);
-            if (totalDuration + clipDuration <= targetDurationSeconds + 60) { // Allow 1 min over
-              selectedClips.push(clip);
-              totalDuration += clipDuration;
-            }
-          }
-          
-          // Auto-accept the selected clips
-          selectedClips.forEach(clip => {
-            if (clip.status !== 'accepted') {
-              updateClipStatus(clip.id, 'accepted');
-            }
-          });
-          
-          // Update export settings
-          updateExportSettings({
-            transition: {
-              type: transitionType,
-              duration: transitionDuration,
-            },
-            exportClipsCompilation: true,
-          });
-          
-          result = {
-            success: true,
-            compilation: {
-              clipCount: selectedClips.length,
-              totalDuration: Math.round(totalDuration),
-              totalDurationFormatted: `${Math.floor(totalDuration / 60)}:${String(Math.floor(totalDuration % 60)).padStart(2, '0')}`,
-              targetDuration: `${targetDurationMinutes} minutes`,
-              orderStrategy,
-              transition: { type: transitionType, duration: transitionDuration },
-            },
-            clips: selectedClips.map((c, i) => ({
-              position: i + 1,
-              id: c.id,
-              title: c.title || `Clip ${i + 1}`,
-              score: c.finalScore,
-              duration: Math.round(c.duration),
-              pattern: c.patternLabel || c.pattern,
-            })),
-            nextSteps: [
-              'Review the selected clips in the timeline',
-              'Click Export to render the compilation',
-              'Or ask me to adjust the selection',
-            ],
-          };
-          break;
-        }
-        
         case 'compare_clips': {
           const clipIds = args.clipIds as string[];
           if (!clipIds || clipIds.length < 2) {
@@ -1246,6 +1080,11 @@ function ChatPanel({
           // Generate a project ID from the file path
           const projectId = `project_${btoa(project.filePath).slice(0, 20)}_${Date.now()}`;
           
+          // IMPORTANT: Set detection state in store so App.tsx listener accepts the events
+          // and UI shows progress
+          setDetecting(true);
+          useStore.getState().setCurrentJobId(projectId);
+          
           // Note: This returns immediately but detection runs asynchronously
           // The UI will receive detection-progress and detection-complete events
           const detectionResult = await window.api.startDetection(
@@ -1264,6 +1103,9 @@ function ChatPanel({
           );
           
           if (!detectionResult.success) {
+            // Reset state on failure
+            setDetecting(false);
+            useStore.getState().setCurrentJobId(null);
             throw new Error(detectionResult.error || 'Failed to start detection');
           }
           
@@ -1271,7 +1113,7 @@ function ChatPanel({
             success: true,
             message: detectionResult.queued 
               ? 'Detection queued - another detection is in progress'
-              : 'Detection started! This will take a few minutes...',
+              : 'Detection started! This will take a few minutes. Watch the progress bar in the UI.',
             settings: {
               targetCount,
               minDuration,
@@ -1279,7 +1121,8 @@ function ChatPanel({
               skipIntro,
               skipOutro,
             },
-            note: 'Check the progress bar in the UI. Results will appear automatically when detection completes.',
+            estimatedTime: `~${Math.ceil((project.duration || 7200) / 60 / 10)} minutes for a ${Math.round((project.duration || 7200) / 60)}-minute video`,
+            note: 'Results will automatically appear when detection completes. You can continue chatting!',
           };
           break;
         }
@@ -1557,6 +1400,7 @@ function ChatPanel({
     updateClipTrim,
     updateToolCall,
     aiSettings,
+    setDetecting,
   ]);
   
   // Build system prompt with current context

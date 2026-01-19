@@ -256,9 +256,9 @@ const defaultSettings: DetectionSettings = {
 const defaultExportSettings: ExportSettings = {
   format: 'mp4',
   mode: 'fast',
-  exportClips: true,
-  exportClipsCompilation: false,
-  exportFullVideo: false,
+  exportClips: false,           // Individual clip files (disabled by default)
+  exportClipsCompilation: true,  // All clips joined into one video
+  exportFullVideo: true,         // Full video with dead spaces removed
   transition: {
     type: 'crossfade',
     duration: 0.5,

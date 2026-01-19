@@ -92,9 +92,41 @@ def _transcript_cache_key(input_hash: str) -> str:
 def extract_audio_ffmpeg(video_path: str, audio_path: str, ffmpeg_path: str = None):
     """Extract audio from video using FFmpeg"""
     import subprocess
+    import shutil
     
-    # Use provided ffmpeg path or fall back to system ffmpeg
-    ffmpeg_cmd = ffmpeg_path if ffmpeg_path else 'ffmpeg'
+    # Determine FFmpeg path with fallbacks
+    ffmpeg_cmd = None
+    
+    # 1. Try provided path
+    if ffmpeg_path and os.path.exists(ffmpeg_path):
+        ffmpeg_cmd = ffmpeg_path
+        print(f"DEBUG:Using provided FFmpeg: {ffmpeg_cmd}", flush=True)
+    # 2. Try common Windows locations if provided path doesn't exist
+    elif ffmpeg_path:
+        print(f"DEBUG:Provided FFmpeg path doesn't exist: {ffmpeg_path}", flush=True)
+    
+    # 3. Try system PATH
+    if not ffmpeg_cmd:
+        system_ffmpeg = shutil.which('ffmpeg')
+        if system_ffmpeg:
+            ffmpeg_cmd = system_ffmpeg
+            print(f"DEBUG:Using system FFmpeg: {ffmpeg_cmd}", flush=True)
+    
+    # 4. Try common Windows install locations
+    if not ffmpeg_cmd:
+        common_paths = [
+            r'C:\ffmpeg\bin\ffmpeg.exe',
+            r'C:\Program Files\ffmpeg\bin\ffmpeg.exe',
+            r'C:\Program Files (x86)\ffmpeg\bin\ffmpeg.exe',
+        ]
+        for path in common_paths:
+            if os.path.exists(path):
+                ffmpeg_cmd = path
+                print(f"DEBUG:Using FFmpeg from common location: {ffmpeg_cmd}", flush=True)
+                break
+    
+    if not ffmpeg_cmd:
+        raise Exception("FFmpeg not found. Please install FFmpeg and add it to your PATH, or install to C:\\ffmpeg")
     
     cmd = [
         ffmpeg_cmd, '-y',
@@ -105,6 +137,8 @@ def extract_audio_ffmpeg(video_path: str, audio_path: str, ffmpeg_path: str = No
         '-ac', '1',  # Mono
         audio_path
     ]
+    
+    print(f"DEBUG:Running FFmpeg command: {' '.join(cmd[:3])}...", flush=True)
     
     result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode != 0:

@@ -10,7 +10,9 @@ import { JobStore } from '../jobs/jobStore';
 let ffmpegPath: string;
 try {
   ffmpegPath = require('ffmpeg-static') as string;
-} catch {
+  console.log('[Detection] Loaded ffmpeg-static successfully:', ffmpegPath);
+} catch (err) {
+  console.log('[Detection] Failed to load ffmpeg-static:', err);
   ffmpegPath = 'ffmpeg';
 }
 console.log('[Detection] Using FFmpeg at:', ffmpegPath);
@@ -138,6 +140,7 @@ const startJob = async (data: {
   debugLog('detectionHandlers.ts:startJob:spawn', 'About to spawn Python', { pythonScript, pythonDir, settingsJson: settingsJson.substring(0, 200) }, 'B');
   console.log('[Detection] About to spawn Python:', pythonScript);
   console.log('[Detection] File path:', filePath);
+  console.log('[Detection] FFmpeg path being passed:', ffmpegPath);
   // #endregion
 
   // Spawn Python process

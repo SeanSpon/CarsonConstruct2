@@ -23,7 +23,15 @@ const progressState = new Map<string, { lastSentAt: number; lastProgress: number
 const PROGRESS_MIN_INTERVAL_MS = 100;
 const PROGRESS_MIN_DELTA = 1;
 
-const jobStore = new JobStore(path.join(app.getPath('userData'), 'jobs'));
+// Lazy initialization - jobStore created on first use after app is ready
+let jobStore: JobStore | null = null;
+function getJobStore(): JobStore {
+  if (!jobStore) {
+    jobStore = new JobStore(path.join(app.getPath('userData'), 'jobs'));
+  }
+  return jobStore;
+}
+
 const jobQueue: Array<{
   projectId: string;
   filePath: string;
@@ -87,7 +95,7 @@ const startJob = async (data: {
   const aiCacheDir = path.join(cacheDir, 'ai');
 
   const jobSteps = buildJobSteps(settings.useAiEnhancement);
-  jobStore.create({
+  getJobStore().create({
     id: projectId,
     inputPath: filePath,
     inputHash,
@@ -103,7 +111,7 @@ const startJob = async (data: {
       aiCache: path.join(cacheDir, 'ai_clips.json'),
     },
   });
-  jobStore.updateStep(projectId, 'detect', { status: 'running' });
+  getJobStore().updateStep(projectId, 'detect', { status: 'running' });
 
   // Cancel any existing detection for this project
   if (activeProcesses.has(projectId)) {
@@ -163,7 +171,7 @@ const startJob = async (data: {
     console.log('[Detection] spawn() threw exception:', errMsg);
     debugLog('detectionHandlers.ts:spawn:exception', 'spawn() threw', { error: errMsg }, 'F');
     // #endregion
-    jobStore.update(projectId, { status: 'failed', error: errMsg });
+    getJobStore().update(projectId, { status: 'failed', error: errMsg });
     win.webContents.send('detection-error', { projectId, error: `Python spawn failed: ${errMsg}` });
     return { success: false, error: errMsg };
   }
@@ -206,10 +214,10 @@ const startJob = async (data: {
           now - state.lastSentAt >= PROGRESS_MIN_INTERVAL_MS;
 
         if (message.toLowerCase().includes('transcrib')) {
-          jobStore.updateStep(projectId, 'transcribe', { status: 'running', message });
+          getJobStore().updateStep(projectId, 'transcribe', { status: 'running', message });
         }
         if (message.toLowerCase().includes('translator') || message.toLowerCase().includes('ai')) {
-          jobStore.updateStep(projectId, 'ai_enrich', { status: 'running', message });
+          getJobStore().updateStep(projectId, 'ai_enrich', { status: 'running', message });
         }
 
         if (shouldSend) {
@@ -227,12 +235,12 @@ const startJob = async (data: {
       } else if (line.startsWith('RESULT:')) {
         try {
           const result = JSON.parse(line.substring(7));
-          jobStore.updateStep(projectId, 'detect', { status: 'done' });
+          getJobStore().updateStep(projectId, 'detect', { status: 'done' });
           if (settings.useAiEnhancement) {
-            jobStore.updateStep(projectId, 'transcribe', { status: 'done' });
-            jobStore.updateStep(projectId, 'ai_enrich', { status: 'done' });
+            getJobStore().updateStep(projectId, 'transcribe', { status: 'done' });
+            getJobStore().updateStep(projectId, 'ai_enrich', { status: 'done' });
           }
-          jobStore.update(projectId, { status: 'done' });
+          getJobStore().update(projectId, { status: 'done' });
           win.webContents.send('detection-complete', {
             projectId,
             clips: result.clips || [],
@@ -241,7 +249,7 @@ const startJob = async (data: {
           });
         } catch (e) {
           console.error('Failed to parse detection result:', e);
-          jobStore.update(projectId, { status: 'failed', error: 'Failed to parse detection results' });
+          getJobStore().update(projectId, { status: 'failed', error: 'Failed to parse detection results' });
           win.webContents.send('detection-error', {
             projectId,
             error: 'Failed to parse detection results',
@@ -261,7 +269,7 @@ const startJob = async (data: {
 
     // Only send critical errors, not warnings
     if (errorMessage.includes('Error') || errorMessage.includes('Exception')) {
-      jobStore.update(projectId, { status: 'failed', error: errorMessage });
+      getJobStore().update(projectId, { status: 'failed', error: errorMessage });
       win.webContents.send('detection-error', {
         projectId,
         error: errorMessage,
@@ -280,7 +288,7 @@ const startJob = async (data: {
     activeJobId = null;
 
     if (code !== 0 && code !== null) {
-      jobStore.update(projectId, { status: 'failed', error: `Detection process exited with code ${code}` });
+      getJobStore().update(projectId, { status: 'failed', error: `Detection process exited with code ${code}` });
       win.webContents.send('detection-error', {
         projectId,
         error: `Detection process exited with code ${code}`,
@@ -301,7 +309,7 @@ const startJob = async (data: {
     // #endregion
     activeProcesses.delete(projectId);
     activeJobId = null;
-    jobStore.update(projectId, { status: 'failed', error: err.message });
+    getJobStore().update(projectId, { status: 'failed', error: err.message });
     win.webContents.send('detection-error', {
       projectId,
       error: `Failed to start Python: ${err.message}. Make sure Python is installed.`,
@@ -312,7 +320,7 @@ const startJob = async (data: {
 };
 
 // #region agent log
-const debugLog = (location: string, message: string, data: Record<string, unknown>, hypothesisId: string) => { fetch('http://127.0.0.1:7244/ingest/35756edc-cf7d-4d9e-ab6e-5b8765ec420b',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location,message,data,timestamp:Date.now(),sessionId:'debug-session',hypothesisId})}).catch(()=>{}); };
+const debugLog = (location: string, message: string, data: Record<string, unknown>, hypothesisId: string) => { fetch('http://127.0.0.1:7243/ingest/5a29b418-6eb9-4d45-b489-cbbacb9ac2f5',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location,message,data,timestamp:Date.now(),sessionId:'debug-session',hypothesisId})}).catch(()=>{}); };
 // #endregion
 
 // Start detection process
@@ -333,7 +341,7 @@ ipcMain.handle('start-detection', async (_event, data: {
   }
 
   if (activeJobId) {
-    jobStore.create({
+    getJobStore().create({
       id: projectId,
       inputPath: filePath,
       inputHash: '',
@@ -360,14 +368,14 @@ ipcMain.handle('cancel-detection', async (_event, projectId: string) => {
   const queuedIndex = jobQueue.findIndex((job) => job.projectId === projectId);
   if (queuedIndex >= 0) {
     jobQueue.splice(queuedIndex, 1);
-    jobStore.update(projectId, { status: 'canceled' });
+    getJobStore().update(projectId, { status: 'canceled' });
     return { success: true };
   }
   const process = activeProcesses.get(projectId);
   if (process) {
     process.kill();
     activeProcesses.delete(projectId);
-    jobStore.update(projectId, { status: 'canceled' });
+    getJobStore().update(projectId, { status: 'canceled' });
     return { success: true };
   }
   return { success: false, error: 'No active detection found' };

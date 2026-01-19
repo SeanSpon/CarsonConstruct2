@@ -1,3 +1,66 @@
+// Project type for editing workflow
+export type ProjectType = 'short-form' | 'long-form' | 'long-form-clips';
+
+// Camera input for multi-cam editing
+export interface CameraInput {
+  id: string;
+  name: string;
+  filePath: string;
+  speakerName?: string;
+  isMain: boolean;
+}
+
+// Editing preferences set during project setup
+export interface EditingPreferences {
+  projectType: ProjectType;
+  bRollEnabled: boolean;
+  referenceVideoUrl: string;
+  editingPrompt: string;
+  pacingStyle: 'fast' | 'moderate' | 'slow' | 'match-reference';
+  cameras: CameraInput[];
+}
+
+// Speaker segment from diarization
+export interface SpeakerSegment {
+  speakerId: string;
+  speakerName?: string;
+  startTime: number;
+  endTime: number;
+  confidence: number;
+}
+
+// Camera cut decision
+export interface CameraCut {
+  id: string;
+  cameraId: string;
+  startTime: number;
+  endTime: number;
+  reason: 'speaker-change' | 'reaction-shot' | 'variety' | 'manual';
+}
+
+// Audio track for mixing
+export interface AudioTrack {
+  id: string;
+  type: 'main' | 'broll' | 'sfx' | 'music';
+  filePath?: string;
+  startTime: number;
+  endTime: number;
+  volume: number; // 0-100, where 100 = 0dB
+  fadeIn?: number;
+  fadeOut?: number;
+}
+
+// QA check result
+export interface QACheck {
+  id: string;
+  type: 'audio-level' | 'mid-word-cut' | 'speaker-visibility' | 'silence' | 'sync';
+  severity: 'error' | 'warning' | 'info';
+  timestamp?: number;
+  message: string;
+  autoFixable: boolean;
+  fixed?: boolean;
+}
+
 // Clip detected by algorithm
 export interface Clip {
   id: string;

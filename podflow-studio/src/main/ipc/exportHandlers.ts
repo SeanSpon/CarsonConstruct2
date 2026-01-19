@@ -27,6 +27,25 @@ interface ExportClip {
   category?: string;
 }
 
+interface AudioTrack {
+  id: string;
+  type: 'main' | 'broll' | 'sfx' | 'music';
+  filePath?: string;
+  startTime: number;
+  endTime: number;
+  volume: number; // 0-100 where 100 = 0dB
+  fadeIn?: number;
+  fadeOut?: number;
+}
+
+// Volume level presets (in dB)
+const VOLUME_PRESETS = {
+  main: 0,      // Full volume
+  broll: -12,   // Background ambience
+  sfx: -6,      // Sound effects
+  music: -18,   // Background music
+};
+
 interface DeadSpace {
   id: string;
   startTime: number;
@@ -291,6 +310,169 @@ function exportWithDeadSpacesRemoved(
 
     ffmpeg.on('error', reject);
   });
+}
+
+// Export with audio mixing support
+ipcMain.handle('export-with-audio-mix', async (_event, data: {
+  sourceFile: string;
+  outputFile: string;
+  startTime: number;
+  endTime: number;
+  audioTracks: AudioTrack[];
+  mode: 'fast' | 'accurate';
+}) => {
+  const { sourceFile, outputFile, startTime, endTime, audioTracks, mode } = data;
+  
+  return new Promise((resolve, reject) => {
+    const duration = endTime - startTime;
+    
+    // Build audio filter chain
+    const audioFilters: string[] = [];
+    const additionalInputs: string[] = [];
+    const mixInputs: string[] = [];
+    let inputIndex = 1; // 0 is the main video
+    
+    // Process main audio first
+    const mainTrack = audioTracks.find(t => t.type === 'main');
+    if (mainTrack) {
+      const volumeDb = volumeToDb(mainTrack.volume);
+      const volumeRatio = dbToRatio(volumeDb);
+      let mainFilter = `[0:a]volume=${volumeRatio}`;
+      
+      if (mainTrack.fadeIn && mainTrack.fadeIn > 0) {
+        mainFilter += `,afade=t=in:st=0:d=${mainTrack.fadeIn}`;
+      }
+      if (mainTrack.fadeOut && mainTrack.fadeOut > 0) {
+        mainFilter += `,afade=t=out:st=${duration - mainTrack.fadeOut}:d=${mainTrack.fadeOut}`;
+      }
+      
+      mainFilter += '[main]';
+      audioFilters.push(mainFilter);
+      mixInputs.push('[main]');
+    } else {
+      audioFilters.push('[0:a]acopy[main]');
+      mixInputs.push('[main]');
+    }
+    
+    // Process additional audio tracks
+    for (const track of audioTracks) {
+      if (track.type === 'main' || !track.filePath) continue;
+      
+      additionalInputs.push(track.filePath);
+      const trackLabel = `track${inputIndex}`;
+      const volumeDb = VOLUME_PRESETS[track.type] || volumeToDb(track.volume);
+      const volumeRatio = dbToRatio(volumeDb);
+      
+      let trackFilter = `[${inputIndex}:a]`;
+      
+      // Trim to segment
+      if (track.startTime > 0 || track.endTime > 0) {
+        const trackDuration = track.endTime - track.startTime;
+        trackFilter += `atrim=start=0:end=${trackDuration},asetpts=PTS-STARTPTS,`;
+      }
+      
+      // Delay to start position
+      if (track.startTime > 0) {
+        const delayMs = Math.round(track.startTime * 1000);
+        trackFilter += `adelay=${delayMs}|${delayMs},`;
+      }
+      
+      // Volume
+      trackFilter += `volume=${volumeRatio}`;
+      
+      // Fades
+      if (track.fadeIn && track.fadeIn > 0) {
+        trackFilter += `,afade=t=in:st=0:d=${track.fadeIn}`;
+      }
+      if (track.fadeOut && track.fadeOut > 0) {
+        const fadeStart = (track.endTime - track.startTime) - track.fadeOut;
+        trackFilter += `,afade=t=out:st=${fadeStart}:d=${track.fadeOut}`;
+      }
+      
+      trackFilter += `[${trackLabel}]`;
+      audioFilters.push(trackFilter);
+      mixInputs.push(`[${trackLabel}]`);
+      inputIndex++;
+    }
+    
+    // Mix all tracks
+    if (mixInputs.length > 1) {
+      audioFilters.push(
+        `${mixInputs.join('')}amix=inputs=${mixInputs.length}:duration=longest:normalize=0[aout]`
+      );
+    } else {
+      // Rename single track to output
+      const lastFilter = audioFilters[audioFilters.length - 1];
+      audioFilters[audioFilters.length - 1] = lastFilter.replace('[main]', '[aout]');
+    }
+    
+    // Build FFmpeg command
+    const args = [
+      '-y',
+      '-ss', startTime.toString(),
+      '-i', sourceFile,
+      '-t', duration.toString(),
+    ];
+    
+    // Add additional audio inputs
+    for (const input of additionalInputs) {
+      args.push('-i', input);
+    }
+    
+    // Add filter complex
+    const filterComplex = audioFilters.join(';');
+    args.push('-filter_complex', filterComplex);
+    args.push('-map', '0:v', '-map', '[aout]');
+    
+    // Encoding options
+    if (mode === 'accurate') {
+      args.push(
+        '-c:v', 'libx264',
+        '-preset', 'fast',
+        '-crf', '23',
+        '-c:a', 'aac',
+        '-b:a', '192k'
+      );
+    } else {
+      args.push(
+        '-c:v', 'copy',
+        '-c:a', 'aac',
+        '-b:a', '192k'
+      );
+    }
+    
+    args.push(outputFile);
+    
+    const ffmpeg = spawn(ffmpegPath, args, { windowsHide: true });
+    let errorOutput = '';
+    
+    ffmpeg.stderr.on('data', (data) => {
+      errorOutput += data.toString();
+    });
+    
+    ffmpeg.on('close', (code) => {
+      if (code === 0) {
+        resolve({ success: true, outputFile });
+      } else {
+        reject(new Error(errorOutput || `FFmpeg exited with code ${code}`));
+      }
+    });
+    
+    ffmpeg.on('error', reject);
+  });
+});
+
+// Helper: Convert 0-100 volume to dB
+function volumeToDb(volume: number): number {
+  if (volume <= 0) return -60; // Effectively silent
+  if (volume >= 100) return 0;
+  // Logarithmic scale: 50 = -6dB, 25 = -12dB, etc.
+  return 20 * Math.log10(volume / 100);
+}
+
+// Helper: Convert dB to linear ratio
+function dbToRatio(db: number): number {
+  return Math.pow(10, db / 20);
 }
 
 // Open folder in file explorer

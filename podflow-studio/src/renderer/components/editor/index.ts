@@ -11,3 +11,5 @@ export { default as ClipStrip } from './ClipStrip';
 export { default as ClipThumbnail } from './ClipThumbnail';
 export { default as ProgressOverlay } from './ProgressOverlay';
 export { default as SettingsDrawer } from './SettingsDrawer';
+export { default as ProjectSetup } from './ProjectSetup';
+export type { ProjectType, EditingPreferences, CameraInput } from './ProjectSetup';

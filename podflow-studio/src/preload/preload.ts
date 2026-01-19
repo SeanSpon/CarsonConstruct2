@@ -137,6 +137,69 @@ contextBridge.exposeInMainWorld('api', {
     ipcRenderer.on('export-complete', handler);
     return () => ipcRenderer.removeListener('export-complete', handler);
   },
+
+  // Cloud / Google Drive
+  checkCloudAuth: (): Promise<{ isAuthenticated: boolean; hasCredentials: boolean }> =>
+    ipcRenderer.invoke('cloud-check-auth'),
+  
+  startCloudAuth: (): Promise<{ success: boolean; error?: string }> =>
+    ipcRenderer.invoke('cloud-start-auth'),
+  
+  signOutCloud: (): Promise<{ success: boolean }> =>
+    ipcRenderer.invoke('cloud-sign-out'),
+  
+  uploadToCloud: (data: {
+    files: Array<{ filePath: string; fileName?: string }>;
+    folderId?: string;
+    folderName?: string;
+  }): Promise<{
+    success: boolean;
+    totalFiles: number;
+    successCount: number;
+    results: Array<{
+      filePath: string;
+      success: boolean;
+      fileId?: string;
+      webViewLink?: string;
+      error?: string;
+    }>;
+  }> => ipcRenderer.invoke('cloud-upload-batch', data),
+  
+  getCloudShareLink: (fileId: string): Promise<{ success: boolean; link?: string; error?: string }> =>
+    ipcRenderer.invoke('cloud-get-link', fileId),
+  
+  onCloudUploadProgress: (callback: (data: {
+    bytesUploaded: number;
+    totalBytes: number;
+    percentage: number;
+    currentFile?: number;
+    totalFiles?: number;
+    fileName?: string;
+  }) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, data: any) => callback(data);
+    ipcRenderer.on('cloud-upload-progress', handler);
+    return () => ipcRenderer.removeListener('cloud-upload-progress', handler);
+  },
+
+  // Export with audio mixing
+  exportWithAudioMix: (data: {
+    sourceFile: string;
+    outputFile: string;
+    startTime: number;
+    endTime: number;
+    audioTracks: Array<{
+      id: string;
+      type: 'main' | 'broll' | 'sfx' | 'music';
+      filePath?: string;
+      startTime: number;
+      endTime: number;
+      volume: number;
+      fadeIn?: number;
+      fadeOut?: number;
+    }>;
+    mode: 'fast' | 'accurate';
+  }): Promise<{ success: boolean; outputFile?: string; error?: string }> =>
+    ipcRenderer.invoke('export-with-audio-mix', data),
 });
 
 // Type declaration for the window object
@@ -168,6 +231,53 @@ declare global {
       onDetectionError: (callback: (data: DetectionError) => void) => () => void;
       onExportProgress: (callback: (data: ExportProgress) => void) => () => void;
       onExportComplete: (callback: (data: ExportResult) => void) => () => void;
+      // Cloud
+      checkCloudAuth: () => Promise<{ isAuthenticated: boolean; hasCredentials: boolean }>;
+      startCloudAuth: () => Promise<{ success: boolean; error?: string }>;
+      signOutCloud: () => Promise<{ success: boolean }>;
+      uploadToCloud: (data: {
+        files: Array<{ filePath: string; fileName?: string }>;
+        folderId?: string;
+        folderName?: string;
+      }) => Promise<{
+        success: boolean;
+        totalFiles: number;
+        successCount: number;
+        results: Array<{
+          filePath: string;
+          success: boolean;
+          fileId?: string;
+          webViewLink?: string;
+          error?: string;
+        }>;
+      }>;
+      getCloudShareLink: (fileId: string) => Promise<{ success: boolean; link?: string; error?: string }>;
+      onCloudUploadProgress: (callback: (data: {
+        bytesUploaded: number;
+        totalBytes: number;
+        percentage: number;
+        currentFile?: number;
+        totalFiles?: number;
+        fileName?: string;
+      }) => void) => () => void;
+      // Audio mix export
+      exportWithAudioMix: (data: {
+        sourceFile: string;
+        outputFile: string;
+        startTime: number;
+        endTime: number;
+        audioTracks: Array<{
+          id: string;
+          type: 'main' | 'broll' | 'sfx' | 'music';
+          filePath?: string;
+          startTime: number;
+          endTime: number;
+          volume: number;
+          fadeIn?: number;
+          fadeOut?: number;
+        }>;
+        mode: 'fast' | 'accurate';
+      }) => Promise<{ success: boolean; outputFile?: string; error?: string }>;
     };
   }
 }

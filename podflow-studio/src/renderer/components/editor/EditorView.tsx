@@ -1,7 +1,7 @@
 import { memo, useState, useCallback, useEffect, useRef } from 'react';
 import { useStore } from '../../stores/store';
 import { estimateAiCost, formatCost } from '../../types';
-import type { Clip } from '../../types';
+import type { Clip, EditingPreferences } from '../../types';
 
 import Header from './Header';
 import DropZone from './DropZone';
@@ -12,6 +12,7 @@ import QuickActions from './QuickActions';
 import ClipStrip from './ClipStrip';
 import ProgressOverlay from './ProgressOverlay';
 import SettingsDrawer from './SettingsDrawer';
+import ProjectSetup from './ProjectSetup';
 
 function EditorView() {
   const {
@@ -33,6 +34,11 @@ function EditorView() {
     currentJobId,
     updateClipStatus,
     lastJobId,
+    setupComplete,
+    setSetupComplete,
+    editingPreferences,
+    setEditingPreferences,
+    setCameras,
   } = useStore();
 
   const [isLoading, setIsLoading] = useState(false);
@@ -411,9 +417,24 @@ function EditorView() {
     project,
   ]);
 
+  // Handle project setup complete
+  const handleSetupComplete = useCallback((preferences: EditingPreferences) => {
+    setEditingPreferences(preferences);
+    if (preferences.cameras.length > 0) {
+      setCameras(preferences.cameras);
+    }
+    setSetupComplete(true);
+  }, [setEditingPreferences, setCameras, setSetupComplete]);
+
+  // Handle going back from setup
+  const handleSetupBack = useCallback(() => {
+    clearProject();
+  }, [clearProject]);
+
   // Determine view state
   const hasProject = !!project;
   const hasClips = clips.length > 0;
+  const needsSetup = hasProject && !setupComplete;
 
   return (
     <div className="h-screen flex flex-col bg-sz-bg text-sz-text overflow-hidden">
@@ -432,6 +453,13 @@ function EditorView() {
             onOpenRecent={handleOpenRecent}
             onRemoveRecent={removeRecentProject}
             onFileDrop={handleFileDrop}
+          />
+        ) : needsSetup ? (
+          // Project setup flow
+          <ProjectSetup
+            onComplete={handleSetupComplete}
+            onBack={handleSetupBack}
+            initialPreferences={editingPreferences || undefined}
           />
         ) : (
           // Editor view

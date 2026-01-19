@@ -7,7 +7,13 @@ import type {
   Transcript, 
   DetectionSettings, 
   DetectionProgress,
-  ExportSettings 
+  ExportSettings,
+  EditingPreferences,
+  CameraInput,
+  CameraCut,
+  SpeakerSegment,
+  AudioTrack,
+  QACheck,
 } from '../types';
 
 interface RecentProject {
@@ -22,6 +28,22 @@ interface AppState {
   project: Project | null;
   currentJobId: string | null;
   lastJobId: string | null;
+  
+  // Project setup flow
+  setupComplete: boolean;
+  editingPreferences: EditingPreferences | null;
+  
+  // Multi-camera
+  cameras: CameraInput[];
+  cameraCuts: CameraCut[];
+  speakerSegments: SpeakerSegment[];
+  
+  // Audio mixing
+  audioTracks: AudioTrack[];
+  
+  // QA checks
+  qaChecks: QACheck[];
+  qaRunning: boolean;
   
   // Detection state
   isDetecting: boolean;
@@ -45,12 +67,37 @@ interface AppState {
   // Recent projects (persisted)
   recentProjects: RecentProject[];
   
-  // Actions
+  // Actions - Project Setup
   setProject: (project: Project | null) => void;
   clearProject: () => void;
   setCurrentJobId: (jobId: string | null) => void;
   setLastJobId: (jobId: string | null) => void;
+  setSetupComplete: (complete: boolean) => void;
+  setEditingPreferences: (preferences: EditingPreferences | null) => void;
   
+  // Actions - Multi-camera
+  setCameras: (cameras: CameraInput[]) => void;
+  addCamera: (camera: CameraInput) => void;
+  removeCamera: (cameraId: string) => void;
+  updateCamera: (cameraId: string, updates: Partial<CameraInput>) => void;
+  setCameraCuts: (cuts: CameraCut[]) => void;
+  addCameraCut: (cut: CameraCut) => void;
+  removeCameraCut: (cutId: string) => void;
+  updateCameraCut: (cutId: string, updates: Partial<CameraCut>) => void;
+  setSpeakerSegments: (segments: SpeakerSegment[]) => void;
+  
+  // Actions - Audio
+  setAudioTracks: (tracks: AudioTrack[]) => void;
+  addAudioTrack: (track: AudioTrack) => void;
+  removeAudioTrack: (trackId: string) => void;
+  updateAudioTrack: (trackId: string, updates: Partial<AudioTrack>) => void;
+  
+  // Actions - QA
+  setQAChecks: (checks: QACheck[]) => void;
+  setQARunning: (running: boolean) => void;
+  markQACheckFixed: (checkId: string) => void;
+  
+  // Actions - Detection
   setDetecting: (isDetecting: boolean) => void;
   setDetectionProgress: (progress: DetectionProgress | null) => void;
   setDetectionError: (error: string | null) => void;
@@ -99,6 +146,14 @@ export const useStore = create<AppState>()(
       project: null,
       currentJobId: null,
       lastJobId: null,
+      setupComplete: false,
+      editingPreferences: null,
+      cameras: [],
+      cameraCuts: [],
+      speakerSegments: [],
+      audioTracks: [],
+      qaChecks: [],
+      qaRunning: false,
       isDetecting: false,
       detectionProgress: null,
       detectionError: null,
@@ -129,12 +184,86 @@ export const useStore = create<AppState>()(
         project: null,
         currentJobId: null,
         lastJobId: null,
+        setupComplete: false,
+        editingPreferences: null,
+        cameras: [],
+        cameraCuts: [],
+        speakerSegments: [],
+        audioTracks: [],
+        qaChecks: [],
         clips: [],
         deadSpaces: [],
         transcript: null,
         detectionProgress: null,
         detectionError: null,
       }),
+      
+      setSetupComplete: (setupComplete) => set({ setupComplete }),
+      
+      setEditingPreferences: (editingPreferences) => set({ editingPreferences }),
+      
+      // Multi-camera actions
+      setCameras: (cameras) => set({ cameras }),
+      
+      addCamera: (camera) => set((state) => ({
+        cameras: [...state.cameras, camera],
+      })),
+      
+      removeCamera: (cameraId) => set((state) => ({
+        cameras: state.cameras.filter((c) => c.id !== cameraId),
+      })),
+      
+      updateCamera: (cameraId, updates) => set((state) => ({
+        cameras: state.cameras.map((c) =>
+          c.id === cameraId ? { ...c, ...updates } : c
+        ),
+      })),
+      
+      setCameraCuts: (cameraCuts) => set({ cameraCuts }),
+      
+      addCameraCut: (cut) => set((state) => ({
+        cameraCuts: [...state.cameraCuts, cut].sort((a, b) => a.startTime - b.startTime),
+      })),
+      
+      removeCameraCut: (cutId) => set((state) => ({
+        cameraCuts: state.cameraCuts.filter((c) => c.id !== cutId),
+      })),
+      
+      updateCameraCut: (cutId, updates) => set((state) => ({
+        cameraCuts: state.cameraCuts.map((c) =>
+          c.id === cutId ? { ...c, ...updates } : c
+        ),
+      })),
+      
+      setSpeakerSegments: (speakerSegments) => set({ speakerSegments }),
+      
+      // Audio actions
+      setAudioTracks: (audioTracks) => set({ audioTracks }),
+      
+      addAudioTrack: (track) => set((state) => ({
+        audioTracks: [...state.audioTracks, track],
+      })),
+      
+      removeAudioTrack: (trackId) => set((state) => ({
+        audioTracks: state.audioTracks.filter((t) => t.id !== trackId),
+      })),
+      
+      updateAudioTrack: (trackId, updates) => set((state) => ({
+        audioTracks: state.audioTracks.map((t) =>
+          t.id === trackId ? { ...t, ...updates } : t
+        ),
+      })),
+      
+      // QA actions
+      setQAChecks: (qaChecks) => set({ qaChecks }),
+      
+      setQARunning: (qaRunning) => set({ qaRunning }),
+      
+      markQACheckFixed: (checkId) => set((state) => ({
+        qaChecks: state.qaChecks.map((c) =>
+          c.id === checkId ? { ...c, fixed: true } : c
+        ),
+      })),
 
       // Detection actions
       setDetecting: (isDetecting) => set({ isDetecting }),
@@ -221,6 +350,14 @@ export const useStore = create<AppState>()(
         project: null,
         currentJobId: null,
         lastJobId: null,
+        setupComplete: false,
+        editingPreferences: null,
+        cameras: [],
+        cameraCuts: [],
+        speakerSegments: [],
+        audioTracks: [],
+        qaChecks: [],
+        qaRunning: false,
         isDetecting: false,
         detectionProgress: null,
         detectionError: null,
@@ -238,6 +375,8 @@ export const useStore = create<AppState>()(
         exportSettings: state.exportSettings,
         recentProjects: state.recentProjects,
         lastExportDir: state.lastExportDir,
+        // Persist last editing preferences for quick start
+        editingPreferences: state.editingPreferences,
       }),
     }
   )

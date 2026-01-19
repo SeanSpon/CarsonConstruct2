@@ -3,24 +3,13 @@ import { spawn, execSync } from 'child_process';
 import path from 'path';
 import fs from 'fs';
 
-// #region agent log
-const debugLog = (location: string, message: string, data: Record<string, unknown>, hypothesisId: string) => { fetch('http://127.0.0.1:7244/ingest/35756edc-cf7d-4d9e-ab6e-5b8765ec420b',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location,message,data,timestamp:Date.now(),sessionId:'debug-session',hypothesisId})}).catch(()=>{}); };
-// #endregion
-
 // Get ffprobe path - try multiple methods
 function getFFprobePath(): string | null {
-  // #region agent log
-  debugLog('fileHandlers.ts:getFFprobePath:entry', 'Starting ffprobe detection', { PATH: process.env.PATH?.split(';').slice(0, 10), cwd: process.cwd() }, 'A');
-  // #endregion
-
   // Method 1: Try @ffprobe-installer/ffprobe package (best for Electron)
   try {
     // eslint-disable-next-line @typescript-eslint/no-var-requires
     const ffprobeInstaller = require('@ffprobe-installer/ffprobe');
     const installerPath = ffprobeInstaller?.path || ffprobeInstaller;
-    // #region agent log
-    debugLog('fileHandlers.ts:method1', 'ffprobe-installer result', { installerPath, exists: installerPath ? fs.existsSync(installerPath) : false }, 'B');
-    // #endregion
     if (installerPath && typeof installerPath === 'string' && fs.existsSync(installerPath)) {
       console.log('[FileHandlers] Using @ffprobe-installer:', installerPath);
       return installerPath;
@@ -28,9 +17,6 @@ function getFFprobePath(): string | null {
       console.log('[FileHandlers] @ffprobe-installer path exists but file not found:', installerPath);
     }
   } catch (e) {
-    // #region agent log
-    debugLog('fileHandlers.ts:method1:error', 'ffprobe-installer failed', { error: String(e) }, 'B');
-    // #endregion
     console.log('[FileHandlers] @ffprobe-installer not available:', e);
   }
 
@@ -86,24 +72,15 @@ function getFFprobePath(): string | null {
   try {
     const result = execSync('where ffprobe', { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] });
     const foundPath = result.trim().split('\n')[0];
-    // #region agent log
-    debugLog('fileHandlers.ts:method5:success', 'where ffprobe succeeded', { foundPath, exists: foundPath ? fs.existsSync(foundPath) : false }, 'A');
-    // #endregion
     if (foundPath && fs.existsSync(foundPath)) {
       console.log('[FileHandlers] Found ffprobe in PATH:', foundPath);
       return foundPath;
     }
   } catch (e) {
-    // #region agent log
-    debugLog('fileHandlers.ts:method5:error', 'where ffprobe failed', { error: String(e) }, 'A');
-    // #endregion
     console.log('[FileHandlers] ffprobe not found in PATH');
   }
 
   // No valid path found
-  // #region agent log
-  debugLog('fileHandlers.ts:getFFprobePath:exit', 'No ffprobe found anywhere', { result: null }, 'A');
-  // #endregion
   console.log('[FileHandlers] Could not find ffprobe in any location');
   return null;
 }
@@ -146,6 +123,7 @@ ipcMain.handle('select-file', async () => {
 });
 
 // Validate video file with FFprobe
+console.log('[FileHandlers] Registering validate-file handler...');
 ipcMain.handle('validate-file', async (_event, filePath: string) => {
   console.log('[FileHandlers] validate-file handler invoked for:', filePath);
   return new Promise((resolve) => {
@@ -232,6 +210,7 @@ ipcMain.handle('validate-file', async (_event, filePath: string) => {
     });
   });
 });
+console.log('[FileHandlers] validate-file handler registered successfully');
 
 // Select output directory
 ipcMain.handle('select-output-dir', async () => {

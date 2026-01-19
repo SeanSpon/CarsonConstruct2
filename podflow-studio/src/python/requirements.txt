@@ -4,6 +4,13 @@ numpy>=1.24.3
 scipy>=1.11.3
 soundfile>=0.12.1
 webrtcvad
+pydub>=0.25.0
+
+# Speaker diarization (for multi-camera switching)
+# Note: pyannote.audio requires torch and HuggingFace token
+# pip install pyannote.audio torch
+pyannote.audio>=3.0.0
+torch>=2.0.0
 
 # Environment
 python-dotenv>=1.0.0

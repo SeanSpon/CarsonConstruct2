@@ -1,13 +1,22 @@
-import { ipcMain } from 'electron';
+/**
+ * Chat Handlers - Unified AI chat with automatic provider routing
+ * 
+ * Uses the capability router to auto-select the best AI provider.
+ * No hardcoded API endpoints - all providers go through the router.
+ */
 
-// Tool definitions for the AI - focused on algorithmic analysis and editing features
+import { ipcMain } from 'electron';
+import { getRouter, updateRouterConfig, ProviderCapability } from '../ai/capabilityRouter';
+import type { CompletionRequest, CompletionResponse, ToolCall } from '../ai/providers/base';
+
+// Tool definitions for the AI
 const TOOL_DEFINITIONS = [
   // ========================================
-  // ANALYSIS TOOLS - Use algorithms to analyze content
+  // ANALYSIS TOOLS
   // ========================================
   {
     name: 'analyze_clip_quality',
-    description: 'Run algorithmic analysis on a clip to get detailed quality metrics including hook strength, energy curve, speech density, pacing score, and clipworthiness breakdown. Use this to understand WHY a clip is good or bad.',
+    description: 'Run algorithmic analysis on a clip to get detailed quality metrics including hook strength, energy curve, speech density, pacing score, and clipworthiness breakdown.',
     input_schema: {
       type: 'object',
       properties: {
@@ -20,138 +29,124 @@ const TOOL_DEFINITIONS = [
   },
   {
     name: 'analyze_energy_curve',
-    description: 'Get the energy/loudness profile over time for a clip or time range. Returns an array of energy values that you can reason about to find peaks, buildups, and drops.',
+    description: 'Get the energy/loudness profile over time for a clip or time range.',
     input_schema: {
       type: 'object',
       properties: {
-        clipId: {
-          type: 'string',
-          description: 'Analyze energy for a specific clip',
-        },
-        startTime: {
-          type: 'number',
-          description: 'Start time in seconds (if not using clipId)',
-        },
-        endTime: {
-          type: 'number',
-          description: 'End time in seconds (if not using clipId)',
-        },
-        resolution: {
-          type: 'number',
-          description: 'Number of data points to return (default: 50)',
-        },
+        clipId: { type: 'string', description: 'Analyze energy for a specific clip' },
+        startTime: { type: 'number', description: 'Start time in seconds' },
+        endTime: { type: 'number', description: 'End time in seconds' },
+        resolution: { type: 'number', description: 'Number of data points (default: 50)' },
       },
     },
   },
   {
     name: 'analyze_speech_patterns',
-    description: 'Analyze speech patterns in a clip including speech rate, pause patterns, sentence boundaries, and speaker changes. Useful for finding natural cut points.',
+    description: 'Analyze speech patterns including rate, pauses, sentence boundaries. Useful for finding natural cut points.',
     input_schema: {
       type: 'object',
       properties: {
-        clipId: {
-          type: 'string',
-          description: 'The clip to analyze',
-        },
-        startTime: {
-          type: 'number',
-          description: 'Start time in seconds',
-        },
-        endTime: {
-          type: 'number',
-          description: 'End time in seconds',
-        },
+        clipId: { type: 'string', description: 'The clip to analyze' },
+        startTime: { type: 'number', description: 'Start time in seconds' },
+        endTime: { type: 'number', description: 'End time in seconds' },
       },
     },
   },
   {
     name: 'find_optimal_boundaries',
-    description: 'Use VAD (voice activity detection) and speech analysis to find optimal start/end points for a clip. Returns suggested trim offsets that snap to sentence boundaries and avoid mid-word cuts.',
+    description: 'Use VAD and speech analysis to find optimal start/end points that avoid mid-word cuts.',
     input_schema: {
       type: 'object',
       properties: {
-        clipId: {
-          type: 'string',
-          description: 'The clip to optimize',
-        },
-        preferCleanStart: {
-          type: 'boolean',
-          description: 'Prefer starting at sentence beginning (default: true)',
-        },
-        preferCleanEnd: {
-          type: 'boolean',
-          description: 'Prefer ending at sentence end (default: true)',
-        },
-        maxExtension: {
-          type: 'number',
-          description: 'Maximum seconds to extend in either direction (default: 3)',
-        },
+        clipId: { type: 'string', description: 'The clip to optimize' },
+        preferCleanStart: { type: 'boolean', description: 'Prefer sentence beginning (default: true)' },
+        preferCleanEnd: { type: 'boolean', description: 'Prefer sentence end (default: true)' },
+        maxExtension: { type: 'number', description: 'Max seconds to extend (default: 3)' },
       },
     },
   },
   {
     name: 'detect_highlights',
-    description: 'Run highlight detection algorithms on a time range to find potential viral moments. Uses payoff detection (silence→spike), monologue detection (sustained energy), and laughter detection.',
+    description: 'Run highlight detection to find viral moments (payoff, monologue, laughter patterns).',
     input_schema: {
       type: 'object',
       properties: {
-        startTime: {
-          type: 'number',
-          description: 'Start of range to analyze (default: 0)',
-        },
-        endTime: {
-          type: 'number',
-          description: 'End of range to analyze (default: full duration)',
-        },
+        startTime: { type: 'number', description: 'Start of range (default: 0)' },
+        endTime: { type: 'number', description: 'End of range (default: full duration)' },
         patterns: {
           type: 'array',
           items: { type: 'string', enum: ['payoff', 'monologue', 'laughter', 'debate'] },
           description: 'Which patterns to detect (default: all)',
         },
-        minScore: {
-          type: 'number',
-          description: 'Minimum score threshold (0-100, default: 60)',
-        },
+        minScore: { type: 'number', description: 'Minimum score 0-100 (default: 60)' },
       },
     },
   },
   {
     name: 'compare_clips',
-    description: 'Compare two or more clips algorithmically and return which is better based on hook strength, pacing, energy, speech clarity, and viral potential.',
+    description: 'Compare clips based on hook strength, pacing, energy, and viral potential.',
     input_schema: {
       type: 'object',
       properties: {
-        clipIds: {
-          type: 'array',
-          items: { type: 'string' },
-          description: 'Array of clip IDs to compare',
-        },
+        clipIds: { type: 'array', items: { type: 'string' }, description: 'Clip IDs to compare' },
         criteria: {
           type: 'array',
-          items: { type: 'string', enum: ['hook', 'energy', 'pacing', 'speech_clarity', 'viral_potential', 'completeness'] },
-          description: 'Criteria to compare on (default: all)',
+          items: { type: 'string', enum: ['hook', 'energy', 'pacing', 'viral_potential', 'completeness'] },
         },
       },
       required: ['clipIds'],
     },
   },
-  // ========================================
-  // ACTION TOOLS - Make changes based on analysis
-  // ========================================
   {
-    name: 'smart_trim_clip',
-    description: 'Intelligently trim a clip using algorithms to find optimal boundaries. Automatically snaps to speech boundaries and avoids mid-word cuts.',
+    name: 'run_detection',
+    description: 'Start the AI clip detection pipeline to find viral moments in the video. This must be run before you can find/filter highlights. Use this when the user wants to analyze their video for clips.',
     input_schema: {
       type: 'object',
       properties: {
-        clipId: {
-          type: 'string',
-          description: 'The clip to trim',
+        targetCount: { type: 'number', description: 'Target number of clips to find (default: 10)' },
+        minDuration: { type: 'number', description: 'Minimum clip duration in seconds (default: 15)' },
+        maxDuration: { type: 'number', description: 'Maximum clip duration in seconds (default: 90)' },
+        skipIntro: { type: 'number', description: 'Seconds to skip at start (default: 90)' },
+        skipOutro: { type: 'number', description: 'Seconds to skip at end (default: 60)' },
+      },
+    },
+  },
+  {
+    name: 'create_vod_compilation',
+    description: 'Create a VOD (video on demand) compilation from accepted clips. Arranges clips in optimal order with optional transitions.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        targetDuration: { type: 'number', description: 'Target duration for compilation in minutes (e.g. 20 for 20 minutes)' },
+        maxClips: { type: 'number', description: 'Maximum number of clips to include' },
+        orderStrategy: { 
+          type: 'string', 
+          enum: ['energy_arc', 'chronological', 'best_first', 'topic_clusters'],
+          description: 'How to order clips (default: energy_arc)' 
         },
+        transitionType: {
+          type: 'string',
+          enum: ['none', 'crossfade', 'dip-to-black'],
+          description: 'Transition between clips (default: crossfade)'
+        },
+        transitionDuration: { type: 'number', description: 'Transition duration in seconds (default: 0.5)' },
+      },
+    },
+  },
+  // ========================================
+  // ACTION TOOLS
+  // ========================================
+  {
+    name: 'smart_trim_clip',
+    description: 'Intelligently trim a clip using algorithms to find optimal boundaries.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        clipId: { type: 'string', description: 'The clip to trim' },
         strategy: {
           type: 'string',
           enum: ['tighten', 'extend_hook', 'sentence_boundaries', 'energy_peaks'],
-          description: 'Trimming strategy: tighten (remove dead air), extend_hook (strengthen opening), sentence_boundaries (clean cuts), energy_peaks (cut at low energy points)',
+          description: 'Trimming strategy',
         },
       },
       required: ['strategy'],
@@ -159,145 +154,177 @@ const TOOL_DEFINITIONS = [
   },
   {
     name: 'auto_review_clips',
-    description: 'Automatically review and accept/reject clips based on algorithmic quality thresholds. Returns a summary of decisions made.',
+    description: 'Automatically review and accept/reject clips based on quality thresholds.',
     input_schema: {
       type: 'object',
       properties: {
-        minScore: {
-          type: 'number',
-          description: 'Minimum final score to accept (default: 70)',
-        },
-        minHookStrength: {
-          type: 'number',
-          description: 'Minimum hook strength to accept (default: 50)',
-        },
-        requireCompleteThought: {
-          type: 'boolean',
-          description: 'Only accept clips marked as complete thoughts (default: false)',
-        },
-        maxToAccept: {
-          type: 'number',
-          description: 'Maximum clips to accept (default: 10)',
-        },
-        dryRun: {
-          type: 'boolean',
-          description: 'If true, only return recommendations without making changes (default: false)',
-        },
+        minScore: { type: 'number', description: 'Minimum score to accept (default: 70)' },
+        minHookStrength: { type: 'number', description: 'Minimum hook strength (default: 50)' },
+        maxToAccept: { type: 'number', description: 'Max clips to accept (default: 10)' },
+        dryRun: { type: 'boolean', description: 'Preview only, no changes (default: false)' },
       },
     },
   },
   {
     name: 'suggest_clip_order',
-    description: 'Analyze accepted clips and suggest an optimal order for a compilation based on pacing, topic flow, and energy arc.',
+    description: 'Suggest optimal clip order for a compilation based on pacing and energy arc.',
     input_schema: {
       type: 'object',
       properties: {
         strategy: {
           type: 'string',
           enum: ['chronological', 'energy_arc', 'best_first', 'topic_clusters'],
-          description: 'Ordering strategy (default: energy_arc)',
         },
       },
     },
   },
-  // ========================================
-  // BASIC TOOLS - Simple operations
-  // ========================================
   {
-    name: 'seek_to_time',
-    description: 'Seek the video playhead to a specific timestamp',
+    name: 'run_detection',
+    description: 'Run the AI detection pipeline to scan the video and find viral-worthy moments. This MUST be called before detect_highlights if no clips exist yet. Takes several minutes to complete.',
     input_schema: {
       type: 'object',
       properties: {
-        time: {
-          type: 'number',
-          description: 'The timestamp in seconds to seek to',
+        targetCount: { type: 'number', description: 'Target number of clips to find (default: 10)' },
+        minDuration: { type: 'number', description: 'Minimum clip duration in seconds (default: 15)' },
+        maxDuration: { type: 'number', description: 'Maximum clip duration in seconds (default: 90)' },
+        skipIntro: { type: 'number', description: 'Seconds to skip at video start (default: 90)' },
+        skipOutro: { type: 'number', description: 'Seconds to skip at video end (default: 60)' },
+      },
+    },
+  },
+  {
+    name: 'create_vod_compilation',
+    description: 'Select and accept the best clips to create a VOD compilation of a target duration. Auto-selects clips and sets their status to accepted.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        targetDurationMinutes: { type: 'number', description: 'Target VOD duration in minutes (default: 20)' },
+        clipCount: { type: 'number', description: 'Maximum number of clips to include (default: 10)' },
+        vibe: { 
+          type: 'string', 
+          enum: ['best_moments', 'chronological', 'high_energy', 'building'],
+          description: 'How to order the clips: best_moments (interspersed), chronological, high_energy (best first), building (save best for end)',
         },
+        includeTransitions: { type: 'boolean', description: 'Include crossfade transitions (default: true)' },
+      },
+    },
+  },
+  // ========================================
+  // UI CONTROL TOOLS
+  // ========================================
+  {
+    name: 'show_panel',
+    description: 'Show or focus a panel in the UI',
+    input_schema: {
+      type: 'object',
+      properties: {
+        panel: {
+          type: 'string',
+          enum: ['effects', 'settings', 'timeline', 'clips'],
+          description: 'Panel to show',
+        },
+      },
+      required: ['panel'],
+    },
+  },
+  {
+    name: 'highlight_element',
+    description: 'Highlight an element to draw user attention',
+    input_schema: {
+      type: 'object',
+      properties: {
+        elementId: { type: 'string', description: 'Element to highlight' },
+        duration: { type: 'number', description: 'Duration in ms (default: 2000)' },
+      },
+      required: ['elementId'],
+    },
+  },
+  // ========================================
+  // BASIC TOOLS
+  // ========================================
+  {
+    name: 'seek_to_time',
+    description: 'Seek the video to a specific timestamp',
+    input_schema: {
+      type: 'object',
+      properties: {
+        time: { type: 'number', description: 'Timestamp in seconds' },
       },
       required: ['time'],
     },
   },
   {
     name: 'select_clip',
-    description: 'Select a clip by its ID or index',
+    description: 'Select a clip by ID or index',
     input_schema: {
       type: 'object',
       properties: {
-        clipId: { type: 'string', description: 'The ID of the clip to select' },
-        clipIndex: { type: 'number', description: 'The index (0-based) of the clip to select' },
+        clipId: { type: 'string', description: 'Clip ID' },
+        clipIndex: { type: 'number', description: 'Clip index (0-based)' },
       },
     },
   },
   {
     name: 'set_clip_status',
-    description: 'Set the status of one or more clips (accept, reject, or reset to pending)',
+    description: 'Set clip status (accept, reject, pending)',
     input_schema: {
       type: 'object',
       properties: {
-        clipIds: {
-          type: 'array',
-          items: { type: 'string' },
-          description: 'Array of clip IDs to update',
-        },
-        status: {
-          type: 'string',
-          enum: ['accepted', 'rejected', 'pending'],
-          description: 'The status to set',
-        },
+        clipIds: { type: 'array', items: { type: 'string' } },
+        status: { type: 'string', enum: ['accepted', 'rejected', 'pending'] },
       },
       required: ['clipIds', 'status'],
     },
   },
   {
     name: 'trim_clip',
-    description: 'Manually adjust the trim offsets of a clip',
+    description: 'Adjust trim offsets for a clip',
     input_schema: {
       type: 'object',
       properties: {
-        clipId: { type: 'string', description: 'The clip to trim' },
-        trimStartOffset: { type: 'number', description: 'Offset in seconds to add to start time' },
-        trimEndOffset: { type: 'number', description: 'Offset in seconds to add to end time' },
+        clipId: { type: 'string' },
+        trimStartOffset: { type: 'number' },
+        trimEndOffset: { type: 'number' },
       },
     },
   },
   {
     name: 'get_project_state',
-    description: 'Get the current state of the project including all clips, their scores, and analysis data',
+    description: 'Get current project state including clips and scores',
     input_schema: {
       type: 'object',
       properties: {
-        includeTranscript: { type: 'boolean', description: 'Include full transcript (default: false)' },
-        includeDeadSpaces: { type: 'boolean', description: 'Include dead space regions (default: true)' },
+        includeTranscript: { type: 'boolean', description: 'Include transcript (default: false)' },
       },
     },
   },
   {
     name: 'get_transcript',
-    description: 'Get the transcript for a time range or clip',
+    description: 'Get transcript for a time range or clip',
     input_schema: {
       type: 'object',
       properties: {
-        clipId: { type: 'string', description: 'Get transcript for a specific clip' },
-        startTime: { type: 'number', description: 'Start time in seconds' },
-        endTime: { type: 'number', description: 'End time in seconds' },
+        clipId: { type: 'string' },
+        startTime: { type: 'number' },
+        endTime: { type: 'number' },
       },
     },
   },
   {
     name: 'play_pause',
-    description: 'Toggle video playback or set to specific state',
+    description: 'Control video playback',
     input_schema: {
       type: 'object',
       properties: {
-        action: {
-          type: 'string',
-          enum: ['play', 'pause', 'toggle'],
-          description: 'The playback action (default: toggle)',
-        },
+        action: { type: 'string', enum: ['play', 'pause', 'toggle'] },
       },
     },
   },
 ];
+
+// ============================================
+// TYPES
+// ============================================
 
 interface ChatMessage {
   role: 'user' | 'assistant' | 'system';
@@ -306,15 +333,15 @@ interface ChatMessage {
 
 interface ChatRequest {
   messages: ChatMessage[];
-  model: string;
-  apiKey: string;
   tools?: boolean;
   systemPrompt?: string;
-}
-
-interface ToolCall {
-  name: string;
-  arguments: Record<string, unknown>;
+  // Provider config - sent from settings
+  providerConfig?: {
+    anthropicApiKey?: string;
+    openaiApiKey?: string;
+    geminiApiKey?: string;
+    ollamaHost?: string;
+  };
 }
 
 interface ChatResponse {
@@ -324,117 +351,104 @@ interface ChatResponse {
   toolCalls?: ToolCall[];
   requiresToolResults?: boolean;
   error?: string;
+  // Tell UI which provider was used
+  provider?: string;
+  model?: string;
 }
 
-export function registerChatHandlers(): void {
-  // Chat with AI handler
-  ipcMain.handle('chat-with-ai', async (_event, request: ChatRequest): Promise<ChatResponse> => {
-    const { messages, model, apiKey, tools, systemPrompt } = request;
+// ============================================
+// HANDLERS
+// ============================================
 
-    if (!apiKey) {
-      return { success: false, error: 'API key is required' };
+export function registerChatHandlers(): void {
+  // Update provider config handler
+  ipcMain.handle('chat-update-config', async (_event, config: {
+    anthropicApiKey?: string;
+    openaiApiKey?: string;
+    geminiApiKey?: string;
+    ollamaHost?: string;
+  }) => {
+    updateRouterConfig(config);
+    const router = getRouter();
+    return {
+      success: true,
+      availableProviders: router.getAvailableProviders(),
+    };
+  });
+  
+  // Get available providers handler
+  ipcMain.handle('chat-get-providers', async () => {
+    const router = getRouter();
+    return {
+      available: router.getAvailableProviders(),
+      chatProvider: router.getChatProvider()?.providerName || null,
+      transcriptionProvider: router.getTranscriptionProvider()?.providerName || null,
+      visionProvider: router.getVisionProvider()?.providerName || null,
+    };
+  });
+
+  // Main chat handler - auto-routes to best provider
+  ipcMain.handle('chat-with-ai', async (_event, request: ChatRequest): Promise<ChatResponse> => {
+    const { messages, tools, systemPrompt, providerConfig } = request;
+
+    // Update router config if provided
+    if (providerConfig) {
+      updateRouterConfig(providerConfig);
     }
 
-    try {
-      // Build the request for Anthropic API
-      const anthropicMessages = messages.map(msg => ({
-        role: msg.role === 'system' ? 'user' : msg.role,
-        content: msg.content,
-      }));
-
-      const requestBody: Record<string, unknown> = {
-        model: model || 'claude-sonnet-4-20250514',
-        max_tokens: 4096,
-        messages: anthropicMessages,
+    const router = getRouter();
+    const route = router.getChatProvider();
+    
+    if (!route) {
+      return { 
+        success: false, 
+        error: 'No AI provider available. Please configure an API key in Settings.' 
       };
+    }
 
-      // Add system prompt if provided
-      if (systemPrompt) {
-        requestBody.system = systemPrompt;
-      }
+    console.log(`[ChatHandlers] Using provider: ${route.providerName}`);
 
-      // Add tools if enabled
-      if (tools) {
-        requestBody.tools = TOOL_DEFINITIONS;
-      }
-
-      // Enable extended thinking for supported models
-      // Claude claude-sonnet-4-20250514 and later support extended thinking
-      const supportsThinking = model?.includes('claude-sonnet-4-20250514') || 
-                               model?.includes('claude-3-5') || 
-                               model?.includes('claude-3-opus');
+    try {
+      const completionRequest: CompletionRequest = {
+        messages,
+        systemPrompt,
+        maxTokens: 4096,
+        temperature: 0.1,
+      };
       
-      if (supportsThinking) {
-        // Note: Extended thinking requires specific beta headers
-        // For now, we'll use the standard API
+      if (tools) {
+        completionRequest.tools = TOOL_DEFINITIONS;
       }
 
-      console.log('[ChatHandlers] Sending request to Anthropic API...');
-
-      const response = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': apiKey,
-          'anthropic-version': '2023-06-01',
-          // Enable extended thinking beta if available
-          // 'anthropic-beta': 'extended-thinking-2024-01-01',
-        },
-        body: JSON.stringify(requestBody),
-      });
-
-      if (!response.ok) {
-        const errorData = await response.text();
-        console.error('[ChatHandlers] API error:', response.status, errorData);
-        
-        // Parse error message if possible
-        try {
-          const errorJson = JSON.parse(errorData);
-          return { 
-            success: false, 
-            error: errorJson.error?.message || `API error: ${response.status}` 
-          };
-        } catch {
-          return { success: false, error: `API error: ${response.status}` };
-        }
-      }
-
-      const data = await response.json();
-      console.log('[ChatHandlers] Received response:', JSON.stringify(data, null, 2).slice(0, 500));
-
-      // Parse the response
-      let content = '';
-      let thinking = '';
-      const toolCalls: ToolCall[] = [];
-
-      if (data.content && Array.isArray(data.content)) {
-        for (const block of data.content) {
-          if (block.type === 'text') {
-            content += block.text;
-          } else if (block.type === 'thinking') {
-            thinking += block.thinking;
-          } else if (block.type === 'tool_use') {
-            toolCalls.push({
-              name: block.name,
-              arguments: block.input || {},
-            });
-          }
-        }
-      }
-
-      // Check if we need tool results (stop_reason === 'tool_use')
-      const requiresToolResults = data.stop_reason === 'tool_use';
+      const response = await route.provider.complete(completionRequest);
 
       return {
-        success: true,
-        content,
-        thinking,
-        toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
-        requiresToolResults,
+        success: response.success,
+        content: response.content,
+        thinking: response.thinking,
+        toolCalls: response.toolCalls,
+        requiresToolResults: response.requiresToolResults,
+        error: response.error,
+        provider: route.providerName,
+        model: response.model,
       };
 
     } catch (err) {
       console.error('[ChatHandlers] Error:', err);
+      
+      // Try fallback
+      const fallbackResult = await router.complete(
+        { messages, systemPrompt, tools: tools ? TOOL_DEFINITIONS : undefined },
+        ProviderCapability.TEXT_COMPLETION
+      );
+      
+      if (fallbackResult.success) {
+        return {
+          ...fallbackResult,
+          provider: fallbackResult.usedProvider,
+        };
+      }
+      
       return {
         success: false,
         error: err instanceof Error ? err.message : 'Unknown error',
@@ -446,90 +460,92 @@ export function registerChatHandlers(): void {
   ipcMain.handle('chat-continue-with-tools', async (_event, request: {
     messages: ChatMessage[];
     toolResults: Array<{ toolName: string; result: unknown }>;
-    model: string;
-    apiKey: string;
     systemPrompt?: string;
+    providerConfig?: {
+      anthropicApiKey?: string;
+      openaiApiKey?: string;
+      geminiApiKey?: string;
+      ollamaHost?: string;
+    };
   }): Promise<ChatResponse> => {
-    const { messages, toolResults, model, apiKey, systemPrompt } = request;
+    const { messages, toolResults, systemPrompt, providerConfig } = request;
 
-    if (!apiKey) {
-      return { success: false, error: 'API key is required' };
+    if (providerConfig) {
+      updateRouterConfig(providerConfig);
+    }
+
+    const router = getRouter();
+    const route = router.getChatProvider();
+    
+    if (!route) {
+      return { success: false, error: 'No AI provider available' };
     }
 
     try {
-      // Build messages including tool results
-      const anthropicMessages = messages.map(msg => ({
-        role: msg.role === 'system' ? 'user' : msg.role,
-        content: msg.content,
-      }));
-
-      // Add tool results as a user message
-      const toolResultsContent = toolResults.map(tr => ({
-        type: 'tool_result',
-        tool_use_id: tr.toolName, // This should be the actual tool_use_id
-        content: JSON.stringify(tr.result),
-      }));
-
-      anthropicMessages.push({
-        role: 'user',
-        content: toolResultsContent as unknown as string,
+      // Build messages with tool results
+      // This is provider-specific, so we handle it here
+      const provider = route.provider;
+      const providerName = route.providerName;
+      
+      // For Anthropic, tool results need special formatting
+      if (providerName === 'anthropic') {
+        const anthropicMessages = [...messages];
+        
+        // Add tool results as a user message with tool_result blocks
+        const toolResultsContent = toolResults.map(tr => ({
+          type: 'tool_result',
+          tool_use_id: tr.toolName,
+          content: JSON.stringify(tr.result),
+        }));
+        
+        anthropicMessages.push({
+          role: 'user',
+          content: JSON.stringify(toolResultsContent),
+        });
+        
+        const response = await provider.complete({
+          messages: anthropicMessages,
+          systemPrompt,
+          tools: TOOL_DEFINITIONS,
+        });
+        
+        return {
+          success: response.success,
+          content: response.content,
+          thinking: response.thinking,
+          toolCalls: response.toolCalls,
+          requiresToolResults: response.requiresToolResults,
+          provider: providerName,
+          model: response.model,
+        };
+      }
+      
+      // For other providers, include tool results in the conversation
+      const messagesWithResults = [...messages];
+      
+      // Add a summary of tool results as an assistant message
+      const resultsSummary = toolResults.map(tr => 
+        `Tool ${tr.toolName} returned: ${JSON.stringify(tr.result)}`
+      ).join('\n');
+      
+      messagesWithResults.push({
+        role: 'assistant',
+        content: `I executed the tools. Results:\n${resultsSummary}`,
       });
-
-      const requestBody: Record<string, unknown> = {
-        model: model || 'claude-sonnet-4-20250514',
-        max_tokens: 4096,
-        messages: anthropicMessages,
+      
+      const response = await provider.complete({
+        messages: messagesWithResults,
+        systemPrompt,
         tools: TOOL_DEFINITIONS,
-      };
-
-      if (systemPrompt) {
-        requestBody.system = systemPrompt;
-      }
-
-      const response = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': apiKey,
-          'anthropic-version': '2023-06-01',
-        },
-        body: JSON.stringify(requestBody),
       });
-
-      if (!response.ok) {
-        const errorData = await response.text();
-        console.error('[ChatHandlers] API error:', response.status, errorData);
-        return { success: false, error: `API error: ${response.status}` };
-      }
-
-      const data = await response.json();
-
-      // Parse the response
-      let content = '';
-      let thinking = '';
-      const toolCalls: ToolCall[] = [];
-
-      if (data.content && Array.isArray(data.content)) {
-        for (const block of data.content) {
-          if (block.type === 'text') {
-            content += block.text;
-          } else if (block.type === 'thinking') {
-            thinking += block.thinking;
-          } else if (block.type === 'tool_use') {
-            toolCalls.push({
-              name: block.name,
-              arguments: block.input || {},
-            });
-          }
-        }
-      }
-
+      
       return {
-        success: true,
-        content,
-        thinking,
-        toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
-        requiresToolResults: data.stop_reason === 'tool_use',
+        success: response.success,
+        content: response.content,
+        toolCalls: response.toolCalls,
+        requiresToolResults: response.requiresToolResults,
+        provider: providerName,
+        model: response.model,
       };
 
     } catch (err) {
@@ -541,5 +557,5 @@ export function registerChatHandlers(): void {
     }
   });
 
-  console.log('[ChatHandlers] Registered chat handlers');
+  console.log('[ChatHandlers] Registered chat handlers with auto-routing');
 }

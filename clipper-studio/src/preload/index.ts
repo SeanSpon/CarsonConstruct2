@@ -50,8 +50,26 @@ export interface ExportResult {
   errors?: string[];
 }
 
+export interface ProjectCreateResult {
+  success: boolean;
+  projectPath?: string;
+  projectName?: string;
+  projectFile?: string;
+  error?: string;
+}
+
 // Expose protected methods to renderer via window.api
 const api = {
+  // Project operations
+  getDefaultProjectsDir: (): Promise<string> =>
+    ipcRenderer.invoke('get-default-projects-dir'),
+  
+  selectProjectLocation: (defaultPath?: string): Promise<string | null> =>
+    ipcRenderer.invoke('select-project-location', defaultPath),
+  
+  createProject: (data: { name: string; location: string }): Promise<ProjectCreateResult> =>
+    ipcRenderer.invoke('create-project', data),
+
   // File operations
   selectFile: (): Promise<FileSelection | null> => 
     ipcRenderer.invoke('select-file'),

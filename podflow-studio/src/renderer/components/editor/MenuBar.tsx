@@ -205,7 +205,7 @@ function MenuBar({
       label: 'Edit',
       items: [
         { id: 'undo', label: 'Undo', icon: <Undo2 className="w-4 h-4" />, shortcut: 'Ctrl+Z', onClick: onUndo, disabled: !canUndo },
-        { id: 'redo', label: 'Redo', icon: <Redo2 className="w-4 h-4" />, shortcut: 'Ctrl+Y', onClick: onRedo, disabled: !canRedo },
+        { id: 'redo', label: 'Redo', icon: <Redo2 className="w-4 h-4" />, shortcut: 'Ctrl+Shift+Z', onClick: onRedo, disabled: !canRedo },
         { id: 'sep1', label: '', separator: true },
         { id: 'accept', label: 'Accept Clip', icon: <Check className="w-4 h-4" />, shortcut: 'A', onClick: onAcceptClip, disabled: !hasSelectedClip },
         { id: 'reject', label: 'Reject Clip', icon: <X className="w-4 h-4" />, shortcut: 'R', onClick: onRejectClip, disabled: !hasSelectedClip },

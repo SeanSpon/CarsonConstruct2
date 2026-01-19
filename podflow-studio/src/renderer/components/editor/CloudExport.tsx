@@ -11,7 +11,9 @@ import {
   AlertCircle,
   Loader2,
   FolderOpen,
+  FolderPlus,
   File,
+  ChevronDown,
 } from 'lucide-react';
 
 interface CloudExportProps {
@@ -42,6 +44,9 @@ function CloudExport({ files, onClose, className }: CloudExportProps) {
   const [uploadResults, setUploadResults] = useState<UploadResult[]>([]);
   const [copiedLink, setCopiedLink] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [folderName, setFolderName] = useState(`PodFlow Export ${new Date().toLocaleDateString()}`);
+  const [showFolderInput, setShowFolderInput] = useState(false);
+  const [createNewFolder, setCreateNewFolder] = useState(true);
 
   // Check authentication status on mount
   useEffect(() => {
@@ -113,7 +118,7 @@ function CloudExport({ files, onClose, className }: CloudExportProps) {
       
       const result = await window.api.uploadToCloud({
         files: filesToUpload,
-        folderName: `PodFlow Export ${new Date().toLocaleDateString()}`,
+        folderName: createNewFolder ? folderName : undefined,
       });
       
       setUploadResults(result.results || []);
@@ -127,7 +132,7 @@ function CloudExport({ files, onClose, className }: CloudExportProps) {
       setIsUploading(false);
       setUploadProgress(null);
     }
-  }, [files]);
+  }, [files, folderName, createNewFolder]);
 
   const handleCopyLink = useCallback(async (link: string) => {
     try {
@@ -215,22 +220,93 @@ function CloudExport({ files, onClose, className }: CloudExportProps) {
               </button>
             </div>
 
-            {/* Files to upload */}
+            {/* Folder destination */}
             {uploadResults.length === 0 && (
-              <div className="space-y-2">
-                <p className="text-xs text-sz-text-muted">
-                  {files.length} file{files.length !== 1 ? 's' : ''} ready to upload
-                </p>
-                <div className="max-h-40 overflow-y-auto space-y-1">
-                  {files.map((file, i) => (
-                    <div
-                      key={i}
-                      className="flex items-center gap-2 p-2 rounded bg-sz-bg-tertiary text-sm"
+              <div className="space-y-3">
+                {/* Folder selection */}
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs text-sz-text-muted flex items-center gap-1">
+                      <FolderOpen className="w-3.5 h-3.5" />
+                      Destination folder
+                    </label>
+                    <button
+                      onClick={() => setShowFolderInput(!showFolderInput)}
+                      className="text-xs text-sz-accent hover:text-sz-accent-hover transition-colors"
                     >
-                      <File className="w-4 h-4 text-sz-text-secondary" />
-                      <span className="flex-1 truncate text-sz-text">{file.name}</span>
+                      {showFolderInput ? 'Hide options' : 'Change'}
+                    </button>
+                  </div>
+                  
+                  {showFolderInput ? (
+                    <div className="space-y-2">
+                      <div className="flex items-center gap-2">
+                        <label className="flex items-center gap-2 cursor-pointer">
+                          <input
+                            type="radio"
+                            checked={createNewFolder}
+                            onChange={() => setCreateNewFolder(true)}
+                            className="accent-sz-accent"
+                          />
+                          <span className="text-sm text-sz-text">Create new folder</span>
+                        </label>
+                        <label className="flex items-center gap-2 cursor-pointer">
+                          <input
+                            type="radio"
+                            checked={!createNewFolder}
+                            onChange={() => setCreateNewFolder(false)}
+                            className="accent-sz-accent"
+                          />
+                          <span className="text-sm text-sz-text">My Drive root</span>
+                        </label>
+                      </div>
+                      
+                      {createNewFolder && (
+                        <div className="flex items-center gap-2">
+                          <FolderPlus className="w-4 h-4 text-sz-text-secondary flex-shrink-0" />
+                          <input
+                            type="text"
+                            value={folderName}
+                            onChange={(e) => setFolderName(e.target.value)}
+                            placeholder="Folder name"
+                            className="flex-1 px-3 py-2 rounded-lg bg-sz-bg-tertiary border border-sz-border text-sz-text text-sm focus:outline-none focus:border-sz-accent"
+                          />
+                        </div>
+                      )}
                     </div>
-                  ))}
+                  ) : (
+                    <div className="flex items-center gap-2 p-2 rounded-lg bg-sz-bg-tertiary">
+                      {createNewFolder ? (
+                        <>
+                          <FolderPlus className="w-4 h-4 text-sz-accent" />
+                          <span className="text-sm text-sz-text">{folderName}</span>
+                        </>
+                      ) : (
+                        <>
+                          <FolderOpen className="w-4 h-4 text-sz-text-secondary" />
+                          <span className="text-sm text-sz-text-secondary">My Drive (root)</span>
+                        </>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {/* Files to upload */}
+                <div className="space-y-2">
+                  <p className="text-xs text-sz-text-muted">
+                    {files.length} file{files.length !== 1 ? 's' : ''} ready to upload
+                  </p>
+                  <div className="max-h-32 overflow-y-auto space-y-1">
+                    {files.map((file, i) => (
+                      <div
+                        key={i}
+                        className="flex items-center gap-2 p-2 rounded bg-sz-bg-tertiary text-sm"
+                      >
+                        <File className="w-4 h-4 text-sz-text-secondary" />
+                        <span className="flex-1 truncate text-sz-text">{file.name}</span>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               </div>
             )}

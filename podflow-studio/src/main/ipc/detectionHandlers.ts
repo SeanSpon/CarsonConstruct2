@@ -20,6 +20,8 @@ console.log('[Detection] Using FFmpeg at:', ffmpegPath);
 // Store active detection processes
 const activeProcesses = new Map<string, ChildProcess>();
 const progressState = new Map<string, { lastSentAt: number; lastProgress: number; lastMessage: string }>();
+// Buffer for accumulating stdout data per project (for large JSON outputs)
+const stdoutBuffers = new Map<string, string>();
 const PROGRESS_MIN_INTERVAL_MS = 100;
 const PROGRESS_MIN_DELTA = 1;
 
@@ -164,18 +166,32 @@ const startJob = async (data: {
 
   activeProcesses.set(projectId, pythonProcess);
   activeJobId = projectId;
+  // Initialize stdout buffer for this project
+  stdoutBuffers.set(projectId, '');
 
   // Handle stdout - progress and results
+  // IMPORTANT: Buffer data to handle large JSON outputs that span multiple data events
   pythonProcess.stdout.on('data', (data) => {
-    const fullOutput = data.toString();
-    const lines = fullOutput.split('\n').filter((line: string) => line.trim());
+    // Append new data to the buffer
+    const buffer = (stdoutBuffers.get(projectId) || '') + data.toString();
+    
+    // Split by newlines, but keep incomplete lines in the buffer
+    const parts = buffer.split('\n');
+    // The last element might be incomplete (no trailing newline), keep it buffered
+    const incompleteData = parts.pop() || '';
+    stdoutBuffers.set(projectId, incompleteData);
+    
+    // Process complete lines
+    const lines = parts.filter((line: string) => line.trim());
 
     // Log all lines for debugging
     for (const line of lines) {
       if (line.startsWith('DEBUG:')) {
         console.log('[Detection]', line);
-      } else if (line.startsWith('ERROR:') || line.startsWith('PROGRESS:') || line.startsWith('RESULT:')) {
+      } else if (line.startsWith('ERROR:') || line.startsWith('PROGRESS:')) {
         console.log('[Detection] Python stdout:', line.substring(0, 300));
+      } else if (line.startsWith('RESULT:')) {
+        console.log('[Detection] Python stdout: RESULT:<json of', line.length - 7, 'chars>');
       }
     }
 
@@ -215,7 +231,10 @@ const startJob = async (data: {
         }
       } else if (line.startsWith('RESULT:')) {
         try {
-          const result = JSON.parse(line.substring(7));
+          const jsonStr = line.substring(7);
+          console.log('[Detection] Parsing RESULT JSON, length:', jsonStr.length);
+          const result = JSON.parse(jsonStr);
+          console.log('[Detection] Successfully parsed RESULT with', result.clips?.length || 0, 'clips');
           getJobStore().updateStep(projectId, 'detect', { status: 'done' });
           if (settings.useAiEnhancement) {
             getJobStore().updateStep(projectId, 'transcribe', { status: 'done' });
@@ -230,13 +249,22 @@ const startJob = async (data: {
             speakers: result.speakers || [],
           });
         } catch (e) {
-          console.error('Failed to parse detection result:', e);
+          console.error('[Detection] Failed to parse detection result:', e);
+          console.error('[Detection] JSON string starts with:', line.substring(7, 200));
+          console.error('[Detection] JSON string ends with:', line.substring(line.length - 100));
           getJobStore().update(projectId, { status: 'failed', error: 'Failed to parse detection results' });
           win.webContents.send('detection-error', {
             projectId,
             error: 'Failed to parse detection results',
           });
         }
+      } else if (line.startsWith('ERROR:')) {
+        const errorMessage = line.substring(6).trim();
+        console.error('[Detection] Python error:', errorMessage);
+        win.webContents.send('detection-error', {
+          projectId,
+          error: errorMessage,
+        });
       }
     }
   });
@@ -259,8 +287,40 @@ const startJob = async (data: {
   // Handle process exit
   pythonProcess.on('close', (code) => {
     console.log('[Detection] Python process exited with code:', code);
+    
+    // Check if there's any remaining data in the buffer (e.g., final RESULT line without trailing newline)
+    const remainingData = stdoutBuffers.get(projectId) || '';
+    if (remainingData.trim()) {
+      console.log('[Detection] Processing remaining buffered data:', remainingData.length, 'chars');
+      if (remainingData.startsWith('RESULT:')) {
+        try {
+          const jsonStr = remainingData.substring(7);
+          console.log('[Detection] Parsing final RESULT JSON, length:', jsonStr.length);
+          const result = JSON.parse(jsonStr);
+          console.log('[Detection] Successfully parsed final RESULT with', result.clips?.length || 0, 'clips');
+          getJobStore().updateStep(projectId, 'detect', { status: 'done' });
+          if (settings.useAiEnhancement) {
+            getJobStore().updateStep(projectId, 'transcribe', { status: 'done' });
+            getJobStore().updateStep(projectId, 'ai_enrich', { status: 'done' });
+          }
+          getJobStore().update(projectId, { status: 'done' });
+          win.webContents.send('detection-complete', {
+            projectId,
+            clips: result.clips || [],
+            deadSpaces: result.deadSpaces || [],
+            transcript: result.transcript || null,
+            speakers: result.speakers || [],
+          });
+        } catch (e) {
+          console.error('[Detection] Failed to parse final RESULT:', e);
+        }
+      }
+    }
+    
+    // Cleanup
     activeProcesses.delete(projectId);
     progressState.delete(projectId);
+    stdoutBuffers.delete(projectId);
     activeJobId = null;
 
     if (code !== 0 && code !== null) {

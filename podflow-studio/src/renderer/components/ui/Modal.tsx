@@ -1,202 +1,327 @@
-import { memo, useEffect, type ReactNode } from 'react';
+import { useEffect, useRef, ReactNode } from 'react';
 import { X } from 'lucide-react';
-import IconButton from './IconButton';
 
-export interface ModalProps {
+interface ModalProps {
   isOpen: boolean;
   onClose: () => void;
   title?: string;
-  description?: string;
   children: ReactNode;
-  size?: 'sm' | 'md' | 'lg' | 'xl' | 'full';
+  size?: 'sm' | 'md' | 'lg';
   showCloseButton?: boolean;
-  closeOnOverlayClick?: boolean;
-  closeOnEscape?: boolean;
-  className?: string;
 }
 
-const sizeStyles = {
-  sm: 'max-w-sm',
-  md: 'max-w-md',
-  lg: 'max-w-lg',
-  xl: 'max-w-xl',
-  full: 'max-w-4xl',
-};
-
-function Modal({
-  isOpen,
-  onClose,
-  title,
-  description,
-  children,
+export function Modal({ 
+  isOpen, 
+  onClose, 
+  title, 
+  children, 
   size = 'md',
-  showCloseButton = true,
-  closeOnOverlayClick = true,
-  closeOnEscape = true,
-  className = '',
+  showCloseButton = true 
 }: ModalProps) {
+  const modalRef = useRef<HTMLDivElement>(null);
+
   // Handle escape key
   useEffect(() => {
-    if (!closeOnEscape || !isOpen) return;
-
     const handleEscape = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
+      if (e.key === 'Escape' && isOpen) {
         onClose();
       }
     };
+    window.addEventListener('keydown', handleEscape);
+    return () => window.removeEventListener('keydown', handleEscape);
+  }, [isOpen, onClose]);
 
-    document.addEventListener('keydown', handleEscape);
-    return () => document.removeEventListener('keydown', handleEscape);
-  }, [isOpen, closeOnEscape, onClose]);
-
-  // Prevent body scroll when modal is open
+  // Focus trap
   useEffect(() => {
-    if (isOpen) {
-      document.body.style.overflow = 'hidden';
-    } else {
-      document.body.style.overflow = '';
+    if (isOpen && modalRef.current) {
+      const focusableElements = modalRef.current.querySelectorAll(
+        'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+      );
+      const firstEl = focusableElements[0] as HTMLElement;
+      firstEl?.focus();
     }
-    return () => {
-      document.body.style.overflow = '';
-    };
   }, [isOpen]);
 
   if (!isOpen) return null;
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      {/* Overlay */}
-      <div
-        className="absolute inset-0 bg-black/70 backdrop-blur-sm animate-sz-fade-in"
-        onClick={closeOnOverlayClick ? onClose : undefined}
-      />
+  const sizeClasses = {
+    sm: 'max-w-sm',
+    md: 'max-w-lg',
+    lg: 'max-w-2xl',
+  };
 
-      {/* Modal content */}
-      <div
-        className={`
-          relative w-full ${sizeStyles[size]}
-          bg-sz-bg-secondary border border-sz-border rounded-sz-lg
-          shadow-sz-float animate-sz-slide-up
-          ${className}
-        `}
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center">
+      {/* Backdrop */}
+      <div 
+        className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+        onClick={onClose}
+      />
+      
+      {/* Modal */}
+      <div 
+        ref={modalRef}
+        className={`relative bg-sz-bg-secondary border border-sz-border rounded-sz-lg shadow-2xl w-full ${sizeClasses[size]} mx-4 animate-sz-fade-in`}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={title ? 'modal-title' : undefined}
       >
         {/* Header */}
         {(title || showCloseButton) && (
-          <div className="flex items-start justify-between gap-4 px-6 py-4 border-b border-sz-border">
-            <div className="flex-1 min-w-0">
-              {title && (
-                <h2 className="text-lg font-semibold text-sz-text">{title}</h2>
-              )}
-              {description && (
-                <p className="text-sm text-sz-text-secondary mt-1">{description}</p>
-              )}
-            </div>
+          <div className="flex items-center justify-between px-6 py-4 border-b border-sz-border">
+            {title && (
+              <h2 id="modal-title" className="text-lg font-semibold text-sz-text">{title}</h2>
+            )}
             {showCloseButton && (
-              <IconButton
-                icon={<X className="w-4 h-4" />}
-                variant="ghost"
-                size="sm"
+              <button
                 onClick={onClose}
-                tooltip="Close"
-              />
+                className="p-1 text-sz-text-muted hover:text-sz-text hover:bg-sz-bg-tertiary rounded-sz transition-colors ml-auto"
+              >
+                <X className="w-5 h-5" />
+              </button>
             )}
           </div>
         )}
 
-        {/* Body */}
-        <div className="px-6 py-4">
-          {children}
+        {/* Content */}
+        {children}
+      </div>
+    </div>
+  );
+}
+
+// Confirm Modal - replaces window.confirm
+interface ConfirmModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  onConfirm: () => void;
+  title: string;
+  message: string;
+  confirmText?: string;
+  cancelText?: string;
+  variant?: 'default' | 'danger';
+  icon?: ReactNode;
+}
+
+export function ConfirmModal({
+  isOpen,
+  onClose,
+  onConfirm,
+  title,
+  message,
+  confirmText = 'Confirm',
+  cancelText = 'Cancel',
+  variant = 'default',
+  icon,
+}: ConfirmModalProps) {
+  const handleConfirm = () => {
+    onConfirm();
+    onClose();
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') {
+      handleConfirm();
+    }
+  };
+
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center" onKeyDown={handleKeyDown}>
+      {/* Backdrop */}
+      <div 
+        className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+        onClick={onClose}
+      />
+      
+      {/* Modal */}
+      <div className="relative bg-sz-bg-secondary border border-sz-border rounded-sz-lg shadow-2xl w-full max-w-md mx-4 animate-sz-fade-in">
+        {/* Content */}
+        <div className="p-6">
+          <div className="flex gap-4">
+            {icon && (
+              <div className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 ${
+                variant === 'danger' ? 'bg-sz-danger-muted text-sz-danger' : 'bg-sz-accent-muted text-sz-accent'
+              }`}>
+                {icon}
+              </div>
+            )}
+            <div className="flex-1">
+              <h3 className="text-lg font-semibold text-sz-text mb-2">{title}</h3>
+              <p className="text-sm text-sz-text-secondary whitespace-pre-wrap">{message}</p>
+            </div>
+          </div>
+        </div>
+
+        {/* Footer */}
+        <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-sz-border bg-sz-bg-tertiary/50 rounded-b-sz-lg">
+          <button
+            onClick={onClose}
+            className="px-4 py-2 text-sz-text-muted hover:text-sz-text font-medium transition-colors"
+          >
+            {cancelText}
+          </button>
+          <button
+            onClick={handleConfirm}
+            className={`px-5 py-2 font-semibold rounded-sz transition-colors ${
+              variant === 'danger'
+                ? 'bg-sz-danger hover:bg-sz-danger/90 text-white'
+                : 'bg-sz-accent hover:bg-sz-accent-hover text-white'
+            }`}
+            autoFocus
+          >
+            {confirmText}
+          </button>
         </div>
       </div>
     </div>
   );
 }
 
-export default memo(Modal);
+// Alert Modal - replaces window.alert
+interface AlertModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  title: string;
+  message: string;
+  buttonText?: string;
+  variant?: 'info' | 'success' | 'warning' | 'error';
+  icon?: ReactNode;
+}
 
-// Modal footer helper
+export function AlertModal({
+  isOpen,
+  onClose,
+  title,
+  message,
+  buttonText = 'OK',
+  variant = 'info',
+  icon,
+}: AlertModalProps) {
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' || e.key === 'Escape') {
+      onClose();
+    }
+  };
+
+  if (!isOpen) return null;
+
+  const variantStyles = {
+    info: 'bg-sz-accent-muted text-sz-accent',
+    success: 'bg-green-500/10 text-green-500',
+    warning: 'bg-yellow-500/10 text-yellow-500',
+    error: 'bg-sz-danger-muted text-sz-danger',
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center" onKeyDown={handleKeyDown}>
+      {/* Backdrop */}
+      <div 
+        className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+        onClick={onClose}
+      />
+      
+      {/* Modal */}
+      <div className="relative bg-sz-bg-secondary border border-sz-border rounded-sz-lg shadow-2xl w-full max-w-md mx-4 animate-sz-fade-in">
+        {/* Content */}
+        <div className="p-6">
+          <div className="flex gap-4">
+            {icon && (
+              <div className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 ${variantStyles[variant]}`}>
+                {icon}
+              </div>
+            )}
+            <div className="flex-1">
+              <h3 className="text-lg font-semibold text-sz-text mb-2">{title}</h3>
+              <p className="text-sm text-sz-text-secondary whitespace-pre-wrap">{message}</p>
+            </div>
+          </div>
+        </div>
+
+        {/* Footer */}
+        <div className="flex items-center justify-end px-6 py-4 border-t border-sz-border bg-sz-bg-tertiary/50 rounded-b-sz-lg">
+          <button
+            onClick={onClose}
+            className="px-5 py-2 bg-sz-accent hover:bg-sz-accent-hover text-white font-semibold rounded-sz transition-colors"
+            autoFocus
+          >
+            {buttonText}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Modal Footer - helper component for consistent footer styling
 export interface ModalFooterProps {
   children: ReactNode;
   className?: string;
 }
 
-export const ModalFooter = memo(function ModalFooter({ children, className = '' }: ModalFooterProps) {
+export function ModalFooter({ children, className = '' }: ModalFooterProps) {
   return (
-    <div className={`flex items-center justify-end gap-3 pt-4 border-t border-sz-border mt-4 -mx-6 -mb-4 px-6 py-4 bg-sz-bg-tertiary ${className}`}>
+    <div className={`flex items-center justify-end gap-3 px-6 py-4 border-t border-sz-border bg-sz-bg-tertiary/50 rounded-b-sz-lg ${className}`}>
       {children}
     </div>
   );
-});
+}
 
-// Slide-in panel (from right)
+// Slide-in Panel - for settings drawers, side panels, etc.
 export interface SlideInPanelProps {
   isOpen: boolean;
   onClose: () => void;
   title?: string;
   children: ReactNode;
-  width?: 'sm' | 'md' | 'lg';
-  className?: string;
+  side?: 'left' | 'right';
+  width?: string;
 }
 
-const panelWidths = {
-  sm: 'w-80',
-  md: 'w-96',
-  lg: 'w-[480px]',
-};
-
-export const SlideInPanel = memo(function SlideInPanel({
+export function SlideInPanel({
   isOpen,
   onClose,
   title,
   children,
-  width = 'md',
-  className = '',
+  side = 'right',
+  width = 'w-96',
 }: SlideInPanelProps) {
   useEffect(() => {
     const handleEscape = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
+      if (e.key === 'Escape' && isOpen) {
         onClose();
       }
     };
-
-    if (isOpen) {
-      document.addEventListener('keydown', handleEscape);
-    }
-    return () => document.removeEventListener('keydown', handleEscape);
+    window.addEventListener('keydown', handleEscape);
+    return () => window.removeEventListener('keydown', handleEscape);
   }, [isOpen, onClose]);
 
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex justify-end">
-      {/* Overlay */}
-      <div
-        className="absolute inset-0 bg-black/50 animate-sz-fade-in"
+    <div className="fixed inset-0 z-50 flex">
+      {/* Backdrop */}
+      <div 
+        className="absolute inset-0 bg-black/40 backdrop-blur-sm"
         onClick={onClose}
       />
-
+      
       {/* Panel */}
-      <div
-        className={`
-          relative ${panelWidths[width]} h-full
-          bg-sz-bg-secondary border-l border-sz-border
-          animate-sz-slide-in-right overflow-hidden flex flex-col
-          ${className}
-        `}
+      <div 
+        className={`absolute ${side}-0 top-0 bottom-0 ${width} bg-sz-bg-secondary border-${side === 'right' ? 'l' : 'r'} border-sz-border shadow-2xl flex flex-col animate-sz-slide-in-${side}`}
       >
         {/* Header */}
-        <div className="flex items-center justify-between gap-4 px-4 py-3 border-b border-sz-border flex-shrink-0">
-          {title && (
-            <h2 className="text-sm font-semibold text-sz-text">{title}</h2>
-          )}
-          <IconButton
-            icon={<X className="w-4 h-4" />}
-            variant="ghost"
-            size="sm"
-            onClick={onClose}
-            tooltip="Close"
-          />
-        </div>
+        {title && (
+          <div className="flex items-center justify-between px-6 py-4 border-b border-sz-border flex-shrink-0">
+            <h2 className="text-lg font-semibold text-sz-text">{title}</h2>
+            <button
+              onClick={onClose}
+              className="p-1 text-sz-text-muted hover:text-sz-text hover:bg-sz-bg-tertiary rounded-sz transition-colors"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
+        )}
 
         {/* Content */}
         <div className="flex-1 overflow-y-auto">
@@ -205,4 +330,10 @@ export const SlideInPanel = memo(function SlideInPanel({
       </div>
     </div>
   );
-});
+}
+
+// Export types
+export type { ModalProps, ConfirmModalProps, AlertModalProps };
+
+// Default export for backward compatibility
+export default Modal;

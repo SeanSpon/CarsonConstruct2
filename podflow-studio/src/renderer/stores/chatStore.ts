@@ -21,10 +21,13 @@ export interface ChatMessage {
   thinkingCollapsed?: boolean;
   toolCalls?: ToolCall[];
   isStreaming?: boolean;
+  // Which provider generated this message
+  provider?: string;
+  model?: string;
 }
 
 // Tool categories for UI organization
-export type ToolCategory = 'analysis' | 'action' | 'basic';
+export type ToolCategory = 'analysis' | 'action' | 'basic' | 'ui';
 
 export interface ToolDefinition {
   name: string;
@@ -33,109 +36,35 @@ export interface ToolDefinition {
   icon?: string;
 }
 
-// Available tools that the AI can use - organized by category
+// Available tools that the AI can use
 export const AVAILABLE_TOOLS: ToolDefinition[] = [
-  // Analysis tools - Use algorithms to understand content
-  {
-    name: 'analyze_clip_quality',
-    description: 'Run algorithmic analysis on a clip to get quality metrics, hook strength, energy, speech density, and clipworthiness breakdown',
-    category: 'analysis',
-    icon: 'sparkles',
-  },
-  {
-    name: 'analyze_energy_curve',
-    description: 'Get the energy/loudness profile over time to find peaks, buildups, and drops',
-    category: 'analysis',
-    icon: 'activity',
-  },
-  {
-    name: 'analyze_speech_patterns',
-    description: 'Analyze speech patterns including rate, pauses, sentence boundaries for finding natural cut points',
-    category: 'analysis',
-    icon: 'message-square',
-  },
-  {
-    name: 'find_optimal_boundaries',
-    description: 'Use VAD and speech analysis to find optimal start/end points that avoid mid-word cuts',
-    category: 'analysis',
-    icon: 'scissors',
-  },
-  {
-    name: 'detect_highlights',
-    description: 'Run highlight detection algorithms to find viral moments (payoff, monologue, laughter patterns)',
-    category: 'analysis',
-    icon: 'zap',
-  },
-  {
-    name: 'compare_clips',
-    description: 'Compare clips algorithmically based on hook strength, pacing, energy, and viral potential',
-    category: 'analysis',
-    icon: 'git-compare',
-  },
+  // Analysis tools
+  { name: 'analyze_clip_quality', description: 'Analyze clip quality metrics', category: 'analysis', icon: 'sparkles' },
+  { name: 'analyze_energy_curve', description: 'Get energy profile over time', category: 'analysis', icon: 'activity' },
+  { name: 'analyze_speech_patterns', description: 'Analyze speech rate and pauses', category: 'analysis', icon: 'message-square' },
+  { name: 'find_optimal_boundaries', description: 'Find optimal clip boundaries', category: 'analysis', icon: 'scissors' },
+  { name: 'detect_highlights', description: 'Filter existing clips by criteria', category: 'analysis', icon: 'zap' },
+  { name: 'compare_clips', description: 'Compare clips', category: 'analysis', icon: 'git-compare' },
   
-  // Action tools - Make changes based on analysis
-  {
-    name: 'smart_trim_clip',
-    description: 'Intelligently trim a clip using algorithms (tighten, extend hook, sentence boundaries, energy peaks)',
-    category: 'action',
-    icon: 'crop',
-  },
-  {
-    name: 'auto_review_clips',
-    description: 'Automatically review and accept/reject clips based on quality thresholds',
-    category: 'action',
-    icon: 'check-check',
-  },
-  {
-    name: 'suggest_clip_order',
-    description: 'Suggest optimal clip order for compilation based on pacing and energy arc',
-    category: 'action',
-    icon: 'list-ordered',
-  },
+  // Action tools
+  { name: 'run_detection', description: 'Start AI clip detection pipeline', category: 'action', icon: 'search' },
+  { name: 'create_vod_compilation', description: 'Create VOD from clips with transitions', category: 'action', icon: 'film' },
+  { name: 'smart_trim_clip', description: 'Intelligently trim clip', category: 'action', icon: 'crop' },
+  { name: 'auto_review_clips', description: 'Auto accept/reject clips', category: 'action', icon: 'check-check' },
+  { name: 'suggest_clip_order', description: 'Suggest clip ordering', category: 'action', icon: 'list-ordered' },
   
-  // Basic tools - Simple operations
-  {
-    name: 'seek_to_time',
-    description: 'Seek video to a timestamp',
-    category: 'basic',
-    icon: 'clock',
-  },
-  {
-    name: 'select_clip',
-    description: 'Select a clip by ID or index',
-    category: 'basic',
-    icon: 'mouse-pointer',
-  },
-  {
-    name: 'set_clip_status',
-    description: 'Set clip status (accept/reject/pending)',
-    category: 'basic',
-    icon: 'check-circle',
-  },
-  {
-    name: 'trim_clip',
-    description: 'Manually adjust trim offsets',
-    category: 'basic',
-    icon: 'scissors',
-  },
-  {
-    name: 'get_project_state',
-    description: 'Get current project state with all clips and scores',
-    category: 'basic',
-    icon: 'info',
-  },
-  {
-    name: 'get_transcript',
-    description: 'Get transcript for a time range or clip',
-    category: 'basic',
-    icon: 'file-text',
-  },
-  {
-    name: 'play_pause',
-    description: 'Toggle or control video playback',
-    category: 'basic',
-    icon: 'play',
-  },
+  // UI control tools
+  { name: 'show_panel', description: 'Show a UI panel', category: 'ui', icon: 'layout' },
+  { name: 'highlight_element', description: 'Highlight an element', category: 'ui', icon: 'pointer' },
+  
+  // Basic tools
+  { name: 'seek_to_time', description: 'Seek video', category: 'basic', icon: 'clock' },
+  { name: 'select_clip', description: 'Select a clip', category: 'basic', icon: 'mouse-pointer' },
+  { name: 'set_clip_status', description: 'Set clip status', category: 'basic', icon: 'check-circle' },
+  { name: 'trim_clip', description: 'Adjust trim offsets', category: 'basic', icon: 'scissors' },
+  { name: 'get_project_state', description: 'Get project state', category: 'basic', icon: 'info' },
+  { name: 'get_transcript', description: 'Get transcript', category: 'basic', icon: 'file-text' },
+  { name: 'play_pause', description: 'Control playback', category: 'basic', icon: 'play' },
 ];
 
 interface ChatState {
@@ -147,9 +76,12 @@ interface ChatState {
   isStreaming: boolean;
   error: string | null;
   
+  // Provider tracking (auto-selected)
+  lastUsedProvider: string | null;
+  lastUsedModel: string | null;
+  availableProviders: string[];
+  
   // Settings
-  apiKey: string | null;
-  model: string;
   showThinking: boolean;
   
   // Actions
@@ -164,19 +96,20 @@ interface ChatState {
   setLoading: (loading: boolean) => void;
   setStreaming: (streaming: boolean) => void;
   setError: (error: string | null) => void;
-  setApiKey: (key: string | null) => void;
-  setModel: (model: string) => void;
+  setLastUsedProvider: (provider: string | null, model?: string | null) => void;
+  setAvailableProviders: (providers: string[]) => void;
   setShowThinking: (show: boolean) => void;
 }
 
-export const useChatStore = create<ChatState>((set, get) => ({
+export const useChatStore = create<ChatState>((set) => ({
   // Initial state
   messages: [],
   isLoading: false,
   isStreaming: false,
   error: null,
-  apiKey: null,
-  model: 'claude-sonnet-4-20250514',
+  lastUsedProvider: null,
+  lastUsedModel: null,
+  availableProviders: [],
   showThinking: true,
   
   // Actions
@@ -269,9 +202,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
   
   setError: (error) => set({ error }),
   
-  setApiKey: (apiKey) => set({ apiKey }),
+  setLastUsedProvider: (provider, model = null) => set({ 
+    lastUsedProvider: provider,
+    lastUsedModel: model,
+  }),
   
-  setModel: (model) => set({ model }),
+  setAvailableProviders: (providers) => set({ availableProviders: providers }),
   
   setShowThinking: (showThinking) => set({ showThinking }),
 }));

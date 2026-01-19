@@ -1,5 +1,5 @@
 import { memo, useCallback, useRef, useState, useMemo, useEffect } from 'react';
-import { 
+import {
   ZoomIn, 
   ZoomOut, 
   Maximize2, 
@@ -22,6 +22,7 @@ import {
   Plus,
   FileAudio,
   MoreVertical,
+  SkipForward,
 } from 'lucide-react';
 import type { Clip, CameraCut, AudioTrack, DeadSpace, SpeakerSegment, TimelineGroup } from '../../types';
 import { formatDuration } from '../../types';
@@ -50,6 +51,7 @@ interface TimelineProps {
   selectedClipId: string | null;
   selectedClipIds?: string[]; // Support multi-select
   waveformData?: number[];
+  isExtractingWaveform?: boolean;
   onSeek: (time: number) => void;
   onSelectClip: (clipId: string) => void;
   onMultiSelectClip?: (clipId: string, addToSelection: boolean) => void;
@@ -72,9 +74,9 @@ interface TimelineProps {
 
 const defaultTracks: Track[] = [
   { id: 'video', name: 'Video', type: 'video', icon: <Video className="w-3.5 h-3.5" />, visible: true, locked: false, height: 64 },
-  { id: 'audio', name: 'Audio', type: 'audio', icon: <Volume2 className="w-3.5 h-3.5" />, visible: true, locked: false, height: 36 },
-  { id: 'broll', name: 'B-Roll', type: 'broll', icon: <Image className="w-3.5 h-3.5" />, visible: true, locked: false, height: 36 },
-  { id: 'music', name: 'Music', type: 'music', icon: <Music className="w-3.5 h-3.5" />, visible: true, locked: false, height: 28 },
+  { id: 'audio', name: 'Audio', type: 'audio', icon: <Volume2 className="w-3.5 h-3.5" />, visible: true, locked: false, height: 48 },
+  { id: 'broll', name: 'B-Roll', type: 'broll', icon: <Image className="w-3.5 h-3.5" />, visible: true, locked: false, height: 44 },
+  { id: 'music', name: 'Music', type: 'music', icon: <Music className="w-3.5 h-3.5" />, visible: true, locked: false, height: 40 },
 ];
 
 function Timeline({
@@ -89,6 +91,7 @@ function Timeline({
   selectedClipId,
   selectedClipIds = [],
   waveformData,
+  isExtractingWaveform = false,
   onSeek,
   onSelectClip,
   onMultiSelectClip,
@@ -111,6 +114,7 @@ function Timeline({
   const trackContainerRef = useRef<HTMLDivElement>(null);
   const isWheelZoomingRef = useRef(false);
   const [zoom, setZoom] = useState(1);
+  const zoomRef = useRef(zoom); // Keep ref in sync for wheel handler
   const [tracks, setTracks] = useState<Track[]>(defaultTracks);
   const [draggedClip, setDraggedClip] = useState<string | null>(null);
   const [dragStartX, setDragStartX] = useState(0);
@@ -121,21 +125,50 @@ function Timeline({
   const [playbackRate, setPlaybackRate] = useState(1);
   const [snapEnabled, setSnapEnabled] = useState(true);
   const [isPlaying, setIsPlaying] = useState(false);
-  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; clipId?: string; trackId?: string } | null>(null);
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; clipId?: string; trackId?: string; emptySpace?: boolean; timeAtCursor?: number } | null>(null);
   const [selectedAudioTrackId, setSelectedAudioTrackId] = useState<string | null>(null);
+  const [containerWidth, setContainerWidth] = useState(0);
   
-  // Calculate base timeline width based on duration
-  // Minimum 100% width of container, scales up for longer videos
-  // At zoom=1: short videos (<10min) fill container, longer videos get more width
+  // Keep zoom ref in sync with state (for wheel handler to access current value)
+  useEffect(() => {
+    zoomRef.current = zoom;
+  }, [zoom]);
+  
+  // Measure container width for responsive timeline
+  useEffect(() => {
+    if (!trackContainerRef.current) return;
+    
+    const updateWidth = () => {
+      if (trackContainerRef.current) {
+        const measuredWidth = trackContainerRef.current.clientWidth;
+        setContainerWidth(measuredWidth);
+      }
+    };
+    
+    // Initial measurement
+    updateWidth();
+    
+    // Update on resize
+    const resizeObserver = new ResizeObserver(updateWidth);
+    resizeObserver.observe(trackContainerRef.current);
+    
+    return () => resizeObserver.disconnect();
+  }, []);
+  
+  // Calculate base timeline width based on duration and container size
+  // At zoom=1: timeline fills container width for short videos, scales up for longer videos
   const BASE_TIMELINE_WIDTH = useMemo(() => {
-    // At minimum, timeline should be 800px
-    // For videos longer than 10 minutes, add more width
-    const minWidth = 800;
-    const pixelsPerMinute = 50; // 50px per minute of content
+    // Use container width as minimum (defaults to 800px if not measured yet)
+    const minWidth = containerWidth || 800;
+    
+    // For longer videos, scale up: 80px per minute of content
+    const pixelsPerMinute = 80;
     const durationMinutes = duration / 60;
-    const calculatedWidth = Math.max(minWidth, durationMinutes * pixelsPerMinute);
-    return calculatedWidth;
-  }, [duration]);
+    const contentBasedWidth = durationMinutes * pixelsPerMinute;
+    
+    // Use the larger of container width or content-based width
+    return Math.max(minWidth, contentBasedWidth);
+  }, [duration, containerWidth]);
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -218,7 +251,7 @@ function Timeline({
   // Calculate timeline width based on zoom (in pixels)
   const timelineWidth = useMemo(() => {
     return BASE_TIMELINE_WIDTH * zoom;
-  }, [zoom]);
+  }, [BASE_TIMELINE_WIDTH, zoom]);
   
   // Preserve scroll position when zooming (zoom towards center of viewport)
   // Skip if zooming via wheel (wheel handler manages its own scroll)
@@ -321,16 +354,32 @@ function Timeline({
   }, [duration, onSeek, isRazorMode, onSplitClip, clips]);
 
   // Handle right-click context menu
-  const handleContextMenu = useCallback((e: React.MouseEvent, clipId?: string, trackId?: string) => {
+  const handleContextMenu = useCallback((e: React.MouseEvent, clipId?: string, trackId?: string, emptySpace?: boolean) => {
     e.preventDefault();
     e.stopPropagation();
+    
+    // Calculate time at cursor position for empty space context menu
+    let timeAtCursor: number | undefined;
+    if (emptySpace && trackContainerRef.current && containerRef.current && duration > 0) {
+      const scrollContainer = trackContainerRef.current;
+      const scrollContainerRect = scrollContainer.getBoundingClientRect();
+      const scrollLeft = scrollContainer.scrollLeft;
+      const xInViewport = e.clientX - scrollContainerRect.left;
+      const x = xInViewport + scrollLeft;
+      const contentWidth = containerRef.current.scrollWidth;
+      const percentage = x / contentWidth;
+      timeAtCursor = percentage * duration;
+    }
+    
     setContextMenu({
       x: e.clientX,
       y: e.clientY,
       clipId,
       trackId,
+      emptySpace,
+      timeAtCursor,
     });
-  }, []);
+  }, [duration]);
 
   // Close context menu when clicking outside
   useEffect(() => {
@@ -399,14 +448,23 @@ function Timeline({
 
   // Zoom controls (scroll preservation handled by useEffect)
   const handleZoomIn = useCallback(() => {
-    setZoom(prev => Math.min(10, prev + 0.5));
+    setZoom(prev => {
+      const newZoom = Math.min(10, prev + 0.5);
+      zoomRef.current = newZoom;
+      return newZoom;
+    });
   }, []);
 
   const handleZoomOut = useCallback(() => {
-    setZoom(prev => Math.max(0.5, prev - 0.5));
+    setZoom(prev => {
+      const newZoom = Math.max(0.5, prev - 0.5);
+      zoomRef.current = newZoom;
+      return newZoom;
+    });
   }, []);
 
   const handleFit = useCallback(() => {
+    zoomRef.current = 1;
     setZoom(1);
   }, []);
   
@@ -427,18 +485,21 @@ function Timeline({
         
         // Get mouse position relative to timeline
         const rect = container.getBoundingClientRect();
-        const oldWidth = container.offsetWidth || BASE_TIMELINE_WIDTH * zoom;
+        // Use zoomRef.current for instant access to latest zoom value (avoids stale closure)
+        const currentZoom = zoomRef.current;
+        const oldWidth = container.offsetWidth || BASE_TIMELINE_WIDTH * currentZoom;
         const mouseX = e.clientX - rect.left + scrollContainer.scrollLeft;
         const mouseRatio = mouseX / oldWidth;
         
         // Calculate zoom delta
         const delta = e.deltaY > 0 ? -0.1 : 0.1;
-        const newZoom = Math.max(0.5, Math.min(10, zoom + delta));
+        const newZoom = Math.max(0.5, Math.min(10, currentZoom + delta));
         
         // Mark that we're zooming via wheel to prevent useEffect from interfering
         isWheelZoomingRef.current = true;
         
-        // Update zoom
+        // Update zoom state and ref immediately
+        zoomRef.current = newZoom;
         setZoom(newZoom);
         
         // After zoom, adjust scroll to keep mouse position stable
@@ -494,39 +555,58 @@ function Timeline({
     return () => {
       trackContainer.removeEventListener('wheel', handleWheel);
     };
-  }, [zoom]);
+  }, [BASE_TIMELINE_WIDTH]); // Only depend on BASE_TIMELINE_WIDTH, use refs for zoom
 
-  // Render waveform
-  const renderWaveform = useCallback((data: number[], trackHeight: number) => {
+  // Render waveform with proper scaling
+  const renderWaveform = useCallback((data: number[], trackHeight: number, color: string = 'emerald') => {
     if (!data || data.length === 0) return null;
     
-    const points: string[] = [];
-    const width = 100;
-    const stepWidth = width / data.length;
+    // Use the actual data length as viewbox width for proper scaling
+    const viewBoxWidth = data.length;
+    const viewBoxHeight = trackHeight;
+    
+    // Build top and bottom paths for mirrored waveform
+    const topPath: string[] = [];
+    const bottomPath: string[] = [];
     
     data.forEach((value, i) => {
-      const x = i * stepWidth;
-      const y = trackHeight / 2 - (value * trackHeight / 2);
-      points.push(`${x},${y}`);
+      const amplitude = value * (viewBoxHeight / 2 - 2); // Leave 2px padding
+      const centerY = viewBoxHeight / 2;
+      topPath.push(`${i},${centerY - amplitude}`);
+      bottomPath.push(`${i},${centerY + amplitude}`);
     });
     
-    // Mirror for full waveform
-    const mirroredPoints = [...data].reverse().map((value, i) => {
-      const x = (data.length - 1 - i) * stepWidth;
-      const y = trackHeight / 2 + (value * trackHeight / 2);
-      return `${x},${y}`;
-    });
+    // Create filled polygon by connecting top path forward, then bottom path backward
+    const polygonPoints = [...topPath, ...bottomPath.reverse()].join(' ');
+    
+    const colorClasses: Record<string, string> = {
+      emerald: 'text-emerald-400',
+      blue: 'text-blue-400',
+      violet: 'text-violet-400',
+      cyan: 'text-cyan-400',
+    };
     
     return (
       <svg 
-        className="absolute inset-0 w-full h-full opacity-50"
+        className="absolute inset-0 w-full h-full"
         preserveAspectRatio="none"
-        viewBox={`0 0 ${width} ${trackHeight}`}
+        viewBox={`0 0 ${viewBoxWidth} ${viewBoxHeight}`}
       >
+        {/* Background */}
+        <rect x="0" y="0" width={viewBoxWidth} height={viewBoxHeight} fill="rgba(16,185,129,0.15)" />
+        {/* Center line */}
+        <line 
+          x1="0" y1={viewBoxHeight / 2} 
+          x2={viewBoxWidth} y2={viewBoxHeight / 2} 
+          stroke="rgba(16,185,129,0.3)" 
+          strokeWidth="1"
+        />
+        {/* Waveform */}
         <polygon
-          points={[...points, ...mirroredPoints].join(' ')}
+          points={polygonPoints}
           fill="currentColor"
-          className="text-emerald-500"
+          className={colorClasses[color] || colorClasses.emerald}
+          opacity="0.7"
         />
       </svg>
     );
@@ -678,48 +758,158 @@ function Timeline({
       {/* Timeline body */}
       <div className="flex flex-1 min-h-0">
         {/* Track labels */}
-        <div className="w-28 flex-shrink-0 border-r border-sz-border bg-sz-bg">
+        <div className="w-36 flex-shrink-0 border-r border-sz-border bg-sz-bg">
           {/* Time ruler header */}
           <div className="h-6 border-b border-sz-border" />
           
           {/* Track labels */}
-          {tracks.filter(t => t.visible).map((track) => (
-            <div
-              key={track.id}
-              className="flex items-center justify-between px-2 border-b border-sz-border/50"
-              style={{ height: track.height }}
-            >
-              <div className="flex items-center gap-1.5">
-                <GripVertical className="w-3 h-3 text-sz-text-muted cursor-grab" />
-                <span className="text-sz-text-secondary">{track.icon}</span>
-                <span className="text-xs text-sz-text truncate">{track.name}</span>
+          {tracks.filter(t => t.visible).map((track) => {
+            // Get audio track for this track type to show volume/mute state
+            const trackAudioItems = audioTracks.filter(at => {
+              if (track.type === 'audio') return at.type === 'main' || at.type === 'sfx';
+              if (track.type === 'music') return at.type === 'music';
+              if (track.type === 'broll') return at.type === 'broll';
+              return false;
+            });
+            const firstAudioItem = trackAudioItems[0];
+            const isMuted = firstAudioItem?.muted ?? false;
+            const isSolo = firstAudioItem?.solo ?? false;
+            const volume = firstAudioItem?.volume ?? 100;
+            const isAudioTrack = ['audio', 'music', 'broll'].includes(track.type);
+            
+            return (
+              <div
+                key={track.id}
+                className="flex flex-col justify-center px-2 border-b border-sz-border/50 gap-0.5"
+                style={{ height: track.height }}
+              >
+                {/* Track name row */}
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-1">
+                    <GripVertical className="w-2.5 h-2.5 text-sz-text-muted cursor-grab" />
+                    <span className="text-sz-text-secondary">{track.icon}</span>
+                    <span className="text-[10px] text-sz-text truncate max-w-[40px]">{track.name}</span>
+                  </div>
+                  <div className="flex items-center gap-0.5">
+                    <button
+                      onClick={() => toggleTrackVisibility(track.id)}
+                      className="p-0.5 rounded hover:bg-sz-bg-tertiary"
+                      title={track.visible ? 'Hide' : 'Show'}
+                    >
+                      {track.visible ? (
+                        <Eye className="w-2.5 h-2.5 text-sz-text-muted" />
+                      ) : (
+                        <EyeOff className="w-2.5 h-2.5 text-sz-text-muted" />
+                      )}
+                    </button>
+                    <button
+                      onClick={() => toggleTrackLock(track.id)}
+                      className="p-0.5 rounded hover:bg-sz-bg-tertiary"
+                      title={track.locked ? 'Unlock' : 'Lock'}
+                    >
+                      {track.locked ? (
+                        <Lock className="w-2.5 h-2.5 text-amber-400" />
+                      ) : (
+                        <Unlock className="w-2.5 h-2.5 text-sz-text-muted" />
+                      )}
+                    </button>
+                  </div>
+                </div>
+                
+                {/* Volume controls row - only for audio-type tracks */}
+                {isAudioTrack && track.height >= 36 && (
+                  <div className="flex items-center gap-1">
+                    {/* Mute button */}
+                    <button
+                      onClick={() => {
+                        if (onUpdateAudioTrack && firstAudioItem) {
+                          onUpdateAudioTrack(firstAudioItem.id, { muted: !isMuted });
+                        }
+                      }}
+                      className={`p-0.5 rounded transition-colors ${
+                        isMuted ? 'text-red-400 bg-red-500/20' : 'text-sz-text-muted hover:bg-sz-bg-tertiary'
+                      }`}
+                      title={isMuted ? 'Unmute' : 'Mute'}
+                      disabled={!firstAudioItem}
+                    >
+                      {isMuted ? (
+                        <VolumeX className="w-2.5 h-2.5" />
+                      ) : (
+                        <Volume2 className="w-2.5 h-2.5" />
+                      )}
+                    </button>
+                    
+                    {/* Solo button */}
+                    <button
+                      onClick={() => {
+                        if (onUpdateAudioTrack && firstAudioItem) {
+                          onUpdateAudioTrack(firstAudioItem.id, { solo: !isSolo });
+                        }
+                      }}
+                      className={`px-1 py-0.5 rounded text-[8px] font-bold transition-colors ${
+                        isSolo ? 'text-amber-400 bg-amber-500/20' : 'text-sz-text-muted hover:bg-sz-bg-tertiary'
+                      }`}
+                      title={isSolo ? 'Unsolo' : 'Solo'}
+                      disabled={!firstAudioItem}
+                    >
+                      S
+                    </button>
+                    
+                    {/* Auto-duck toggle - only for music and broll tracks */}
+                    {(track.type === 'music' || track.type === 'broll') && (
+                      <button
+                        onClick={() => {
+                          if (onUpdateAudioTrack && firstAudioItem) {
+                            const currentDuck = firstAudioItem.duckWhenSpeech;
+                            onUpdateAudioTrack(firstAudioItem.id, { 
+                              duckWhenSpeech: currentDuck 
+                                ? undefined 
+                                : { enabled: true, targetVolume: 20, fadeTime: 0.5 }
+                            });
+                          }
+                        }}
+                        className={`px-1 py-0.5 rounded text-[8px] font-bold transition-colors ${
+                          firstAudioItem?.duckWhenSpeech?.enabled 
+                            ? 'text-cyan-400 bg-cyan-500/20' 
+                            : 'text-sz-text-muted hover:bg-sz-bg-tertiary'
+                        }`}
+                        title={firstAudioItem?.duckWhenSpeech?.enabled 
+                          ? 'Auto-duck ON - lowers when speech detected' 
+                          : 'Enable auto-duck (lower volume when speech detected)'}
+                        disabled={!firstAudioItem}
+                      >
+                        D
+                      </button>
+                    )}
+                    
+                    {/* Volume slider */}
+                    <input
+                      type="range"
+                      min="0"
+                      max="100"
+                      value={volume}
+                      onChange={(e) => {
+                        if (onUpdateAudioTrack && firstAudioItem) {
+                          onUpdateAudioTrack(firstAudioItem.id, { volume: Number(e.target.value) });
+                        }
+                      }}
+                      className="flex-1 h-1 bg-sz-bg-tertiary rounded-full appearance-none cursor-pointer
+                        [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-2 [&::-webkit-slider-thumb]:h-2 
+                        [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-sz-accent
+                        [&::-webkit-slider-thumb]:cursor-pointer [&::-webkit-slider-thumb]:hover:bg-sz-accent-hover"
+                      title={`Volume: ${volume}%`}
+                      disabled={!firstAudioItem}
+                    />
+                    
+                    {/* Volume value */}
+                    <span className="text-[8px] text-sz-text-muted w-6 text-right">
+                      {volume}%
+                    </span>
+                  </div>
+                )}
               </div>
-              <div className="flex items-center gap-0.5">
-                <button
-                  onClick={() => toggleTrackVisibility(track.id)}
-                  className="p-0.5 rounded hover:bg-sz-bg-tertiary"
-                  title={track.visible ? 'Hide' : 'Show'}
-                >
-                  {track.visible ? (
-                    <Eye className="w-3 h-3 text-sz-text-muted" />
-                  ) : (
-                    <EyeOff className="w-3 h-3 text-sz-text-muted" />
-                  )}
-                </button>
-                <button
-                  onClick={() => toggleTrackLock(track.id)}
-                  className="p-0.5 rounded hover:bg-sz-bg-tertiary"
-                  title={track.locked ? 'Unlock' : 'Lock'}
-                >
-                  {track.locked ? (
-                    <Lock className="w-3 h-3 text-amber-400" />
-                  ) : (
-                    <Unlock className="w-3 h-3 text-sz-text-muted" />
-                  )}
-                </button>
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
 
         {/* Tracks area */}
@@ -763,11 +953,21 @@ function Timeline({
                 key={track.id}
                 className="relative border-b border-sz-border/50 bg-sz-bg"
                 style={{ height: track.height }}
+                onContextMenu={(e) => {
+                  // Check if click is on empty space (not on a clip)
+                  const target = e.target as HTMLElement;
+                  const isClipElement = target.closest('[data-clip-id]');
+                  const isAudioTrackElement = target.closest('[data-audio-track-id]');
+                  
+                  if (!isClipElement && !isAudioTrackElement) {
+                    handleContextMenu(e, undefined, undefined, true);
+                  }
+                }}
               >
-                {/* Source video clip - always show when we have a video loaded */}
-                {track.type === 'video' && duration > 0 && (
+                {/* Source video clip background - show when no clips exist (clips render on top otherwise) */}
+                {track.type === 'video' && duration > 0 && !hasClips && (
                   <div
-                    className="absolute top-1 bottom-1 left-0 right-0 rounded bg-gradient-to-b from-blue-600/80 to-blue-700/80 border border-blue-500/60 overflow-hidden"
+                    className="absolute top-1 bottom-1 left-0 right-0 rounded bg-gradient-to-b from-blue-600/80 to-blue-700/80 border border-blue-500/60 overflow-hidden pointer-events-none"
                     title={sourceVideoName || 'Source video'}
                   >
                     {/* Video clip header bar */}
@@ -811,19 +1011,27 @@ function Timeline({
                   </div>
                 ))}
 
-                {/* Detected clips - show as highlighted regions on top of video */}
+                {/* Video clips - selectable and editable */}
                 {track.type === 'video' && hasClips && clips.map((clip) => {
                   const group = clip.groupId ? timelineGroups.find(g => g.id === clip.groupId) : null;
                   const isSelected = clip.id === selectedClipId || selectedClipIds.includes(clip.id);
+                  // Determine clip color based on status
+                  const clipColors = clip.status === 'accepted' 
+                    ? 'from-emerald-600/90 to-emerald-700/90 border-emerald-500/80'
+                    : clip.status === 'rejected'
+                    ? 'from-red-600/90 to-red-700/90 border-red-500/80'
+                    : 'from-blue-600/90 to-blue-700/90 border-blue-500/80';
                   
                   return (
                     <div
                       key={clip.id}
-                      className={`absolute top-0 bottom-0 cursor-pointer transition-all z-10 ${
-                        isSelected
-                          ? 'ring-2 ring-sz-accent ring-offset-1 ring-offset-sz-bg z-20' 
-                          : ''
-                      } ${draggedClip === clip.id ? 'opacity-70' : ''} ${clip.locked ? 'cursor-not-allowed' : ''}`}
+                      data-clip-id={clip.id}
+                      className={`absolute top-1 bottom-1 cursor-pointer transition-all z-10 rounded overflow-hidden
+                        bg-gradient-to-b ${clipColors} border
+                        ${isSelected ? 'ring-2 ring-sz-accent ring-offset-1 ring-offset-sz-bg z-20' : ''}
+                        ${draggedClip === clip.id ? 'opacity-70' : ''}
+                        ${clip.locked ? 'cursor-not-allowed' : ''}
+                        hover:brightness-110`}
                       style={{
                         left: `${(clip.startTime / duration) * 100}%`,
                         width: `${((clip.endTime - clip.startTime) / duration) * 100}%`,
@@ -859,34 +1067,34 @@ function Timeline({
                       {/* Group color indicator */}
                       {group && (
                         <div 
-                          className="absolute top-0 left-0 right-0 h-1 rounded-t-sm"
+                          className="absolute top-0 left-0 right-0 h-1"
                           style={{ backgroundColor: group.color }}
                           title={`Group: ${group.name}`}
                         />
                       )}
-                      {/* Clip highlight overlay */}
-                      <div className={`absolute rounded-sm border-2 ${
-                        clip.status === 'accepted' 
-                          ? 'bg-emerald-500/30 border-emerald-400' 
-                          : clip.status === 'rejected'
-                          ? 'bg-red-500/30 border-red-400'
-                          : 'bg-amber-500/30 border-amber-400'
-                      }`}
-                      style={{
-                        top: group ? '4px' : 0,
-                        bottom: 0,
-                        left: 0,
-                        right: 0,
-                      }}
-                      >
-                        {/* Clip label */}
-                        <div className="absolute -top-4 left-0 px-1 py-0.5 bg-sz-bg-secondary rounded text-[8px] text-sz-text whitespace-nowrap border border-sz-border flex items-center gap-1">
-                          {clip.locked && <Lock className="w-2 h-2 text-amber-400" />}
+                      {/* Clip header bar */}
+                      <div className={`absolute top-0 left-0 right-0 h-3 flex items-center px-1.5 gap-1 ${
+                        clip.status === 'accepted' ? 'bg-emerald-500/50' 
+                        : clip.status === 'rejected' ? 'bg-red-500/50'
+                        : 'bg-blue-500/50'
+                      }`} style={{ top: group ? '4px' : 0 }}>
+                        <Video className="w-2.5 h-2.5 text-white/90" />
+                        <span className="text-[8px] text-white/90 font-medium truncate flex-1">
                           {clip.title || `Clip ${clip.id.split('_')[1] || ''}`}
-                          {clip.appliedEffects && clip.appliedEffects.length > 0 && (
-                            <span className="text-sz-accent">fx</span>
-                          )}
-                        </div>
+                        </span>
+                        {clip.locked && <Lock className="w-2.5 h-2.5 text-amber-300" />}
+                        {clip.appliedEffects && clip.appliedEffects.length > 0 && (
+                          <span className="text-[8px] text-violet-300 font-bold">fx</span>
+                        )}
+                      </div>
+                      {/* Thumbnail strip effect */}
+                      <div className="absolute left-0 right-0 h-[calc(100%-12px)] flex" style={{ top: group ? '16px' : '12px', bottom: 0 }}>
+                        {Array.from({ length: Math.min(10, Math.max(2, Math.ceil((clip.endTime - clip.startTime) / 10))) }).map((_, i) => (
+                          <div
+                            key={i}
+                            className="flex-1 border-r border-white/10 last:border-r-0"
+                          />
+                        ))}
                       </div>
                     </div>
                   );
@@ -896,7 +1104,7 @@ function Timeline({
                 {track.type === 'video' && cameraCuts?.map((cut, i) => (
                   <div
                     key={cut.id}
-                    className="absolute top-0 h-1 bg-violet-500 z-30"
+                    className="absolute top-0 h-1 bg-violet-500 z-30 pointer-events-none"
                     style={{
                       left: `${(cut.startTime / duration) * 100}%`,
                       width: `${((cut.endTime - cut.startTime) / duration) * 100}%`,
@@ -907,8 +1115,43 @@ function Timeline({
 
                 {/* Audio track - show main waveform from source video */}
                 {track.type === 'audio' && waveformData && (
-                  <div className="absolute inset-0">
+                  <div className="absolute inset-0 pointer-events-none">
                     {renderWaveform(waveformData, track.height)}
+                  </div>
+                )}
+
+                {/* Source video audio - show loading or placeholder when no waveform data */}
+                {track.type === 'audio' && duration > 0 && !waveformData && (
+                  <div
+                    className="absolute top-1 bottom-1 left-0 right-0 rounded bg-gradient-to-b from-emerald-600/60 to-emerald-700/60 border border-emerald-500/50 overflow-hidden pointer-events-none"
+                    title={sourceVideoName ? `Audio: ${sourceVideoName}` : 'Source audio'}
+                  >
+                    {/* Audio clip header bar */}
+                    <div className="absolute top-0 left-0 right-0 h-3 bg-emerald-500/40 flex items-center px-1.5 gap-1">
+                      <Volume2 className="w-2.5 h-2.5 text-emerald-100" />
+                      <span className="text-[8px] text-emerald-100 font-medium truncate">
+                        {sourceVideoName || 'Audio'}
+                      </span>
+                      {isExtractingWaveform && (
+                        <div className="w-2 h-2 border border-emerald-100 border-t-transparent rounded-full animate-spin ml-auto" />
+                      )}
+                    </div>
+                    {/* Loading or placeholder waveform visual */}
+                    <div className="absolute bottom-0 left-0 right-0 h-[calc(100%-12px)] flex items-center justify-center">
+                      {isExtractingWaveform ? (
+                        <span className="text-[9px] text-emerald-200/70">Loading waveform...</span>
+                      ) : (
+                        <div className="flex-1 flex items-center justify-around h-full px-1">
+                          {Array.from({ length: Math.min(80, Math.ceil(duration / 10)) }).map((_, i) => (
+                            <div
+                              key={i}
+                              className="w-0.5 bg-emerald-400/40 rounded-full"
+                              style={{ height: `${20 + Math.sin(i * 0.3) * 15 + (i % 3) * 10}%` }}
+                            />
+                          ))}
+                        </div>
+                      )}
+                    </div>
                   </div>
                 )}
 
@@ -916,6 +1159,7 @@ function Timeline({
                 {track.type === 'audio' && audioTracks.filter(at => at.type === 'main' || at.type === 'sfx').map((audioTrack) => (
                   <div
                     key={audioTrack.id}
+                    data-audio-track-id={audioTrack.id}
                     onClick={(e) => {
                       e.stopPropagation();
                       setSelectedAudioTrackId(audioTrack.id);
@@ -964,7 +1208,7 @@ function Timeline({
                   </div>
                 ))}
 
-                {/* Audio track - show speaker segments */}
+                {/* Audio track - show speaker segments (visual overlay only) */}
                 {track.type === 'audio' && speakerSegments.length > 0 && speakerSegments.map((seg, i) => {
                   // Color-code speakers
                   const speakerColors = [
@@ -1003,6 +1247,7 @@ function Timeline({
                   return (
                     <div
                       key={audioTrack.id}
+                      data-audio-track-id={audioTrack.id}
                       onClick={(e) => {
                         e.stopPropagation();
                         setSelectedAudioTrackId(audioTrack.id);
@@ -1104,6 +1349,38 @@ function Timeline({
           style={{ left: contextMenu.x, top: contextMenu.y }}
           onClick={(e) => e.stopPropagation()}
         >
+          {/* Empty space context menu */}
+          {contextMenu.emptySpace && contextMenu.timeAtCursor !== undefined && (
+            <>
+              <button
+                onClick={() => {
+                  if (contextMenu.timeAtCursor !== undefined) {
+                    onSeek(contextMenu.timeAtCursor);
+                  }
+                  setContextMenu(null);
+                }}
+                className="w-full px-3 py-1.5 text-xs text-left text-sz-text hover:bg-sz-bg-tertiary flex items-center gap-2"
+              >
+                <SkipForward className="w-3.5 h-3.5" />
+                Seek to {formatDuration(contextMenu.timeAtCursor)}
+              </button>
+              {onAddAudioTrack && (
+                <button
+                  onClick={() => {
+                    onAddAudioTrack();
+                    setContextMenu(null);
+                  }}
+                  className="w-full px-3 py-1.5 text-xs text-left text-sz-text hover:bg-sz-bg-tertiary flex items-center gap-2"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <FileAudio className="w-3.5 h-3.5" />
+                  Add Audio Track
+                </button>
+              )}
+            </>
+          )}
+          
+          {/* Clip context menu */}
           {contextMenu.clipId && (
             <>
               <button

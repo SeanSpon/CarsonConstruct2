@@ -28,6 +28,10 @@ export interface DetectionSettings {
   skipOutro: number;
   useAiEnhancement: boolean;
   openaiApiKey?: string;
+  // AI Provider settings (for chat assistant)
+  anthropicApiKey?: string;
+  geminiApiKey?: string;
+  ollamaHost?: string;
   debug?: boolean;
 }
 
@@ -80,8 +84,48 @@ export interface ExportResult {
   errors?: string[];
 }
 
+// Project creation result type
+export interface ProjectCreateResult {
+  success: boolean;
+  projectPath?: string;
+  projectName?: string;
+  projectFile?: string;
+  error?: string;
+}
+
+// Media Library types
+export type MediaLibraryItemType = 'video' | 'audio' | 'broll' | 'music' | 'sfx';
+
+export interface MediaLibraryItem {
+  id: string;
+  name: string;
+  fileName: string;
+  originalPath: string;
+  libraryPath: string;
+  type: MediaLibraryItemType;
+  size: number;
+  duration?: number;
+  resolution?: string;
+  width?: number;
+  height?: number;
+  fps?: number;
+  thumbnailPath?: string;
+  addedAt: string;
+  tags?: string[];
+}
+
 // Expose API to renderer
 contextBridge.exposeInMainWorld('api', {
+  // Project operations
+  getDefaultProjectsDir: (): Promise<string> =>
+    ipcRenderer.invoke('get-default-projects-dir'),
+  
+  selectProjectLocation: (defaultPath?: string): Promise<string | null> =>
+    ipcRenderer.invoke('select-project-location', defaultPath),
+  
+  createProject: (data: { name: string; location: string }): Promise<ProjectCreateResult> =>
+    ipcRenderer.invoke('create-project', data),
+
   // File operations
   selectFile: (): Promise<FileInfo | null> => 
     ipcRenderer.invoke('select-file'),
@@ -91,6 +135,109 @@ contextBridge.exposeInMainWorld('api', {
   
   selectOutputDir: (): Promise<string | null> => 
     ipcRenderer.invoke('select-output-dir'),
+
+  // Extract waveform data from video/audio file
+  extractWaveform: (filePath: string, numPoints?: number): Promise<{
+    success: boolean;
+    waveform?: number[];
+    error?: string;
+  }> => ipcRenderer.invoke('extract-waveform', filePath, numPoints || 500),
+
+  // Multi-camera file operations
+  selectCameraFiles: (): Promise<{
+    success: boolean;
+    files: Array<{
+      id: string;
+      name: string;
+      filePath: string;
+      fileName: string;
+      size: number;
+      speakerName?: string;
+      isMain: boolean;
+    }>;
+    error?: string;
+  }> => ipcRenderer.invoke('select-camera-files'),
+  
+  validateCameraFiles: (filePaths: string[]): Promise<{
+    success: boolean;
+    files: Array<{
+      filePath: string;
+      valid: boolean;
+      duration?: number;
+      resolution?: string;
+      width?: number;
+      height?: number;
+      fps?: number;
+      error?: string;
+    }>;
+    error?: string;
+  }> => ipcRenderer.invoke('validate-camera-files', filePaths),
+
+  // Camera switching
+  generateCameraCuts: (data: {
+    cameras: Array<{
+      id: string;
+      name: string;
+      filePath: string;
+      speakerId?: string;
+      isMain: boolean;
+      isReaction?: boolean;
+    }>;
+    speakerSegments: Array<{
+      speakerId: string;
+      speakerLabel?: string;
+      startTime: number;
+      endTime: number;
+      confidence?: number;
+    }>;
+    speakerToCamera: Record<string, string>;
+    totalDuration: number;
+    pacing?: 'fast' | 'moderate' | 'slow';
+    minCutDuration?: number;
+    maxCutDuration?: number;
+    reactionShotProbability?: number;
+  }): Promise<{
+    success: boolean;
+    result?: {
+      cuts: Array<{
+        id: string;
+        cameraId: string;
+        startTime: number;
+        endTime: number;
+        reason: string;
+        confidence: number;
+        duration: number;
+      }>;
+      totalDuration: number;
+      cutCount: number;
+      averageCutLength: number;
+      camerasUsed: string[];
+    };
+    error?: string;
+  }> => ipcRenderer.invoke('generate-camera-cuts', data),
+
+  autoMapSpeakersToCameras: (data: {
+    cameras: Array<{
+      id: string;
+      name: string;
+      filePath: string;
+      speakerId?: string;
+      isMain: boolean;
+    }>;
+    speakerSegments: Array<{
+      speakerId: string;
+      startTime: number;
+      endTime: number;
+    }>;
+  }): Promise<{
+    success: boolean;
+    speakerToCamera: Record<string, string>;
+    speakerStats: Array<{
+      speakerId: string;
+      speakingTime: number;
+      assignedCamera: string | null;
+    }>;
+  }> => ipcRenderer.invoke('auto-map-speakers-to-cameras', data),
 
   // Detection
   startDetection: (
@@ -162,6 +309,115 @@ contextBridge.exposeInMainWorld('api', {
     infoCount?: number;
     error?: string;
   }> => ipcRenderer.invoke('run-qa-checks', data),
+
+  // Auto-fix a single QA issue
+  autoFixQAIssue: (data: {
+    issue: {
+      id: string;
+      type: string;
+      severity: 'error' | 'warning' | 'info';
+      timestamp?: number;
+      message: string;
+      autoFixable: boolean;
+      fixData?: {
+        clipId?: string;
+        suggestedStart?: number;
+        suggestedEnd?: number;
+        action?: string;
+      };
+    };
+    clips: Array<{
+      id: string;
+      startTime: number;
+      endTime: number;
+      title?: string;
+      trimStartOffset?: number;
+      trimEndOffset?: number;
+    }>;
+    deadSpaces: Array<{
+      id: string;
+      startTime: number;
+      endTime: number;
+      duration: number;
+      remove: boolean;
+    }>;
+    transcript?: {
+      words?: Array<{
+        word: string;
+        start: number;
+        end: number;
+      }>;
+    };
+  }): Promise<{
+    success: boolean;
+    fix?: {
+      type: string;
+      clipId?: string;
+      deadSpaceId?: string;
+      trimStartOffset?: number;
+      trimEndOffset?: number;
+      remove?: boolean;
+    };
+    message?: string;
+    error?: string;
+  }> => ipcRenderer.invoke('auto-fix-qa-issue', data),
+
+  // Auto-fix all fixable QA issues
+  autoFixAllQAIssues: (data: {
+    issues: Array<{
+      id: string;
+      type: string;
+      severity: 'error' | 'warning' | 'info';
+      timestamp?: number;
+      message: string;
+      autoFixable: boolean;
+      fixData?: {
+        clipId?: string;
+        suggestedStart?: number;
+        suggestedEnd?: number;
+        action?: string;
+      };
+    }>;
+    clips: Array<{
+      id: string;
+      startTime: number;
+      endTime: number;
+      title?: string;
+      trimStartOffset?: number;
+      trimEndOffset?: number;
+    }>;
+    deadSpaces: Array<{
+      id: string;
+      startTime: number;
+      endTime: number;
+      duration: number;
+      remove: boolean;
+    }>;
+    transcript?: {
+      words?: Array<{
+        word: string;
+        start: number;
+        end: number;
+      }>;
+    };
+  }): Promise<{
+    success: boolean;
+    fixed: number;
+    failed: number;
+    fixes: Array<{
+      issueId: string;
+      fix: {
+        type: string;
+        clipId?: string;
+        deadSpaceId?: string;
+        trimStartOffset?: number;
+        trimEndOffset?: number;
+        remove?: boolean;
+      };
+      message: string;
+    }>;
+    errors: string[];
+  }> => ipcRenderer.invoke('auto-fix-all-qa-issues', data),
 
   // Event listeners
   onDetectionProgress: (callback: (data: DetectionProgress) => void) => {
@@ -569,29 +825,55 @@ contextBridge.exposeInMainWorld('api', {
   },
 
   // ========================================
-  // AI Chat Functions
+  // AI Chat Functions (Auto-routing)
   // ========================================
   
-  // Chat with AI (supports tool calling)
+  // Update AI provider configuration
+  chatUpdateConfig: (config: {
+    anthropicApiKey?: string;
+    openaiApiKey?: string;
+    geminiApiKey?: string;
+    ollamaHost?: string;
+  }): Promise<{
+    success: boolean;
+    availableProviders: string[];
+  }> => ipcRenderer.invoke('chat-update-config', config),
+  
+  // Get available AI providers
+  chatGetProviders: (): Promise<{
+    available: string[];
+    chatProvider: string | null;
+    transcriptionProvider: string | null;
+    visionProvider: string | null;
+  }> => ipcRenderer.invoke('chat-get-providers'),
+  
+  // Chat with AI (auto-routes to best provider)
   chatWithAI: (data: {
     messages: Array<{
       role: 'user' | 'assistant' | 'system';
       content: string;
     }>;
-    model: string;
-    apiKey: string;
     tools?: boolean;
     systemPrompt?: string;
+    providerConfig?: {
+      anthropicApiKey?: string;
+      openaiApiKey?: string;
+      geminiApiKey?: string;
+      ollamaHost?: string;
+    };
   }): Promise<{
     success: boolean;
     content?: string;
     thinking?: string;
     toolCalls?: Array<{
+      id: string;
       name: string;
       arguments: Record<string, unknown>;
     }>;
     requiresToolResults?: boolean;
     error?: string;
+    provider?: string;
+    model?: string;
   }> => ipcRenderer.invoke('chat-with-ai', data),
   
   // Continue chat with tool results
@@ -604,29 +886,224 @@ contextBridge.exposeInMainWorld('api', {
       toolName: string;
       result: unknown;
     }>;
-    model: string;
-    apiKey: string;
     systemPrompt?: string;
+    providerConfig?: {
+      anthropicApiKey?: string;
+      openaiApiKey?: string;
+      geminiApiKey?: string;
+      ollamaHost?: string;
+    };
   }): Promise<{
     success: boolean;
     content?: string;
     thinking?: string;
     toolCalls?: Array<{
+      id: string;
       name: string;
       arguments: Record<string, unknown>;
     }>;
     requiresToolResults?: boolean;
     error?: string;
+    provider?: string;
+    model?: string;
   }> => ipcRenderer.invoke('chat-continue-with-tools', data),
+
+  // ========================================
+  // Media Library Functions
+  // ========================================
+  
+  // Get library path
+  mediaLibraryGetPath: (): Promise<string> =>
+    ipcRenderer.invoke('media-library-get-path'),
+  
+  // Get all items in the library
+  mediaLibraryGetItems: (): Promise<{
+    success: boolean;
+    items: MediaLibraryItem[];
+    libraryPath?: string;
+    error?: string;
+  }> => ipcRenderer.invoke('media-library-get-items'),
+  
+  // Import files to library
+  mediaLibraryImport: (data: {
+    type: MediaLibraryItemType;
+    filePaths?: string[];
+  }): Promise<{
+    success: boolean;
+    items: MediaLibraryItem[];
+    canceled?: boolean;
+    errors?: string[];
+    error?: string;
+  }> => ipcRenderer.invoke('media-library-import', data),
+  
+  // Update media item metadata
+  mediaLibraryUpdateItem: (data: {
+    id: string;
+    updates: Partial<MediaLibraryItem>;
+  }): Promise<{
+    success: boolean;
+    item?: MediaLibraryItem;
+    error?: string;
+  }> => ipcRenderer.invoke('media-library-update-item', data),
+  
+  // Remove item from library
+  mediaLibraryRemove: (data: {
+    id: string;
+    deleteFile?: boolean;
+  }): Promise<{
+    success: boolean;
+    error?: string;
+  }> => ipcRenderer.invoke('media-library-remove', data),
+  
+  // Open library folder in file explorer
+  mediaLibraryOpenFolder: (subfolder?: string): Promise<{
+    success: boolean;
+    error?: string;
+  }> => ipcRenderer.invoke('media-library-open-folder', subfolder),
+  
+  // Get library statistics
+  mediaLibraryGetStats: (): Promise<{
+    success: boolean;
+    stats?: {
+      totalItems: number;
+      totalSize: number;
+      countByType: Record<MediaLibraryItemType, number>;
+      libraryPath: string;
+      createdAt: string;
+      updatedAt: string;
+    };
+    error?: string;
+  }> => ipcRenderer.invoke('media-library-get-stats'),
+  
+  // Search library
+  mediaLibrarySearch: (data: {
+    query: string;
+    type?: MediaLibraryItemType;
+  }): Promise<{
+    success: boolean;
+    items: MediaLibraryItem[];
+    error?: string;
+  }> => ipcRenderer.invoke('media-library-search', data),
+  
+  // Add tags to item
+  mediaLibraryAddTags: (data: {
+    id: string;
+    tags: string[];
+  }): Promise<{
+    success: boolean;
+    tags?: string[];
+    error?: string;
+  }> => ipcRenderer.invoke('media-library-add-tags', data),
 });
 
 // Type declaration for the window object
 declare global {
   interface Window {
     api: {
+      // Project operations
+      getDefaultProjectsDir: () => Promise<string>;
+      selectProjectLocation: (defaultPath?: string) => Promise<string | null>;
+      createProject: (data: { name: string; location: string }) => Promise<ProjectCreateResult>;
       selectFile: () => Promise<FileInfo | null>;
       validateFile: (filePath: string) => Promise<FileValidation>;
       selectOutputDir: () => Promise<string | null>;
+      extractWaveform: (filePath: string, numPoints?: number) => Promise<{
+        success: boolean;
+        waveform?: number[];
+        error?: string;
+      }>;
+      // Multi-camera operations
+      selectCameraFiles: () => Promise<{
+        success: boolean;
+        files: Array<{
+          id: string;
+          name: string;
+          filePath: string;
+          fileName: string;
+          size: number;
+          speakerName?: string;
+          isMain: boolean;
+        }>;
+        error?: string;
+      }>;
+      validateCameraFiles: (filePaths: string[]) => Promise<{
+        success: boolean;
+        files: Array<{
+          filePath: string;
+          valid: boolean;
+          duration?: number;
+          resolution?: string;
+          width?: number;
+          height?: number;
+          fps?: number;
+          error?: string;
+        }>;
+        error?: string;
+      }>;
+      // Camera switching
+      generateCameraCuts: (data: {
+        cameras: Array<{
+          id: string;
+          name: string;
+          filePath: string;
+          speakerId?: string;
+          isMain: boolean;
+          isReaction?: boolean;
+        }>;
+        speakerSegments: Array<{
+          speakerId: string;
+          speakerLabel?: string;
+          startTime: number;
+          endTime: number;
+          confidence?: number;
+        }>;
+        speakerToCamera: Record<string, string>;
+        totalDuration: number;
+        pacing?: 'fast' | 'moderate' | 'slow';
+        minCutDuration?: number;
+        maxCutDuration?: number;
+        reactionShotProbability?: number;
+      }) => Promise<{
+        success: boolean;
+        result?: {
+          cuts: Array<{
+            id: string;
+            cameraId: string;
+            startTime: number;
+            endTime: number;
+            reason: string;
+            confidence: number;
+            duration: number;
+          }>;
+          totalDuration: number;
+          cutCount: number;
+          averageCutLength: number;
+          camerasUsed: string[];
+        };
+        error?: string;
+      }>;
+      autoMapSpeakersToCameras: (data: {
+        cameras: Array<{
+          id: string;
+          name: string;
+          filePath: string;
+          speakerId?: string;
+          isMain: boolean;
+        }>;
+        speakerSegments: Array<{
+          speakerId: string;
+          startTime: number;
+          endTime: number;
+        }>;
+      }) => Promise<{
+        success: boolean;
+        speakerToCamera: Record<string, string>;
+        speakerStats: Array<{
+          speakerId: string;
+          speakingTime: number;
+          assignedCamera: string | null;
+        }>;
+      }>;
       startDetection: (
         projectId: string,
         filePath: string,
@@ -681,6 +1158,111 @@ declare global {
         warningCount?: number;
         infoCount?: number;
         error?: string;
+      }>;
+      autoFixQAIssue: (data: {
+        issue: {
+          id: string;
+          type: string;
+          severity: 'error' | 'warning' | 'info';
+          timestamp?: number;
+          message: string;
+          autoFixable: boolean;
+          fixData?: {
+            clipId?: string;
+            suggestedStart?: number;
+            suggestedEnd?: number;
+            action?: string;
+          };
+        };
+        clips: Array<{
+          id: string;
+          startTime: number;
+          endTime: number;
+          title?: string;
+          trimStartOffset?: number;
+          trimEndOffset?: number;
+        }>;
+        deadSpaces: Array<{
+          id: string;
+          startTime: number;
+          endTime: number;
+          duration: number;
+          remove: boolean;
+        }>;
+        transcript?: {
+          words?: Array<{
+            word: string;
+            start: number;
+            end: number;
+          }>;
+        };
+      }) => Promise<{
+        success: boolean;
+        fix?: {
+          type: string;
+          clipId?: string;
+          deadSpaceId?: string;
+          trimStartOffset?: number;
+          trimEndOffset?: number;
+          remove?: boolean;
+        };
+        message?: string;
+        error?: string;
+      }>;
+      autoFixAllQAIssues: (data: {
+        issues: Array<{
+          id: string;
+          type: string;
+          severity: 'error' | 'warning' | 'info';
+          timestamp?: number;
+          message: string;
+          autoFixable: boolean;
+          fixData?: {
+            clipId?: string;
+            suggestedStart?: number;
+            suggestedEnd?: number;
+            action?: string;
+          };
+        }>;
+        clips: Array<{
+          id: string;
+          startTime: number;
+          endTime: number;
+          title?: string;
+          trimStartOffset?: number;
+          trimEndOffset?: number;
+        }>;
+        deadSpaces: Array<{
+          id: string;
+          startTime: number;
+          endTime: number;
+          duration: number;
+          remove: boolean;
+        }>;
+        transcript?: {
+          words?: Array<{
+            word: string;
+            start: number;
+            end: number;
+          }>;
+        };
+      }) => Promise<{
+        success: boolean;
+        fixed: number;
+        failed: number;
+        fixes: Array<{
+          issueId: string;
+          fix: {
+            type: string;
+            clipId?: string;
+            deadSpaceId?: string;
+            trimStartOffset?: number;
+            trimEndOffset?: number;
+            remove?: boolean;
+          };
+          message: string;
+        }>;
+        errors: string[];
       }>;
       onDetectionProgress: (callback: (data: DetectionProgress) => void) => () => void;
       onDetectionComplete: (callback: (data: DetectionResult) => void) => () => void;
@@ -997,26 +1579,48 @@ declare global {
       }>;
       onPreviewProgress: (callback: (data: { percent: number; message: string }) => void) => () => void;
       
-      // AI Chat
+      // AI Chat (Auto-routing)
+      chatUpdateConfig: (config: {
+        anthropicApiKey?: string;
+        openaiApiKey?: string;
+        geminiApiKey?: string;
+        ollamaHost?: string;
+      }) => Promise<{
+        success: boolean;
+        availableProviders: string[];
+      }>;
+      chatGetProviders: () => Promise<{
+        available: string[];
+        chatProvider: string | null;
+        transcriptionProvider: string | null;
+        visionProvider: string | null;
+      }>;
       chatWithAI: (data: {
         messages: Array<{
           role: 'user' | 'assistant' | 'system';
           content: string;
         }>;
-        model: string;
-        apiKey: string;
         tools?: boolean;
         systemPrompt?: string;
+        providerConfig?: {
+          anthropicApiKey?: string;
+          openaiApiKey?: string;
+          geminiApiKey?: string;
+          ollamaHost?: string;
+        };
       }) => Promise<{
         success: boolean;
         content?: string;
         thinking?: string;
         toolCalls?: Array<{
+          id: string;
           name: string;
           arguments: Record<string, unknown>;
         }>;
         requiresToolResults?: boolean;
         error?: string;
+        provider?: string;
+        model?: string;
       }>;
       chatContinueWithTools: (data: {
         messages: Array<{
@@ -1027,18 +1631,91 @@ declare global {
           toolName: string;
           result: unknown;
         }>;
-        model: string;
-        apiKey: string;
         systemPrompt?: string;
+        providerConfig?: {
+          anthropicApiKey?: string;
+          openaiApiKey?: string;
+          geminiApiKey?: string;
+          ollamaHost?: string;
+        };
       }) => Promise<{
         success: boolean;
         content?: string;
         thinking?: string;
         toolCalls?: Array<{
+          id: string;
           name: string;
           arguments: Record<string, unknown>;
         }>;
         requiresToolResults?: boolean;
+        error?: string;
+        provider?: string;
+        model?: string;
+      }>;
+      
+      // Media Library
+      mediaLibraryGetPath: () => Promise<string>;
+      mediaLibraryGetItems: () => Promise<{
+        success: boolean;
+        items: MediaLibraryItem[];
+        libraryPath?: string;
+        error?: string;
+      }>;
+      mediaLibraryImport: (data: {
+        type: MediaLibraryItemType;
+        filePaths?: string[];
+      }) => Promise<{
+        success: boolean;
+        items: MediaLibraryItem[];
+        canceled?: boolean;
+        errors?: string[];
+        error?: string;
+      }>;
+      mediaLibraryUpdateItem: (data: {
+        id: string;
+        updates: Partial<MediaLibraryItem>;
+      }) => Promise<{
+        success: boolean;
+        item?: MediaLibraryItem;
+        error?: string;
+      }>;
+      mediaLibraryRemove: (data: {
+        id: string;
+        deleteFile?: boolean;
+      }) => Promise<{
+        success: boolean;
+        error?: string;
+      }>;
+      mediaLibraryOpenFolder: (subfolder?: string) => Promise<{
+        success: boolean;
+        error?: string;
+      }>;
+      mediaLibraryGetStats: () => Promise<{
+        success: boolean;
+        stats?: {
+          totalItems: number;
+          totalSize: number;
+          countByType: Record<MediaLibraryItemType, number>;
+          libraryPath: string;
+          createdAt: string;
+          updatedAt: string;
+        };
+        error?: string;
+      }>;
+      mediaLibrarySearch: (data: {
+        query: string;
+        type?: MediaLibraryItemType;
+      }) => Promise<{
+        success: boolean;
+        items: MediaLibraryItem[];
+        error?: string;
+      }>;
+      mediaLibraryAddTags: (data: {
+        id: string;
+        tags: string[];
+      }) => Promise<{
+        success: boolean;
+        tags?: string[];
         error?: string;
       }>;
     };

@@ -11,9 +11,15 @@ import {
   Mic,
   Link2,
   Unlink,
+  Wand2,
+  Scissors,
+  Loader2,
+  ChevronDown,
+  ChevronRight,
+  RefreshCw,
 } from 'lucide-react';
 import { useStore } from '../../stores/store';
-import type { CameraInput, SpeakerSegment } from '../../types';
+import type { CameraInput, SpeakerSegment, CameraCut } from '../../types';
 
 interface MultiCamPanelProps {
   className?: string;
@@ -27,10 +33,17 @@ function MultiCamPanel({ className }: MultiCamPanelProps) {
     removeCamera,
     updateCamera,
     speakerSegments,
+    cameraCuts,
+    setCameraCuts,
+    project,
   } = useStore();
 
   const [selectedCamera, setSelectedCamera] = useState<string | null>(null);
   const [linkingMode, setLinkingMode] = useState(false);
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [isAutoMapping, setIsAutoMapping] = useState(false);
+  const [showCuts, setShowCuts] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   // Get unique speakers from segments
   const uniqueSpeakers = Array.from(
@@ -43,8 +56,40 @@ function MultiCamPanel({ className }: MultiCamPanelProps) {
       .reduce((acc, s) => acc + (s.endTime - s.startTime), 0),
   }));
 
+  // Format time helper
+  const formatTime = (seconds: number): string => {
+    const mins = Math.floor(seconds / 60);
+    const secs = Math.floor(seconds % 60);
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
+  };
+
+  // Add multiple cameras at once
+  const handleAddCameras = useCallback(async () => {
+    try {
+      setError(null);
+      const result = await window.api.selectCameraFiles();
+      if (result.success && result.files.length > 0) {
+        for (let i = 0; i < result.files.length; i++) {
+          const file = result.files[i];
+          const newCamera: CameraInput = {
+            id: file.id,
+            name: file.name || `Camera ${cameras.length + i + 1}`,
+            filePath: file.filePath,
+            isMain: cameras.length === 0 && i === 0,
+          };
+          addCamera(newCamera);
+        }
+      }
+    } catch (err) {
+      console.error('Failed to add cameras:', err);
+      setError('Failed to add camera files');
+    }
+  }, [cameras.length, addCamera]);
+
+  // Add single camera (legacy)
   const handleAddCamera = useCallback(async () => {
     try {
+      setError(null);
       const file = await window.api.selectFile();
       if (file) {
         const newCamera: CameraInput = {
@@ -57,8 +102,112 @@ function MultiCamPanel({ className }: MultiCamPanelProps) {
       }
     } catch (err) {
       console.error('Failed to add camera:', err);
+      setError('Failed to add camera file');
     }
   }, [cameras.length, addCamera]);
+
+  // Auto-map speakers to cameras based on speaking time
+  const handleAutoMapSpeakers = useCallback(async () => {
+    if (cameras.length < 2 || uniqueSpeakers.length === 0) {
+      setError('Need at least 2 cameras and detected speakers to auto-map');
+      return;
+    }
+
+    setIsAutoMapping(true);
+    setError(null);
+
+    try {
+      const result = await window.api.autoMapSpeakersToCameras({
+        cameras: cameras.map(c => ({
+          id: c.id,
+          name: c.name,
+          filePath: c.filePath,
+          speakerId: c.speakerName,
+          isMain: c.isMain,
+        })),
+        speakerSegments: speakerSegments.map(s => ({
+          speakerId: s.speakerId,
+          startTime: s.startTime,
+          endTime: s.endTime,
+        })),
+      });
+
+      if (result.success) {
+        // Update cameras with speaker assignments
+        for (const stat of result.speakerStats) {
+          if (stat.assignedCamera) {
+            updateCamera(stat.assignedCamera, { speakerName: stat.speakerId });
+          }
+        }
+      }
+    } catch (err) {
+      console.error('Failed to auto-map speakers:', err);
+      setError('Failed to auto-map speakers to cameras');
+    } finally {
+      setIsAutoMapping(false);
+    }
+  }, [cameras, speakerSegments, uniqueSpeakers.length, updateCamera]);
+
+  // Generate camera cuts from speaker diarization
+  const handleGenerateCuts = useCallback(async () => {
+    if (cameras.length < 2 || speakerSegments.length === 0) {
+      setError('Need cameras and speaker segments to generate cuts');
+      return;
+    }
+
+    setIsGenerating(true);
+    setError(null);
+
+    try {
+      // Build speaker-to-camera mapping
+      const speakerToCamera: Record<string, string> = {};
+      for (const camera of cameras) {
+        if (camera.speakerName) {
+          speakerToCamera[camera.speakerName] = camera.id;
+        }
+      }
+
+      const result = await window.api.generateCameraCuts({
+        cameras: cameras.map(c => ({
+          id: c.id,
+          name: c.name,
+          filePath: c.filePath,
+          speakerId: c.speakerName,
+          isMain: c.isMain,
+        })),
+        speakerSegments: speakerSegments.map(s => ({
+          speakerId: s.speakerId,
+          speakerLabel: s.speakerName,
+          startTime: s.startTime,
+          endTime: s.endTime,
+          confidence: s.confidence,
+        })),
+        speakerToCamera,
+        totalDuration: project?.duration || 0,
+        pacing: 'moderate',
+      });
+
+      if (result.success && result.result) {
+        // Convert to CameraCut format and store
+        const cuts: CameraCut[] = result.result.cuts.map(c => ({
+          id: c.id,
+          cameraId: c.cameraId,
+          startTime: c.startTime,
+          endTime: c.endTime,
+          reason: c.reason as CameraCut['reason'],
+        }));
+        setCameraCuts(cuts);
+        setShowCuts(true);
+      } else {
+        setError(result.error || 'Failed to generate camera cuts');
+      }
+    } catch (err) {
+      console.error('Failed to generate cuts:', err);
+      setError('Failed to generate camera cuts');
+    } finally {
+      setIsGenerating(false);
+    }
+  }, [cameras, speakerSegments, project?.duration, setCameraCuts]);
 
   const handleRemoveCamera = useCallback((id: string) => {
     removeCamera(id);
@@ -97,15 +246,66 @@ function MultiCamPanel({ className }: MultiCamPanelProps) {
           <span className="px-2 py-0.5 rounded-full text-xs bg-sz-bg-tertiary text-sz-text-secondary">
             {cameras.length} camera{cameras.length !== 1 ? 's' : ''}
           </span>
+          {cameraCuts.length > 0 && (
+            <span className="px-2 py-0.5 rounded-full text-xs bg-emerald-500/20 text-emerald-400">
+              {cameraCuts.length} cuts
+            </span>
+          )}
         </div>
         <button
-          onClick={handleAddCamera}
+          onClick={handleAddCameras}
           className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-sz-accent text-white text-sm hover:bg-sz-accent-hover transition-colors"
         >
           <Plus className="w-4 h-4" />
-          Add Camera
+          Add Cameras
         </button>
       </div>
+
+      {/* Error display */}
+      {error && (
+        <div className="mx-4 mt-2 px-3 py-2 rounded-lg bg-red-500/10 border border-red-500/30">
+          <p className="text-xs text-red-400">{error}</p>
+        </div>
+      )}
+
+      {/* Action buttons */}
+      {cameras.length >= 2 && speakerSegments.length > 0 && (
+        <div className="flex items-center gap-2 px-4 py-2 border-b border-sz-border">
+          <button
+            onClick={handleAutoMapSpeakers}
+            disabled={isAutoMapping}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-violet-500/20 text-violet-400 text-xs hover:bg-violet-500/30 transition-colors disabled:opacity-50"
+          >
+            {isAutoMapping ? (
+              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+            ) : (
+              <Wand2 className="w-3.5 h-3.5" />
+            )}
+            Auto-Map Speakers
+          </button>
+          <button
+            onClick={handleGenerateCuts}
+            disabled={isGenerating}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-500/20 text-emerald-400 text-xs hover:bg-emerald-500/30 transition-colors disabled:opacity-50"
+          >
+            {isGenerating ? (
+              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+            ) : (
+              <Scissors className="w-3.5 h-3.5" />
+            )}
+            Generate Cuts
+          </button>
+          {cameraCuts.length > 0 && (
+            <button
+              onClick={() => setShowCuts(!showCuts)}
+              className="flex items-center gap-1 px-2 py-1.5 text-xs text-sz-text-secondary hover:text-sz-text transition-colors"
+            >
+              {showCuts ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
+              {showCuts ? 'Hide Cuts' : 'Show Cuts'}
+            </button>
+          )}
+        </div>
+      )}
 
       {/* Camera List */}
       <div className="flex-1 overflow-y-auto p-4 space-y-3">
@@ -298,11 +498,63 @@ function MultiCamPanel({ className }: MultiCamPanelProps) {
         </div>
       )}
 
+      {/* Camera Cuts Preview */}
+      {showCuts && cameraCuts.length > 0 && (
+        <div className="px-4 py-3 border-t border-sz-border">
+          <div className="flex items-center justify-between mb-2">
+            <p className="text-xs text-sz-text-muted">Camera Cuts Timeline</p>
+            <button
+              onClick={handleGenerateCuts}
+              className="flex items-center gap-1 text-xs text-sz-text-secondary hover:text-sz-text transition-colors"
+              title="Regenerate cuts"
+            >
+              <RefreshCw className="w-3 h-3" />
+            </button>
+          </div>
+          <div className="max-h-40 overflow-y-auto space-y-1">
+            {cameraCuts.slice(0, 20).map((cut, idx) => {
+              const camera = cameras.find(c => c.id === cut.cameraId);
+              return (
+                <div
+                  key={cut.id}
+                  className="flex items-center gap-2 px-2 py-1.5 rounded bg-sz-bg-tertiary text-xs"
+                >
+                  <span className="text-sz-text-muted w-6">#{idx + 1}</span>
+                  <span className="text-sz-text-secondary font-mono">
+                    {formatTime(cut.startTime)} - {formatTime(cut.endTime)}
+                  </span>
+                  <span className="flex items-center gap-1 text-sz-text">
+                    <Camera className="w-3 h-3" />
+                    {camera?.name || cut.cameraId}
+                  </span>
+                  <span className="text-sz-text-muted ml-auto">
+                    {cut.reason}
+                  </span>
+                </div>
+              );
+            })}
+            {cameraCuts.length > 20 && (
+              <p className="text-xs text-sz-text-muted text-center py-1">
+                ... and {cameraCuts.length - 20} more cuts
+              </p>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Instructions */}
       {cameras.length > 0 && uniqueSpeakers.length === 0 && (
         <div className="px-4 py-3 border-t border-sz-border">
           <p className="text-xs text-sz-text-muted">
             Run detection to identify speakers, then link each speaker to their camera.
+          </p>
+        </div>
+      )}
+
+      {cameras.length === 0 && (
+        <div className="px-4 py-3 border-t border-sz-border">
+          <p className="text-xs text-sz-text-muted">
+            Add multiple camera angles and link them to speakers for automatic camera switching.
           </p>
         </div>
       )}

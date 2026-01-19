@@ -7,4 +7,4 @@ export { default as Badge, PatternBadge, StatusBadge, ScoreBadge, type BadgeProp
 export { default as LoadingState, LoadingOverlay, ProgressLoader, type LoadingStateProps, type LoadingOverlayProps, type ProgressLoaderProps } from './LoadingState';
 export { default as EmptyState, ErrorState, SuccessState, InfoState, WarningState, type EmptyStateProps, type ErrorStateProps, type SuccessStateProps, type InfoStateProps, type WarningStateProps } from './EmptyState';
 export { default as IconButton, type IconButtonProps } from './IconButton';
-export { default as Modal, ModalFooter, SlideInPanel, type ModalProps, type ModalFooterProps, type SlideInPanelProps } from './Modal';
+export { default as Modal, Modal as BaseModal, ModalFooter, SlideInPanel, ConfirmModal, AlertModal, type ModalProps, type ModalFooterProps, type SlideInPanelProps, type ConfirmModalProps, type AlertModalProps } from './Modal';

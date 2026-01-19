@@ -51,9 +51,30 @@ export interface AudioTrack {
   fadeIn?: number;
   fadeOut?: number;
   muted?: boolean;
+  solo?: boolean; // When true, only solo tracks play
   locked?: boolean;
   waveformData?: number[];
+  // Audio ducking - auto-lower when speech detected
+  duckWhenSpeech?: {
+    enabled: boolean;
+    targetVolume: number; // % to reduce to
+    fadeTime: number; // seconds for fade
+  };
 }
+
+// Timeline marker (Premiere Pro-style)
+export interface TimelineMarker {
+  id: string;
+  time: number;
+  duration?: number; // For range markers
+  name: string;
+  comment?: string;
+  color: 'green' | 'red' | 'purple' | 'orange' | 'yellow' | 'blue' | 'cyan' | 'pink';
+  type: 'comment' | 'chapter' | 'ad-read' | 'key-moment' | 'segmentation';
+}
+
+// Clip color label for organization
+export type ClipColorLabel = 'red' | 'orange' | 'yellow' | 'green' | 'cyan' | 'blue' | 'purple' | 'pink' | 'none';
 
 // Timeline item group for nesting
 export interface TimelineGroup {
@@ -63,6 +84,24 @@ export interface TimelineGroup {
   itemIds: string[]; // IDs of clips/audio tracks in this group
   collapsed?: boolean;
   locked?: boolean;
+}
+
+// Edit history entry for undo/redo
+export interface HistoryEntry {
+  id: string;
+  timestamp: number;
+  action: string;
+  description: string;
+  canUndo: boolean;
+  canRedo: boolean;
+}
+
+// Speed/Duration settings for clips
+export interface ClipSpeed {
+  speed: number; // 0.25x to 4x
+  reverse?: boolean;
+  ripple?: boolean; // Adjust adjacent clips
+  frameBlending?: boolean;
 }
 
 // Applied effect on a clip/track
@@ -84,6 +123,8 @@ export interface TimelineTrack {
   locked: boolean;
   height: number;
   muted?: boolean;
+  solo?: boolean; // Premiere Pro-style: only solo tracks are audible
+  targetedForEdit?: boolean; // Enable/disable track for editing operations
 }
 
 // QA check result
@@ -146,6 +187,15 @@ export interface Clip {
   groupId?: string; // Group this clip belongs to
   locked?: boolean;
   appliedEffects?: AppliedEffect[];
+  colorLabel?: ClipColorLabel;
+  speed?: ClipSpeed;
+  opacity?: number; // 0-100
+  volume?: number; // 0-100, for audio control
+  audioDucking?: {
+    enabled: boolean;
+    targetVolume: number; // % to reduce to (e.g., 20 = reduce to 20%)
+    fadeTime: number; // seconds for fade in/out
+  };
 }
 
 // Dead space detected for auto-edit
@@ -196,6 +246,10 @@ export interface DetectionSettings {
   skipOutro: number;
   useAiEnhancement: boolean;
   openaiApiKey?: string;
+  // AI Provider settings (for chat assistant)
+  anthropicApiKey?: string;
+  geminiApiKey?: string;
+  ollamaHost?: string;
   debug?: boolean;
 }
 
@@ -312,4 +366,34 @@ export function estimateAiCost(durationSeconds: number, targetCount: number): Ai
 
 export function formatCost(amount: number): string {
   return `$${amount.toFixed(2)}`;
+}
+
+// Media Library Types
+export type MediaLibraryItemType = 'video' | 'audio' | 'broll' | 'music' | 'sfx';
+
+export interface MediaLibraryItem {
+  id: string;
+  name: string;
+  fileName: string;
+  originalPath: string; // Where the file was imported from
+  libraryPath: string; // Path in the media library
+  type: MediaLibraryItemType;
+  size: number;
+  duration?: number;
+  resolution?: string;
+  width?: number;
+  height?: number;
+  fps?: number;
+  thumbnailPath?: string;
+  addedAt: string;
+  tags?: string[];
+}
+
+export interface MediaLibraryStats {
+  totalItems: number;
+  totalSize: number;
+  countByType: Record<MediaLibraryItemType, number>;
+  libraryPath: string;
+  createdAt: string;
+  updatedAt: string;
 }

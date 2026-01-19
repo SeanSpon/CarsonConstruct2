@@ -7,6 +7,7 @@ import { IconButton } from '../ui';
 interface VideoPreviewProps {
   project: Project;
   selectedClip: Clip | null;
+  clips: Clip[]; // All clips on timeline
   currentTime: number;
   isPlaying: boolean;
   onTimeUpdate: (time: number) => void;
@@ -15,7 +16,7 @@ interface VideoPreviewProps {
 }
 
 const VideoPreview = forwardRef<HTMLVideoElement, VideoPreviewProps>(
-  ({ project, selectedClip, currentTime, isPlaying, onTimeUpdate, onPlayPause, onPlayingChange }, ref) => {
+  ({ project, selectedClip, clips, currentTime, isPlaying, onTimeUpdate, onPlayPause, onPlayingChange }, ref) => {
     const videoRef = useRef<HTMLVideoElement>(null);
     const [isMuted, setIsMuted] = useState(false);
 
@@ -25,12 +26,61 @@ const VideoPreview = forwardRef<HTMLVideoElement, VideoPreviewProps>(
     // Video source
     const videoSrc = `file:///${project.filePath.replace(/\\/g, '/')}`;
 
-    // Handle time update
+    // Handle time update with timeline-aware playback
     const handleTimeUpdate = useCallback(() => {
-      if (videoRef.current) {
-        onTimeUpdate(videoRef.current.currentTime);
+      if (!videoRef.current) return;
+      
+      const time = videoRef.current.currentTime;
+      onTimeUpdate(time);
+      
+      // Timeline-aware playback: respect clip boundaries
+      if (clips.length > 0 && !videoRef.current.paused) {
+        // Sort clips by start time for sequential playback
+        const sortedClips = [...clips].sort((a, b) => a.startTime - b.startTime);
+        
+        // Find the current clip (considering trim offsets)
+        const currentClip = sortedClips.find(clip => {
+          const effectiveStart = clip.startTime + (clip.trimStartOffset || 0);
+          const effectiveEnd = clip.endTime + (clip.trimEndOffset || 0);
+          return time >= effectiveStart && time < effectiveEnd;
+        });
+        
+        if (currentClip) {
+          // Inside a clip - check if we've reached its end
+          const effectiveEnd = currentClip.endTime + (currentClip.trimEndOffset || 0);
+          
+          // Use a small threshold (50ms) to detect end of clip
+          if (time >= effectiveEnd - 0.05) {
+            const currentIndex = sortedClips.findIndex(c => c.id === currentClip.id);
+            
+            if (currentIndex < sortedClips.length - 1) {
+              // Jump to the start of the next clip
+              const nextClip = sortedClips[currentIndex + 1];
+              const nextStart = nextClip.startTime + (nextClip.trimStartOffset || 0);
+              videoRef.current.currentTime = nextStart;
+            } else {
+              // Last clip - pause at the end
+              videoRef.current.pause();
+            }
+          }
+        } else {
+          // Outside all clips - jump to the next clip or pause
+          const nextClip = sortedClips.find(clip => {
+            const effectiveStart = clip.startTime + (clip.trimStartOffset || 0);
+            return effectiveStart > time;
+          });
+          
+          if (nextClip) {
+            // Jump to the next clip
+            const nextStart = nextClip.startTime + (nextClip.trimStartOffset || 0);
+            videoRef.current.currentTime = nextStart;
+          } else {
+            // No more clips - pause
+            videoRef.current.pause();
+          }
+        }
       }
-    }, [onTimeUpdate]);
+    }, [onTimeUpdate, clips]);
 
     // Handle play/pause state changes
     const handlePlay = useCallback(() => {

@@ -16,10 +16,14 @@ import {
   Trash2,
   RotateCcw,
   AlertCircle,
-  CheckCircle2
+  CheckCircle2,
+  Volume2,
+  Sparkles,
+  Download,
+  ExternalLink
 } from 'lucide-react';
 import { useStore } from '../../stores/store';
-import { formatDuration } from '../../types';
+import { formatDuration, formatFileSize, type MediaLibraryItem, type MediaLibraryItemType } from '../../types';
 import { IconButton, Button } from '../ui';
 import { 
   createProjectFile, 
@@ -42,11 +46,21 @@ interface ProjectPanelProps {
 }
 
 function ProjectPanel({ className, onUIStateLoaded }: ProjectPanelProps) {
-  const { project, clips, clearProject } = useStore();
+  const { 
+    project, 
+    clips, 
+    clearProject,
+    mediaLibrary,
+    loadMediaLibrary,
+    importToMediaLibrary,
+    removeFromMediaLibrary,
+    openMediaLibraryFolder,
+  } = useStore();
   const [expandedSections, setExpandedSections] = useState({
     project: true,
     recent: true,
     media: true,
+    storage: true,
     sequences: false,
   });
   const [searchQuery, setSearchQuery] = useState('');
@@ -72,7 +86,7 @@ function ProjectPanel({ className, onUIStateLoaded }: ProjectPanelProps) {
   const rejectedClips = clips.filter(c => c.status === 'rejected');
   const pendingClips = clips.filter(c => c.status === 'pending');
 
-  // Load recent projects on mount
+  // Load recent projects and media library on mount
   useEffect(() => {
     const loadRecent = async () => {
       try {
@@ -85,7 +99,10 @@ function ProjectPanel({ className, onUIStateLoaded }: ProjectPanelProps) {
       }
     };
     loadRecent();
-  }, []);
+    
+    // Load media library
+    loadMediaLibrary();
+  }, [loadMediaLibrary]);
 
   // Track unsaved changes
   useEffect(() => {
@@ -104,7 +121,7 @@ function ProjectPanel({ className, onUIStateLoaded }: ProjectPanelProps) {
     autoSaveTimerRef.current = setInterval(async () => {
       if (hasUnsavedChanges && project) {
         try {
-          const projectId = project.filePath.replace(/[^a-zA-Z0-9]/g, '_');
+          const projectId = project.filePath.replace(/[^a-zA-Z0-9]/g, '_').slice(-50);
           const projectData = serializeProjectFile(createProjectFile());
           await window.api.projectAutoSave(projectId, projectData);
           console.log('[AutoSave] Project auto-saved');
@@ -147,7 +164,7 @@ function ProjectPanel({ className, onUIStateLoaded }: ProjectPanelProps) {
         lastSavedStateRef.current = projectData;
         
         // Clear auto-save
-        const projectId = project.filePath.replace(/[^a-zA-Z0-9]/g, '_');
+        const projectId = project.filePath.replace(/[^a-zA-Z0-9]/g, '_').slice(-50);
         await window.api.projectClearAutoSave(projectId);
         
         // Refresh recent projects
@@ -307,6 +324,46 @@ function ProjectPanel({ className, onUIStateLoaded }: ProjectPanelProps) {
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [handleSave, handleSaveAs, handleOpen]);
+
+  // Import to media library
+  const handleImportToLibrary = useCallback(async (type: MediaLibraryItemType) => {
+    await importToMediaLibrary(type);
+  }, [importToMediaLibrary]);
+
+  // Remove from media library
+  const handleRemoveFromLibrary = useCallback(async (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (confirm('Remove this file from your library?')) {
+      await removeFromMediaLibrary(id, true);
+    }
+  }, [removeFromMediaLibrary]);
+
+  // Get icon for media type
+  const getMediaTypeIcon = (type: MediaLibraryItemType) => {
+    switch (type) {
+      case 'video':
+        return <Film className="w-3.5 h-3.5 text-blue-400" />;
+      case 'audio':
+        return <Volume2 className="w-3.5 h-3.5 text-purple-400" />;
+      case 'broll':
+        return <Image className="w-3.5 h-3.5 text-emerald-400" />;
+      case 'music':
+        return <Music className="w-3.5 h-3.5 text-pink-400" />;
+      case 'sfx':
+        return <Sparkles className="w-3.5 h-3.5 text-yellow-400" />;
+      default:
+        return <FileVideo className="w-3.5 h-3.5 text-sz-text-muted" />;
+    }
+  };
+
+  // Group library items by type
+  const libraryItemsByType = mediaLibrary.items.reduce((acc, item) => {
+    if (!acc[item.type]) {
+      acc[item.type] = [];
+    }
+    acc[item.type].push(item);
+    return acc;
+  }, {} as Record<MediaLibraryItemType, MediaLibraryItem[]>);
 
   return (
     <div className={`h-full flex flex-col bg-sz-bg-secondary border-r border-sz-border ${className} no-select`}>
@@ -597,6 +654,150 @@ function ProjectPanel({ className, onUIStateLoaded }: ProjectPanelProps) {
                   </div>
                 </div>
               </div>
+            </div>
+          )}
+        </div>
+
+        {/* Storage / Media Library */}
+        <div className="px-2 py-1 border-t border-sz-border/50">
+          <button
+            onClick={() => toggleSection('storage')}
+            className="w-full flex items-center gap-1 px-2 py-1.5 text-xs font-medium text-sz-text-secondary hover:bg-sz-bg-tertiary rounded transition-colors"
+          >
+            {expandedSections.storage ? (
+              <ChevronDown className="w-3 h-3" />
+            ) : (
+              <ChevronRight className="w-3 h-3" />
+            )}
+            <HardDrive className="w-3.5 h-3.5" />
+            <span>Storage</span>
+            <span className="ml-auto text-[10px] text-sz-text-muted bg-sz-bg-tertiary px-1.5 py-0.5 rounded">
+              {mediaLibrary.items.length}
+            </span>
+          </button>
+          
+          {expandedSections.storage && (
+            <div className="ml-4 mt-1 space-y-1">
+              {/* Import buttons */}
+              <div className="flex flex-wrap gap-1 px-2 py-1.5">
+                <button
+                  onClick={() => handleImportToLibrary('video')}
+                  className="flex items-center gap-1 px-2 py-1 text-[10px] bg-blue-500/20 text-blue-400 rounded hover:bg-blue-500/30 transition-colors"
+                >
+                  <Download className="w-3 h-3" />
+                  Video
+                </button>
+                <button
+                  onClick={() => handleImportToLibrary('audio')}
+                  className="flex items-center gap-1 px-2 py-1 text-[10px] bg-purple-500/20 text-purple-400 rounded hover:bg-purple-500/30 transition-colors"
+                >
+                  <Download className="w-3 h-3" />
+                  Audio
+                </button>
+                <button
+                  onClick={() => handleImportToLibrary('broll')}
+                  className="flex items-center gap-1 px-2 py-1 text-[10px] bg-emerald-500/20 text-emerald-400 rounded hover:bg-emerald-500/30 transition-colors"
+                >
+                  <Download className="w-3 h-3" />
+                  B-Roll
+                </button>
+                <button
+                  onClick={() => handleImportToLibrary('music')}
+                  className="flex items-center gap-1 px-2 py-1 text-[10px] bg-pink-500/20 text-pink-400 rounded hover:bg-pink-500/30 transition-colors"
+                >
+                  <Download className="w-3 h-3" />
+                  Music
+                </button>
+                <button
+                  onClick={() => handleImportToLibrary('sfx')}
+                  className="flex items-center gap-1 px-2 py-1 text-[10px] bg-yellow-500/20 text-yellow-400 rounded hover:bg-yellow-500/30 transition-colors"
+                >
+                  <Download className="w-3 h-3" />
+                  SFX
+                </button>
+              </div>
+
+              {/* Loading state */}
+              {mediaLibrary.isLoading && (
+                <div className="px-2 py-2 text-[10px] text-sz-text-muted text-center">
+                  Loading library...
+                </div>
+              )}
+
+              {/* Error state */}
+              {mediaLibrary.error && (
+                <div className="px-2 py-2 text-[10px] text-red-400 text-center">
+                  {mediaLibrary.error}
+                </div>
+              )}
+
+              {/* Library items by type */}
+              {(['video', 'audio', 'broll', 'music', 'sfx'] as MediaLibraryItemType[]).map((type) => {
+                const items = libraryItemsByType[type] || [];
+                if (items.length === 0) return null;
+
+                return (
+                  <div key={type} className="space-y-0.5">
+                    <div className="px-2 py-1 text-[10px] text-sz-text-muted uppercase font-medium flex items-center gap-1">
+                      {getMediaTypeIcon(type)}
+                      {type} ({items.length})
+                    </div>
+                    {items.map((item) => (
+                      <div
+                        key={item.id}
+                        className="px-2 py-1.5 rounded hover:bg-sz-bg-tertiary cursor-pointer group"
+                        title={item.originalPath}
+                      >
+                        <div className="flex items-center gap-2">
+                          {getMediaTypeIcon(item.type)}
+                          <div className="flex-1 min-w-0 allow-select">
+                            <div className="text-xs text-sz-text truncate">{item.name}</div>
+                            <div className="flex items-center gap-2 text-[10px] text-sz-text-muted mt-0.5">
+                              {item.duration && (
+                                <span>{formatDuration(item.duration)}</span>
+                              )}
+                              {item.resolution && (
+                                <>
+                                  <span>•</span>
+                                  <span>{item.resolution}</span>
+                                </>
+                              )}
+                              <span>•</span>
+                              <span>{formatFileSize(item.size)}</span>
+                            </div>
+                          </div>
+                          <button
+                            onClick={(e) => handleRemoveFromLibrary(item.id, e)}
+                            className="opacity-0 group-hover:opacity-100 p-0.5 hover:bg-red-500/20 rounded transition-opacity"
+                            title="Remove from library"
+                          >
+                            <Trash2 className="w-3 h-3 text-red-400" />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                );
+              })}
+
+              {/* Empty state */}
+              {mediaLibrary.items.length === 0 && !mediaLibrary.isLoading && (
+                <div className="px-2 py-4 text-center text-xs text-sz-text-muted">
+                  No files in storage.<br />
+                  Import files above to get started.
+                </div>
+              )}
+
+              {/* Open folder link */}
+              {mediaLibrary.items.length > 0 && (
+                <button
+                  onClick={() => openMediaLibraryFolder()}
+                  className="w-full px-2 py-1.5 text-[10px] text-sz-text-muted hover:text-sz-text flex items-center justify-center gap-1 hover:bg-sz-bg-tertiary rounded transition-colors"
+                >
+                  <ExternalLink className="w-3 h-3" />
+                  Open Storage Folder
+                </button>
+              )}
             </div>
           )}
         </div>

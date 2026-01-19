@@ -9,14 +9,6 @@ import {
   ChevronDown,
   ChevronRight,
   Search,
-  Wand2,
-  Zap,
-  Captions,
-  Music,
-  Film,
-  TrendingUp,
-  Mic,
-  Image as ImageIcon,
   Check,
   AlertCircle,
   X,
@@ -39,7 +31,6 @@ function EffectsPanel({ selectedClip, className, onApplyAiEffect, onApplyEffect 
   
   const [activeTab, setActiveTab] = useState<'effects' | 'properties' | 'applied'>('effects');
   const [expandedCategories, setExpandedCategories] = useState({
-    ai: true,
     video: true,
     audio: true,
     text: false,
@@ -66,39 +57,7 @@ function EffectsPanel({ selectedClip, className, onApplyAiEffect, onApplyEffect 
     setExpandedCategories(prev => ({ ...prev, [category]: !prev[category] }));
   };
 
-  const handleAiEffect = async (effect: string) => {
-    if (!selectedClip) {
-      setToast({ message: 'Select a clip first', type: 'error' });
-      return;
-    }
-    
-    setApplyingEffect(effect);
-    try {
-      // Call external handler if provided
-      if (onApplyAiEffect) {
-        await onApplyAiEffect(effect, selectedClip.id);
-      }
-      
-      // Add to clip's applied effects in store
-      const effectName = aiQuickOptions.find(o => o.id === effect)?.name || effect;
-      const newEffect: AppliedEffect = {
-        id: `effect_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
-        effectId: effect,
-        category: 'ai',
-        name: effectName,
-        enabled: true,
-        parameters: {},
-      };
-      addClipEffect(selectedClip.id, newEffect);
-      
-      setToast({ message: `${effectName} applied!`, type: 'success' });
-    } catch (err) {
-      console.error(`Failed to apply ${effect}:`, err);
-      setToast({ message: `Failed to apply effect`, type: 'error' });
-    } finally {
-      setApplyingEffect(null);
-    }
-  };
+  // AI effects are now triggered via the unified AI chat, not buttons
 
   const handleStandardEffect = async (effectId: string, category: 'video' | 'audio' | 'text') => {
     if (!selectedClip) {
@@ -177,64 +136,7 @@ function EffectsPanel({ selectedClip, className, onApplyAiEffect, onApplyEffect 
     }
   };
 
-  const aiQuickOptions = [
-    { 
-      id: 'auto-color', 
-      name: 'Auto Color', 
-      icon: Palette, 
-      description: 'AI-powered color correction',
-      category: 'video'
-    },
-    { 
-      id: 'auto-audio', 
-      name: 'Auto Audio', 
-      icon: Volume2, 
-      description: 'Enhance audio levels & clarity',
-      category: 'audio'
-    },
-    { 
-      id: 'auto-captions', 
-      name: 'Auto Captions', 
-      icon: Captions, 
-      description: 'Generate captions with AI',
-      category: 'text'
-    },
-    { 
-      id: 'auto-pacing', 
-      name: 'Auto Pacing', 
-      icon: TrendingUp, 
-      description: 'Optimize clip pacing',
-      category: 'video'
-    },
-    { 
-      id: 'auto-transitions', 
-      name: 'Smart Transitions', 
-      icon: Film, 
-      description: 'AI-suggested transitions',
-      category: 'video'
-    },
-    { 
-      id: 'auto-broll', 
-      name: 'B-Roll Suggestions', 
-      icon: ImageIcon, 
-      description: 'Suggest B-roll moments',
-      category: 'video'
-    },
-    { 
-      id: 'auto-music', 
-      name: 'Music Match', 
-      icon: Music, 
-      description: 'Match music to clip mood',
-      category: 'audio'
-    },
-    { 
-      id: 'auto-enhance', 
-      name: 'One-Click Enhance', 
-      icon: Sparkles, 
-      description: 'Apply all AI enhancements',
-      category: 'all'
-    },
-  ];
+  // AI Quick Options removed - now handled via unified AI chat
 
   const videoEffects = [
     { id: 'brightness-contrast', name: 'Brightness & Contrast', icon: Sliders, description: 'Adjust brightness and contrast levels' },
@@ -343,94 +245,7 @@ function EffectsPanel({ selectedClip, className, onApplyAiEffect, onApplyEffect 
               </div>
             </div>
 
-            {/* AI Quick Options */}
-            <div className="px-2 py-1 border-b border-sz-border/50 bg-gradient-to-b from-sz-accent/5 to-transparent">
-              <button
-                onClick={() => toggleCategory('ai')}
-                className="w-full flex items-center gap-1 px-2 py-1.5 text-xs font-medium text-sz-text-secondary hover:bg-sz-bg-tertiary rounded transition-colors"
-              >
-                {expandedCategories.ai ? (
-                  <ChevronDown className="w-3 h-3" />
-                ) : (
-                  <ChevronRight className="w-3 h-3" />
-                )}
-                <Wand2 className="w-3.5 h-3.5 text-sz-accent" />
-                <span className="text-sz-accent font-semibold">AI Quick Options</span>
-                <span className="ml-auto text-[10px] text-sz-text-muted bg-sz-accent/20 px-1.5 py-0.5 rounded">
-                  {aiQuickOptions.length}
-                </span>
-              </button>
-              
-              {expandedCategories.ai && (
-                <div className="ml-6 mt-2 mb-2">
-                  <div className="grid grid-cols-2 gap-1.5">
-                    {aiQuickOptions.map((option) => {
-                      const Icon = option.icon;
-                      const isApplying = applyingEffect === option.id;
-                      const isApplied = appliedEffects.has(`ai-${option.id}`);
-                      const isDisabled = !selectedClip || isApplying;
-                      const filtered = searchQuery 
-                        ? option.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                          option.description.toLowerCase().includes(searchQuery.toLowerCase())
-                        : true;
-                      
-                      if (!filtered) return null;
-                      
-                      return (
-                        <button
-                          key={option.id}
-                          onClick={() => handleAiEffect(option.id)}
-                          disabled={isDisabled}
-                          className={`group relative px-2 py-2 rounded border transition-all ${
-                            isApplied
-                              ? 'border-sz-success/50 bg-sz-success/10 hover:bg-sz-success/20'
-                              : isDisabled
-                                ? 'border-sz-border/30 bg-sz-bg-tertiary opacity-60 cursor-not-allowed'
-                                : 'border-sz-border/50 bg-sz-bg hover:bg-sz-bg-tertiary hover:border-sz-accent/50 cursor-pointer'
-                          }`}
-                          title={!selectedClip ? 'Select a clip first' : isApplied ? `${option.name} applied - click to reapply` : option.description}
-                        >
-                          {/* Applied checkmark badge */}
-                          {isApplied && !isApplying && (
-                            <div className="absolute -top-1 -right-1 w-4 h-4 bg-sz-success rounded-full flex items-center justify-center">
-                              <Check className="w-2.5 h-2.5 text-white" />
-                            </div>
-                          )}
-                          <div className="flex flex-col items-center gap-1">
-                            {isApplying ? (
-                              <div className="w-4 h-4 border-2 border-sz-accent border-t-transparent rounded-full animate-spin" />
-                            ) : (
-                              <Icon className={`w-4 h-4 transition-transform ${
-                                isApplied
-                                  ? 'text-sz-success'
-                                  : isDisabled 
-                                    ? 'text-sz-text-muted' 
-                                    : 'text-sz-accent group-hover:scale-110'
-                              }`} />
-                            )}
-                            <span className={`text-[10px] text-center leading-tight ${
-                              isApplied ? 'text-sz-success font-medium' : isDisabled ? 'text-sz-text-muted' : 'text-sz-text'
-                            }`}>
-                              {option.name}
-                            </span>
-                          </div>
-                          {isApplying && (
-                            <div className="absolute inset-0 bg-sz-accent/10 rounded flex items-center justify-center">
-                              <span className="text-[8px] text-sz-accent font-medium">Applying...</span>
-                            </div>
-                          )}
-                        </button>
-                      );
-                    })}
-                  </div>
-                  {!selectedClip && (
-                    <div className="mt-2 px-2 py-1.5 text-center text-[10px] text-sz-text-muted bg-sz-bg-tertiary/50 rounded border border-sz-border/30">
-                      Select a clip from the timeline to apply effects
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
+            {/* AI effects now triggered via the unified AI chat */}
 
             {/* Video Effects */}
             <div className="px-2 py-1">

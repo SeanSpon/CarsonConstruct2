@@ -3,6 +3,8 @@ import { useStore } from '../../stores/store';
 import { estimateAiCost, formatCost } from '../../types';
 import { createProjectFile, serializeProjectFile, loadProjectFile, parseProjectFile } from '../../stores/projectFile';
 import type { Clip, QACheck, AudioTrack } from '../../types';
+import { ConfirmModal, AlertModal } from '../ui';
+import { AlertTriangle, Info, Keyboard, Sparkles } from 'lucide-react';
 
 import Header from './Header';
 import DropZone from './DropZone';
@@ -61,10 +63,20 @@ function EditorView() {
     addClipEffect,
     removeClipEffect,
     toggleClipEffect,
+    // Undo/Redo
+    undo,
+    redo,
+    canUndo,
+    canRedo,
     // Project file state
     projectFilePath: storedProjectFilePath,
     setProjectFilePath: setStoredProjectFilePath,
     setLastAutoSaveTime,
+    // Source waveform
+    sourceWaveform,
+    setSourceWaveform,
+    isExtractingWaveform,
+    setExtractingWaveform,
   } = useStore();
 
   const [isLoading, setIsLoading] = useState(false);
@@ -80,6 +92,30 @@ function EditorView() {
   const [showProjectPanel, setShowProjectPanel] = useState(true);
   const [showEffectsPanel, setShowEffectsPanel] = useState(true);
   const [showChatPanel, setShowChatPanel] = useState(false);
+  const [showQAPanel, setShowQAPanel] = useState(false);
+  
+  // Custom modal state (replaces window.confirm/alert)
+  const [confirmModal, setConfirmModal] = useState<{
+    isOpen: boolean;
+    title: string;
+    message: string;
+    onConfirm: () => void;
+    onCancel?: () => void;
+    variant?: 'default' | 'danger';
+  }>({ isOpen: false, title: '', message: '', onConfirm: () => {} });
+  
+  const [alertModal, setAlertModal] = useState<{
+    isOpen: boolean;
+    title: string;
+    message: string;
+    variant?: 'info' | 'success' | 'warning' | 'error';
+  }>({ isOpen: false, title: '', message: '' });
+  
+  const [aiCostModal, setAiCostModal] = useState<{
+    isOpen: boolean;
+    estimate: { whisperCost: number; gptCost: number; total: number };
+    onConfirm: () => void;
+  } | null>(null);
   
   // Use projectFilePath from store (synced with stored project)
   const projectFilePath = storedProjectFilePath;
@@ -90,6 +126,33 @@ function EditorView() {
   // Get selected clip
   const selectedClip = clips.find(c => c.id === selectedClipId) || null;
 
+  // Auto-create source clip if project exists but no clips
+  // This ensures the timeline always has something selectable
+  useEffect(() => {
+    if (project && project.duration > 0 && clips.length === 0) {
+      // Use store's setResults to create a source clip
+      const { setResults } = useStore.getState();
+      const sourceClip = {
+        id: `source_${Date.now()}`,
+        startTime: 0,
+        endTime: project.duration,
+        duration: project.duration,
+        pattern: 'monologue' as const,
+        patternLabel: 'Source',
+        description: 'Full source video',
+        algorithmScore: 0,
+        hookStrength: 0,
+        hookMultiplier: 1,
+        finalScore: 0,
+        trimStartOffset: 0,
+        trimEndOffset: 0,
+        status: 'pending' as const,
+        title: project.fileName?.replace(/\.[^/.]+$/, '') || 'Source',
+      };
+      setResults([sourceClip], [], null);
+    }
+  }, [project, clips.length]);
+
   // Auto-select first clip when clips change
   useEffect(() => {
     if (clips.length > 0 && !selectedClipId) {
@@ -97,41 +160,60 @@ function EditorView() {
     }
   }, [clips, selectedClipId]);
 
-  // Auto-save every 60 seconds when project has changes
-  useEffect(() => {
-    if (!project) return;
+  // Note: Auto-save is now handled by ProjectPanel to avoid duplicate intervals
 
-    const autoSaveInterval = setInterval(async () => {
-      // Generate a project ID from the file path
-      const projectId = project.filePath.replace(/[^a-zA-Z0-9]/g, '_').slice(-50);
+  // Extract waveform when project is loaded
+  useEffect(() => {
+    const extractWaveform = async () => {
+      if (!project?.filePath) {
+        setSourceWaveform(null);
+        return;
+      }
       
-      const projectFile = createProjectFile({
-        selectedClipId,
-        currentTime,
-        showQAPanel,
-      });
-      const json = serializeProjectFile(projectFile);
+      // Don't re-extract if we already have waveform for this file
+      if (sourceWaveform && sourceWaveform.length > 0) {
+        return;
+      }
+      
+      setExtractingWaveform(true);
+      console.log('[EditorView] Extracting waveform for:', project.filePath);
       
       try {
-        const result = await window.api.projectAutoSave(projectId, json);
-        if (result.success) {
-          setLastAutoSaveTime(Date.now());
-          console.log('[AutoSave] Project auto-saved at', new Date().toLocaleTimeString());
+        // Use more points for longer videos (scales with duration)
+        const numPoints = Math.min(2000, Math.max(500, Math.ceil(project.duration / 2)));
+        const result = await window.api.extractWaveform(project.filePath, numPoints);
+        
+        if (result.success && result.waveform) {
+          console.log('[EditorView] Waveform extracted:', result.waveform.length, 'points');
+          setSourceWaveform(result.waveform);
+        } else {
+          console.warn('[EditorView] Waveform extraction failed:', result.error);
         }
       } catch (err) {
-        console.error('[AutoSave] Failed to auto-save:', err);
+        console.error('[EditorView] Waveform extraction error:', err);
+      } finally {
+        setExtractingWaveform(false);
       }
-    }, 60000); // Auto-save every 60 seconds
+    };
+    
+    extractWaveform();
+  }, [project?.filePath]); // Only re-run when file path changes
 
-    return () => clearInterval(autoSaveInterval);
-  }, [project, clips, deadSpaces, selectedClipId, currentTime, showQAPanel, setLastAutoSaveTime]);
-
-  // Check for recovery on mount
+  // Check for recovery on mount (only once per project)
+  const recoveryCheckedRef = useRef<string | null>(null);
+  
   useEffect(() => {
     const checkRecovery = async () => {
       if (!project) return;
       
       const projectId = project.filePath.replace(/[^a-zA-Z0-9]/g, '_').slice(-50);
+      
+      // Skip if we already checked recovery for this project
+      if (recoveryCheckedRef.current === projectId) {
+        return;
+      }
+      
+      recoveryCheckedRef.current = projectId;
       
       try {
         const result = await window.api.projectCheckRecovery(projectId);
@@ -139,24 +221,30 @@ function EditorView() {
           const recoveryDate = result.recoveryDate 
             ? new Date(result.recoveryDate).toLocaleString() 
             : 'unknown time';
+          const recoveryContent = result.content;
           
-          const shouldRecover = window.confirm(
-            `Found auto-saved project from ${recoveryDate}.\n\nWould you like to recover it?`
-          );
-          
-          if (shouldRecover) {
-            try {
-              const projectFile = parseProjectFile(result.content);
-              const uiState = loadProjectFile(projectFile);
-              handleUIStateLoaded(uiState);
-              console.log('[Recovery] Recovered project from auto-save');
-            } catch (err) {
-              console.error('[Recovery] Failed to load recovery file:', err);
-            }
-          } else {
-            // Clear the auto-save if user declines
-            await window.api.projectClearAutoSave(projectId);
-          }
+          setConfirmModal({
+            isOpen: true,
+            title: 'Recover Auto-Save?',
+            message: `Found an auto-saved project from ${recoveryDate}.\n\nWould you like to recover it?`,
+            onConfirm: async () => {
+              try {
+                const projectFile = parseProjectFile(recoveryContent);
+                const uiState = loadProjectFile(projectFile);
+                handleUIStateLoaded(uiState);
+                console.log('[Recovery] Recovered project from auto-save');
+                // Clear the auto-save after successful recovery
+                await window.api.projectClearAutoSave(projectId);
+              } catch (err) {
+                console.error('[Recovery] Failed to load recovery file:', err);
+              }
+            },
+            onCancel: async () => {
+              // Clear the auto-save if user declines recovery
+              await window.api.projectClearAutoSave(projectId);
+              console.log('[Recovery] User declined recovery, auto-save cleared');
+            },
+          });
         }
       } catch (err) {
         console.error('[Recovery] Failed to check for recovery:', err);
@@ -272,24 +360,9 @@ function EditorView() {
     }
   }, [removeRecentProject, setProject]);
 
-  // Start detection
-  const handleStartDetection = useCallback(async () => {
+  // Actually run detection (after confirmation)
+  const runDetection = useCallback(async () => {
     if (!project) return;
-
-    setDetecting(true);
-    setDetectionError(null);
-
-    // Confirm AI enhancement cost if enabled
-    if (settings.useAiEnhancement && project.duration > 0) {
-      const estimate = estimateAiCost(project.duration, settings.targetCount);
-      const confirmed = window.confirm(
-        `🚀 Ready to analyze your video with AI?\n\nEstimated cost: ${formatCost(estimate.total)}\n  • Transcription (Whisper): ${formatCost(estimate.whisperCost)}\n  • Content analysis (GPT): ${formatCost(estimate.gptCost)}\n\nProceed with AI-powered detection?`
-      );
-      if (!confirmed) {
-        setDetecting(false);
-        return;
-      }
-    }
 
     const jobId = `job_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
     setCurrentJobId(jobId);
@@ -310,7 +383,31 @@ function EditorView() {
       setDetectionError(String(err));
       setDetecting(false);
     }
-  }, [project, settings, setDetecting, setDetectionError, setCurrentJobId]);
+  }, [project, settings, setCurrentJobId, setDetectionError, setDetecting]);
+
+  // Start detection
+  const handleStartDetection = useCallback(async () => {
+    if (!project) return;
+
+    setDetecting(true);
+    setDetectionError(null);
+
+    // Confirm AI enhancement cost if enabled
+    if (settings.useAiEnhancement && project.duration > 0) {
+      const estimate = estimateAiCost(project.duration, settings.targetCount);
+      setAiCostModal({
+        isOpen: true,
+        estimate,
+        onConfirm: () => {
+          setAiCostModal(null);
+          runDetection();
+        },
+      });
+      return;
+    }
+
+    runDetection();
+  }, [project, settings, setDetecting, setDetectionError, runDetection]);
 
   // Cancel detection
   const handleCancelDetection = useCallback(async () => {
@@ -554,135 +651,25 @@ function EditorView() {
     }
   }, []);
 
-  // Keyboard shortcuts
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      // Don't trigger if typing in an input
-      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
-        return;
-      }
-
-      switch (e.key) {
-        case ' ':
-          // Space: Play/pause
-          e.preventDefault();
-          handlePlayPause();
-          break;
-        case 'ArrowLeft':
-          // Left arrow: Seek back
-          e.preventDefault();
-          if (videoRef.current) {
-            const delta = e.shiftKey ? 5 : 1;
-            videoRef.current.currentTime = Math.max(0, videoRef.current.currentTime - delta);
-          }
-          break;
-        case 'ArrowRight':
-          // Right arrow: Seek forward
-          e.preventDefault();
-          if (videoRef.current && project) {
-            const delta = e.shiftKey ? 5 : 1;
-            videoRef.current.currentTime = Math.min(project.duration, videoRef.current.currentTime + delta);
-          }
-          break;
-        case 'a':
-        case 'A':
-          // A: Accept selected clip
-          if (selectedClipId) {
-            handleAccept();
-          }
-          break;
-        case 'r':
-        case 'R':
-          // R: Reject selected clip
-          if (selectedClipId) {
-            handleReject();
-          }
-          break;
-        case 'e':
-        case 'E':
-          // E: Export selected clip (Ctrl/Cmd+E: Export all)
-          if ((e.ctrlKey || e.metaKey) && clips.filter(c => c.status === 'accepted').length > 0) {
-            e.preventDefault();
-            handleExportAll();
-          } else if (selectedClip) {
-            handleExportClip(selectedClip);
-          }
-          break;
-        case 'Tab':
-          // Tab: Next clip, Shift+Tab: Previous clip
-          if (clips.length > 0) {
-            e.preventDefault();
-            const currentIndex = clips.findIndex(c => c.id === selectedClipId);
-            let nextIndex;
-            if (e.shiftKey) {
-              nextIndex = currentIndex <= 0 ? clips.length - 1 : currentIndex - 1;
-            } else {
-              nextIndex = currentIndex >= clips.length - 1 ? 0 : currentIndex + 1;
-            }
-            handleSelectClip(clips[nextIndex].id);
-          }
-          break;
-        case 'j':
-        case 'J':
-          // Ctrl+J: Toggle AI Chat panel
-          if (e.ctrlKey || e.metaKey) {
-            e.preventDefault();
-            handleToggleChatPanel();
-          }
-          break;
-        case 's':
-        case 'S':
-          // Ctrl+S: Save, Ctrl+Shift+S: Save As
-          if (e.ctrlKey || e.metaKey) {
-            e.preventDefault();
-            if (e.shiftKey) {
-              handleSaveProjectAs();
-            } else {
-              handleSaveProject();
-            }
-          }
-          break;
-        case 'o':
-        case 'O':
-          // Ctrl+O: Open project
-          if (e.ctrlKey || e.metaKey) {
-            e.preventDefault();
-            handleOpenProjectFile();
-          }
-          break;
-        case 'n':
-        case 'N':
-          // Ctrl+N: New project
-          if (e.ctrlKey || e.metaKey) {
-            e.preventDefault();
-            handleNewProject();
-          }
-          break;
-      }
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [
-    handlePlayPause,
-    handleAccept,
-    handleReject,
-    handleExportAll,
-    handleExportClip,
-    handleSelectClip,
-    handleToggleChatPanel,
-    handleSaveProject,
-    handleSaveProjectAs,
-    handleOpenProjectFile,
-    handleNewProject,
-    selectedClipId,
-    selectedClip,
-    clips,
-    project,
-  ]);
-
-  // QA Check handlers
-  const [showQAPanel, setShowQAPanel] = useState(false);
+  // ========================================
+  // View Menu Handlers (must be before keyboard shortcuts)
+  // ========================================
+  
+  const handleToggleProjectPanel = useCallback(() => {
+    setShowProjectPanel(prev => !prev);
+  }, []);
+  
+  const handleToggleEffectsPanel = useCallback(() => {
+    setShowEffectsPanel(prev => !prev);
+  }, []);
+  
+  const handleToggleQAPanel = useCallback(() => {
+    setShowQAPanel(prev => !prev);
+  }, []);
+  
+  const handleToggleChatPanel = useCallback(() => {
+    setShowChatPanel(prev => !prev);
+  }, []);
 
   // Handle UI state loaded from project file
   const handleUIStateLoaded = useCallback((uiState: {
@@ -862,15 +849,29 @@ function EditorView() {
   // File Menu Handlers
   // ========================================
   
-  // New Project - clear current project
+  // New Project - clear current project and show modal
   const handleNewProject = useCallback(() => {
     if (project) {
-      const confirmed = window.confirm('Create a new project? Any unsaved changes will be lost.');
-      if (!confirmed) return;
+      setConfirmModal({
+        isOpen: true,
+        title: 'Create New Project?',
+        message: 'Any unsaved changes will be lost. Are you sure you want to create a new project?',
+        variant: 'danger',
+        onConfirm: () => {
+          useStore.getState().clearProject();
+          setProjectFilePath(null);
+          setSelectedClipId(null);
+          // Trigger showing the new project modal
+          setShowNewProjectModalTrigger(true);
+        },
+      });
+      return;
     }
     useStore.getState().clearProject();
     setProjectFilePath(null);
     setSelectedClipId(null);
+    // Trigger showing the new project modal
+    setShowNewProjectModalTrigger(true);
   }, [project]);
   
   // Open Project (.podflow file)
@@ -966,26 +967,6 @@ function EditorView() {
     window.close();
   }, []);
   
-  // ========================================
-  // View Menu Handlers
-  // ========================================
-  
-  const handleToggleProjectPanel = useCallback(() => {
-    setShowProjectPanel(prev => !prev);
-  }, []);
-  
-  const handleToggleEffectsPanel = useCallback(() => {
-    setShowEffectsPanel(prev => !prev);
-  }, []);
-  
-  const handleToggleQAPanel = useCallback(() => {
-    setShowQAPanel(prev => !prev);
-  }, []);
-  
-  const handleToggleChatPanel = useCallback(() => {
-    setShowChatPanel(prev => !prev);
-  }, []);
-  
   // TODO: Implement zoom handlers (would need timeline zoom state)
   const handleZoomIn = useCallback(() => {
     console.log('Zoom in - not implemented yet');
@@ -1001,12 +982,47 @@ function EditorView() {
   
   // Help Menu Handlers
   const handleShowShortcuts = useCallback(() => {
-    alert('Keyboard Shortcuts:\n\nSpace - Play/Pause\nA - Accept clip\nR - Reject clip\nLeft/Right Arrow - Seek\nTab - Next clip\nShift+Tab - Previous clip\nCtrl+S - Save\nCtrl+Shift+S - Save As');
+    setAlertModal({
+      isOpen: true,
+      title: 'Keyboard Shortcuts',
+      message: `Space - Play/Pause
+A - Accept clip
+R - Reject clip
+Left/Right Arrow - Seek (Shift for 5s)
+Tab - Next clip
+Shift+Tab - Previous clip
+Ctrl+Z - Undo
+Ctrl+Shift+Z - Redo
+Ctrl+S - Save project
+Ctrl+Shift+S - Save As
+Ctrl+O - Open project
+Ctrl+N - New project
+Ctrl+J - Toggle AI Chat`,
+      variant: 'info',
+    });
   }, []);
   
   const handleShowAbout = useCallback(() => {
-    alert('PodFlow Studio\n\nAI-powered podcast clip detection and editing.\n\nVersion 1.0.0');
+    setAlertModal({
+      isOpen: true,
+      title: 'About SeeZee Studio',
+      message: `AI-powered podcast clip detection and editing.
+
+Version 1.0.0
+
+All processing happens locally on your machine. Nothing is uploaded to external servers.`,
+      variant: 'info',
+    });
   }, []);
+  
+  // Undo/Redo handlers
+  const handleUndo = useCallback(() => {
+    undo();
+  }, [undo]);
+  
+  const handleRedo = useCallback(() => {
+    redo();
+  }, [redo]);
 
   // ========================================
   // Chat Panel Callbacks (for tool execution)
@@ -1045,9 +1061,163 @@ function EditorView() {
   const getChatSelectedClipId = useCallback(() => selectedClipId, [selectedClipId]);
   const getChatIsPlaying = useCallback(() => isPlaying, [isPlaying]);
 
+  // ========================================
+  // Keyboard shortcuts (must be after all handlers)
+  // ========================================
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Don't trigger if typing in an input
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
+        return;
+      }
+
+      switch (e.key) {
+        case ' ':
+          // Space: Play/pause
+          e.preventDefault();
+          handlePlayPause();
+          break;
+        case 'ArrowLeft':
+          // Left arrow: Seek back
+          e.preventDefault();
+          if (videoRef.current) {
+            const delta = e.shiftKey ? 5 : 1;
+            videoRef.current.currentTime = Math.max(0, videoRef.current.currentTime - delta);
+          }
+          break;
+        case 'ArrowRight':
+          // Right arrow: Seek forward
+          e.preventDefault();
+          if (videoRef.current && project) {
+            const delta = e.shiftKey ? 5 : 1;
+            videoRef.current.currentTime = Math.min(project.duration, videoRef.current.currentTime + delta);
+          }
+          break;
+        case 'a':
+        case 'A':
+          // A: Accept selected clip
+          if (selectedClipId) {
+            handleAccept();
+          }
+          break;
+        case 'r':
+        case 'R':
+          // R: Reject selected clip
+          if (selectedClipId) {
+            handleReject();
+          }
+          break;
+        case 'e':
+        case 'E':
+          // E: Export selected clip (Ctrl/Cmd+E: Export all)
+          if ((e.ctrlKey || e.metaKey) && clips.filter(c => c.status === 'accepted').length > 0) {
+            e.preventDefault();
+            handleExportAll();
+          } else if (selectedClip) {
+            handleExportClip(selectedClip);
+          }
+          break;
+        case 'Tab':
+          // Tab: Next clip, Shift+Tab: Previous clip
+          if (clips.length > 0) {
+            e.preventDefault();
+            const currentIndex = clips.findIndex(c => c.id === selectedClipId);
+            let nextIndex;
+            if (e.shiftKey) {
+              nextIndex = currentIndex <= 0 ? clips.length - 1 : currentIndex - 1;
+            } else {
+              nextIndex = currentIndex >= clips.length - 1 ? 0 : currentIndex + 1;
+            }
+            handleSelectClip(clips[nextIndex].id);
+          }
+          break;
+        case 'j':
+        case 'J':
+          // Ctrl+J: Toggle AI Chat panel
+          if (e.ctrlKey || e.metaKey) {
+            e.preventDefault();
+            handleToggleChatPanel();
+          }
+          break;
+        case 's':
+        case 'S':
+          // Ctrl+S: Save, Ctrl+Shift+S: Save As
+          if (e.ctrlKey || e.metaKey) {
+            e.preventDefault();
+            if (e.shiftKey) {
+              handleSaveProjectAs();
+            } else {
+              handleSaveProject();
+            }
+          }
+          break;
+        case 'o':
+        case 'O':
+          // Ctrl+O: Open project
+          if (e.ctrlKey || e.metaKey) {
+            e.preventDefault();
+            handleOpenProjectFile();
+          }
+          break;
+        case 'n':
+        case 'N':
+          // Ctrl+N: New project
+          if (e.ctrlKey || e.metaKey) {
+            e.preventDefault();
+            handleNewProject();
+          }
+          break;
+        case 'z':
+        case 'Z':
+          // Ctrl+Z: Undo, Ctrl+Shift+Z: Redo
+          if (e.ctrlKey || e.metaKey) {
+            e.preventDefault();
+            if (e.shiftKey) {
+              handleRedo();
+            } else {
+              handleUndo();
+            }
+          }
+          break;
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [
+    handlePlayPause,
+    handleAccept,
+    handleReject,
+    handleExportAll,
+    handleExportClip,
+    handleSelectClip,
+    handleToggleChatPanel,
+    handleSaveProject,
+    handleSaveProjectAs,
+    handleOpenProjectFile,
+    handleNewProject,
+    handleUndo,
+    handleRedo,
+    selectedClipId,
+    selectedClip,
+    clips,
+    project,
+  ]);
+
   // Determine view state
   const hasProject = !!project;
   const hasClips = clips.length > 0;
+  
+  // State to trigger showing the new project modal in DropZone
+  const [showNewProjectModalTrigger, setShowNewProjectModalTrigger] = useState(false);
+
+  // Handle project created from DropZone
+  const handleProjectCreated = useCallback((projectPath: string, projectName: string) => {
+    console.log('[EditorView] Project created:', projectName, 'at', projectPath);
+    // The project file was created, but we still need to import a video
+    // The DropZone will call onSelectFile after this
+    setShowNewProjectModalTrigger(false);
+  }, []);
 
   return (
     <div className="h-screen w-screen flex flex-col bg-sz-bg text-sz-text overflow-hidden">
@@ -1063,6 +1233,10 @@ function EditorView() {
         recentProjects={recentProjects}
         onOpenRecent={handleOpenRecent}
         // Edit menu
+        onUndo={handleUndo}
+        onRedo={handleRedo}
+        canUndo={canUndo()}
+        canRedo={canRedo()}
         onAcceptClip={handleAccept}
         onRejectClip={handleReject}
         hasSelectedClip={!!selectedClip}
@@ -1094,6 +1268,9 @@ function EditorView() {
             onOpenRecent={handleOpenRecent}
             onRemoveRecent={removeRecentProject}
             onFileDrop={handleFileDrop}
+            onProjectCreated={handleProjectCreated}
+            autoShowNewProjectModal={showNewProjectModalTrigger}
+            onModalClosed={() => setShowNewProjectModalTrigger(false)}
           />
         ) : (
           // Editor view - Three panel layout (Premiere Pro style)
@@ -1115,6 +1292,7 @@ function EditorView() {
                     ref={videoRef}
                     project={project}
                     selectedClip={selectedClip}
+                    clips={clips}
                     currentTime={currentTime}
                     isPlaying={isPlaying}
                     onTimeUpdate={handleTimeUpdate}
@@ -1153,6 +1331,8 @@ function EditorView() {
                   timelineGroups={timelineGroups}
                   selectedClipId={selectedClipId}
                   selectedClipIds={selectedClipIds}
+                  waveformData={sourceWaveform || undefined}
+                  isExtractingWaveform={isExtractingWaveform}
                   onSeek={handleTimelineSeek}
                   onSelectClip={handleSelectClip}
                   onMultiSelectClip={handleMultiSelectClip}
@@ -1260,6 +1440,53 @@ function EditorView() {
           exportSettings={exportSettings}
           onExport={handleExportFromPreview}
           onClose={() => setShowExportPreview(false)}
+        />
+      )}
+
+      {/* Confirm Modal */}
+      <ConfirmModal
+        isOpen={confirmModal.isOpen}
+        onClose={() => {
+          confirmModal.onCancel?.();
+          setConfirmModal(prev => ({ ...prev, isOpen: false }));
+        }}
+        onConfirm={confirmModal.onConfirm}
+        title={confirmModal.title}
+        message={confirmModal.message}
+        variant={confirmModal.variant}
+        icon={<AlertTriangle className="w-5 h-5" />}
+      />
+
+      {/* Alert Modal */}
+      <AlertModal
+        isOpen={alertModal.isOpen}
+        onClose={() => setAlertModal(prev => ({ ...prev, isOpen: false }))}
+        title={alertModal.title}
+        message={alertModal.message}
+        variant={alertModal.variant}
+        icon={alertModal.variant === 'info' ? <Info className="w-5 h-5" /> : <Keyboard className="w-5 h-5" />}
+      />
+
+      {/* AI Cost Confirmation Modal */}
+      {aiCostModal && (
+        <ConfirmModal
+          isOpen={aiCostModal.isOpen}
+          onClose={() => {
+            setAiCostModal(null);
+            setDetecting(false);
+          }}
+          onConfirm={aiCostModal.onConfirm}
+          title="Start AI Analysis?"
+          message={`Ready to analyze your video with AI-powered detection.
+
+Estimated cost: ${formatCost(aiCostModal.estimate.total)}
+  • Transcription (Whisper): ${formatCost(aiCostModal.estimate.whisperCost)}
+  • Content analysis (GPT): ${formatCost(aiCostModal.estimate.gptCost)}
+
+Proceed with AI-powered detection?`}
+          confirmText="Start Analysis"
+          cancelText="Cancel"
+          icon={<Sparkles className="w-5 h-5" />}
         />
       )}
     </div>

@@ -1,5 +1,5 @@
 import { memo, useCallback, useEffect, useState } from 'react';
-import { X, Sliders, Brain, Download, Palette, Cloud, CloudOff, LogIn, LogOut, Check, Loader2 } from 'lucide-react';
+import { X, Sliders, Brain, Download, Palette, Cloud, CloudOff, LogIn, LogOut, Check, Loader2, Bot, Eye, EyeOff } from 'lucide-react';
 import { useStore } from '../../stores/store';
 import { Button, Toggle, Input } from '../ui';
 import { SliderInput, NumberRangeInput } from '../settings';
@@ -10,7 +10,7 @@ interface SettingsDrawerProps {
 }
 
 function SettingsDrawer({ isOpen, onClose }: SettingsDrawerProps) {
-  const { settings, exportSettings, updateSettings, updateExportSettings } = useStore();
+  const { settings, exportSettings, aiSettings, updateSettings, updateExportSettings, updateAiSettings } = useStore();
   
   // Cloud storage state
   const [isCloudAuthenticated, setIsCloudAuthenticated] = useState(false);
@@ -91,6 +91,28 @@ function SettingsDrawer({ isOpen, onClose }: SettingsDrawerProps) {
   const handleModeChange = useCallback((mode: 'fast' | 'accurate') => {
     updateExportSettings({ mode });
   }, [updateExportSettings]);
+
+  // AI Assistant settings handlers
+  const handleAnthropicKeyChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    updateAiSettings({ anthropicApiKey: e.target.value || undefined });
+  }, [updateAiSettings]);
+
+  const handleOpenaiAssistantKeyChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    updateAiSettings({ openaiApiKey: e.target.value || undefined });
+  }, [updateAiSettings]);
+
+  const handleGeminiKeyChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    updateAiSettings({ geminiApiKey: e.target.value || undefined });
+  }, [updateAiSettings]);
+
+  const handleOllamaHostChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    updateAiSettings({ ollamaHost: e.target.value || undefined });
+  }, [updateAiSettings]);
+
+  // Password visibility state for API keys
+  const [showAnthropicKey, setShowAnthropicKey] = useState(false);
+  const [showOpenaiKey, setShowOpenaiKey] = useState(false);
+  const [showGeminiKey, setShowGeminiKey] = useState(false);
 
   if (!isOpen) return null;
 
@@ -203,6 +225,132 @@ function SettingsDrawer({ isOpen, onClose }: SettingsDrawerProps) {
                   </p>
                 </div>
               )}
+            </div>
+          </section>
+
+          {/* AI Assistant Settings */}
+          <section>
+            <div className="flex items-center gap-2 mb-4">
+              <Bot className="w-4 h-4 text-violet-400" />
+              <h3 className="text-sm font-medium text-sz-text">AI Assistant</h3>
+            </div>
+
+            <p className="text-xs text-sz-text-muted mb-4">
+              Configure API keys for the AI chat assistant. Only one provider is required.
+            </p>
+
+            <div className="space-y-4">
+              {/* Anthropic (Claude) */}
+              <div>
+                <label className="block text-xs text-sz-text-secondary mb-1.5">
+                  Anthropic API Key (Claude)
+                </label>
+                <div className="relative">
+                  <input
+                    type={showAnthropicKey ? 'text' : 'password'}
+                    value={aiSettings.anthropicApiKey || ''}
+                    onChange={handleAnthropicKeyChange}
+                    placeholder="sk-ant-..."
+                    className="input text-sm pr-10"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowAnthropicKey(!showAnthropicKey)}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-sz-text-muted hover:text-sz-text"
+                  >
+                    {showAnthropicKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
+                <p className="text-[10px] text-sz-text-muted mt-1">
+                  Best quality. Get key at console.anthropic.com
+                </p>
+              </div>
+
+              {/* OpenAI */}
+              <div>
+                <label className="block text-xs text-sz-text-secondary mb-1.5">
+                  OpenAI API Key (GPT)
+                </label>
+                <div className="relative">
+                  <input
+                    type={showOpenaiKey ? 'text' : 'password'}
+                    value={aiSettings.openaiApiKey || ''}
+                    onChange={handleOpenaiAssistantKeyChange}
+                    placeholder="sk-..."
+                    className="input text-sm pr-10"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowOpenaiKey(!showOpenaiKey)}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-sz-text-muted hover:text-sz-text"
+                  >
+                    {showOpenaiKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
+                <p className="text-[10px] text-sz-text-muted mt-1">
+                  Fast and affordable. Get key at platform.openai.com
+                </p>
+              </div>
+
+              {/* Gemini */}
+              <div>
+                <label className="block text-xs text-sz-text-secondary mb-1.5">
+                  Google Gemini API Key
+                </label>
+                <div className="relative">
+                  <input
+                    type={showGeminiKey ? 'text' : 'password'}
+                    value={aiSettings.geminiApiKey || ''}
+                    onChange={handleGeminiKeyChange}
+                    placeholder="AI..."
+                    className="input text-sm pr-10"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowGeminiKey(!showGeminiKey)}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-sz-text-muted hover:text-sz-text"
+                  >
+                    {showGeminiKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
+                <p className="text-[10px] text-sz-text-muted mt-1">
+                  Free tier available! Get key at makersuite.google.com
+                </p>
+              </div>
+
+              {/* Ollama (Local) */}
+              <div>
+                <label className="block text-xs text-sz-text-secondary mb-1.5">
+                  Ollama Host (Local AI)
+                </label>
+                <input
+                  type="text"
+                  value={aiSettings.ollamaHost || ''}
+                  onChange={handleOllamaHostChange}
+                  placeholder="http://localhost:11434"
+                  className="input text-sm"
+                />
+                <p className="text-[10px] text-sz-text-muted mt-1">
+                  Free & private. Install from ollama.ai
+                </p>
+              </div>
+
+              {/* Status indicator */}
+              <div className="p-3 rounded-sz bg-sz-bg-tertiary">
+                <div className="flex items-center gap-2">
+                  {(aiSettings.anthropicApiKey || aiSettings.openaiApiKey || aiSettings.geminiApiKey) ? (
+                    <>
+                      <div className="w-2 h-2 rounded-full bg-emerald-500" />
+                      <span className="text-xs text-emerald-400">AI Assistant ready</span>
+                    </>
+                  ) : (
+                    <>
+                      <div className="w-2 h-2 rounded-full bg-amber-500" />
+                      <span className="text-xs text-amber-400">Add an API key to enable AI Assistant</span>
+                    </>
+                  )}
+                </div>
+              </div>
             </div>
           </section>
 

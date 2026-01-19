@@ -23,6 +23,7 @@ import {
   ExternalLink
 } from 'lucide-react';
 import { useStore } from '../../stores/store';
+import { useChatStore } from '../../stores/chatStore';
 import { formatDuration, formatFileSize, type MediaLibraryItem, type MediaLibraryItemType } from '../../types';
 import { IconButton, Button } from '../ui';
 import { 
@@ -55,6 +56,11 @@ function ProjectPanel({ className, onUIStateLoaded }: ProjectPanelProps) {
     importToMediaLibrary,
     removeFromMediaLibrary,
     openMediaLibraryFolder,
+    // Use store's project file path for persistence
+    projectFilePath: storedProjectFilePath,
+    setProjectFilePath: setStoredProjectFilePath,
+    lastAutoSaveTime: storedLastAutoSaveTime,
+    setLastAutoSaveTime,
   } = useStore();
   const [expandedSections, setExpandedSections] = useState({
     project: true,
@@ -65,14 +71,20 @@ function ProjectPanel({ className, onUIStateLoaded }: ProjectPanelProps) {
   });
   const [searchQuery, setSearchQuery] = useState('');
   
-  // Project file state
-  const [projectFilePath, setProjectFilePath] = useState<string | null>(null);
+  // Use store's projectFilePath
+  const projectFilePath = storedProjectFilePath;
+  const setProjectFilePath = setStoredProjectFilePath;
+  
+  // UI state
   const [isSaving, setIsSaving] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
-  const [lastSaveTime, setLastSaveTime] = useState<Date | null>(null);
+  const [lastSaveTime, setLastSaveTime] = useState<Date | null>(
+    storedLastAutoSaveTime ? new Date(storedLastAutoSaveTime) : null
+  );
   const [recentProjects, setRecentProjects] = useState<RecentProjectFile[]>([]);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [autoSaveStatus, setAutoSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
   
   // Auto-save timer
   const autoSaveTimerRef = useRef<NodeJS.Timeout | null>(null);
@@ -104,39 +116,145 @@ function ProjectPanel({ className, onUIStateLoaded }: ProjectPanelProps) {
     loadMediaLibrary();
   }, [loadMediaLibrary]);
 
-  // Track unsaved changes
+  // Track unsaved changes - compare current state with last saved state
   useEffect(() => {
     if (project) {
       const currentState = serializeProjectFile(createProjectFile());
-      if (lastSavedStateRef.current && currentState !== lastSavedStateRef.current) {
+      if (lastSavedStateRef.current) {
+        if (currentState !== lastSavedStateRef.current) {
+          setHasUnsavedChanges(true);
+        }
+      } else if (clips.length > 0) {
+        // No saved state yet but we have clips - mark as having unsaved changes
         setHasUnsavedChanges(true);
       }
     }
   }, [project, clips]);
-
-  // Auto-save every 60 seconds if there are changes
+  
+  // Also track changes when project file path changes (to show correct save state)
   useEffect(() => {
-    if (!project || !hasUnsavedChanges) return;
+    if (projectFilePath && !lastSavedStateRef.current) {
+      // Project file exists but we don't have saved state - load it
+      const loadSavedState = async () => {
+        try {
+          const result = await window.api.projectLoad(projectFilePath);
+          if (result.success && result.content) {
+            lastSavedStateRef.current = result.content;
+            // Check if current state differs
+            const currentState = serializeProjectFile(createProjectFile());
+            setHasUnsavedChanges(currentState !== result.content);
+          }
+        } catch (err) {
+          console.error('[ProjectPanel] Failed to load saved state:', err);
+        }
+      };
+      loadSavedState();
+    }
+  }, [projectFilePath]);
 
-    autoSaveTimerRef.current = setInterval(async () => {
-      if (hasUnsavedChanges && project) {
+  // Auto-save every 30 seconds if there are changes
+  // Saves to actual .podflow file if one exists, otherwise creates one
+  useEffect(() => {
+    if (!project) return;
+
+    const performAutoSave = async () => {
+      if (!hasUnsavedChanges || !project) return;
+      
+      setAutoSaveStatus('saving');
+      
+      try {
+        const projectData = serializeProjectFile(createProjectFile());
+        
+        if (projectFilePath) {
+          // Save to existing .podflow file
+          const result = await window.api.projectSave(projectFilePath, projectData);
+          if (result.success) {
+            lastSavedStateRef.current = projectData;
+            setHasUnsavedChanges(false);
+            setLastSaveTime(new Date());
+            setLastAutoSaveTime(Date.now());
+            setAutoSaveStatus('saved');
+            console.log('[AutoSave] Saved to:', projectFilePath);
+            
+            // Reset status after 2 seconds
+            setTimeout(() => setAutoSaveStatus('idle'), 2000);
+          } else {
+            console.error('[AutoSave] Failed to save:', result.error);
+            setAutoSaveStatus('error');
+          }
+        } else {
+          // No project file exists yet - create one automatically based on video file name
+          // The file will be saved next to the source video
+          const videoDir = project.filePath.split(/[\\/]/).slice(0, -1).join('/');
+          const videoBaseName = project.fileName?.replace(/\.[^/.]+$/, '') || 'untitled';
+          const suggestedPath = `${videoDir}/${videoBaseName}.podflow`;
+          
+          // Use projectSave with the suggested path (creates new file)
+          const result = await window.api.projectSave(suggestedPath, projectData);
+          
+          if (result.success && result.filePath) {
+            setProjectFilePath(result.filePath);
+            lastSavedStateRef.current = projectData;
+            setHasUnsavedChanges(false);
+            setLastSaveTime(new Date());
+            setLastAutoSaveTime(Date.now());
+            setAutoSaveStatus('saved');
+            console.log('[AutoSave] Created new project file:', result.filePath);
+            
+            // Reset status after 2 seconds
+            setTimeout(() => setAutoSaveStatus('idle'), 2000);
+            
+            // Refresh recent projects
+            const recentResult = await window.api.projectGetRecent();
+            if (recentResult.success && recentResult.projects) {
+              setRecentProjects(recentResult.projects);
+            }
+          } else {
+            console.error('[AutoSave] Failed to create project file:', result.error);
+            // Fall back to recovery auto-save
+            const projectId = project.filePath.replace(/[^a-zA-Z0-9]/g, '_').slice(-50);
+            await window.api.projectAutoSave(projectId, projectData);
+            console.log('[AutoSave] Saved to recovery folder');
+            setAutoSaveStatus('saved');
+            setTimeout(() => setAutoSaveStatus('idle'), 2000);
+          }
+        }
+      } catch (err) {
+        console.error('[AutoSave] Error:', err);
+        setAutoSaveStatus('error');
+        // Fall back to recovery auto-save
         try {
           const projectId = project.filePath.replace(/[^a-zA-Z0-9]/g, '_').slice(-50);
           const projectData = serializeProjectFile(createProjectFile());
           await window.api.projectAutoSave(projectId, projectData);
-          console.log('[AutoSave] Project auto-saved');
-        } catch (err) {
-          console.error('[AutoSave] Failed:', err);
+          console.log('[AutoSave] Saved to recovery folder (fallback)');
+        } catch (fallbackErr) {
+          console.error('[AutoSave] Fallback also failed:', fallbackErr);
         }
       }
-    }, 60000); // 60 seconds
+    };
+
+    // Perform auto-save every 30 seconds
+    autoSaveTimerRef.current = setInterval(performAutoSave, 30000);
+    
+    // Also save immediately when component mounts if there are unsaved changes
+    if (hasUnsavedChanges && !projectFilePath) {
+      // Delay initial auto-save by 5 seconds to avoid saving during initial setup
+      const initialSaveTimer = setTimeout(performAutoSave, 5000);
+      return () => {
+        clearTimeout(initialSaveTimer);
+        if (autoSaveTimerRef.current) {
+          clearInterval(autoSaveTimerRef.current);
+        }
+      };
+    }
 
     return () => {
       if (autoSaveTimerRef.current) {
         clearInterval(autoSaveTimerRef.current);
       }
     };
-  }, [project, hasUnsavedChanges]);
+  }, [project, hasUnsavedChanges, projectFilePath, setProjectFilePath, setLastAutoSaveTime]);
 
   // Save project
   const handleSave = useCallback(async () => {
@@ -160,10 +278,13 @@ function ProjectPanel({ className, onUIStateLoaded }: ProjectPanelProps) {
       if (result.success && result.filePath) {
         setProjectFilePath(result.filePath);
         setLastSaveTime(new Date());
+        setLastAutoSaveTime(Date.now());
         setHasUnsavedChanges(false);
         lastSavedStateRef.current = projectData;
+        setAutoSaveStatus('saved');
+        setTimeout(() => setAutoSaveStatus('idle'), 2000);
         
-        // Clear auto-save
+        // Clear auto-save recovery file
         const projectId = project.filePath.replace(/[^a-zA-Z0-9]/g, '_').slice(-50);
         await window.api.projectClearAutoSave(projectId);
         
@@ -180,7 +301,7 @@ function ProjectPanel({ className, onUIStateLoaded }: ProjectPanelProps) {
     } finally {
       setIsSaving(false);
     }
-  }, [project, projectFilePath]);
+  }, [project, projectFilePath, setProjectFilePath, setLastAutoSaveTime]);
 
   // Save As
   const handleSaveAs = useCallback(async () => {
@@ -196,8 +317,15 @@ function ProjectPanel({ className, onUIStateLoaded }: ProjectPanelProps) {
       if (result.success && result.filePath) {
         setProjectFilePath(result.filePath);
         setLastSaveTime(new Date());
+        setLastAutoSaveTime(Date.now());
         setHasUnsavedChanges(false);
         lastSavedStateRef.current = projectData;
+        setAutoSaveStatus('saved');
+        setTimeout(() => setAutoSaveStatus('idle'), 2000);
+        
+        // Clear auto-save recovery file
+        const projectId = project.filePath.replace(/[^a-zA-Z0-9]/g, '_').slice(-50);
+        await window.api.projectClearAutoSave(projectId);
         
         // Refresh recent projects
         const recentResult = await window.api.projectGetRecent();
@@ -212,7 +340,7 @@ function ProjectPanel({ className, onUIStateLoaded }: ProjectPanelProps) {
     } finally {
       setIsSaving(false);
     }
-  }, [project]);
+  }, [project, setProjectFilePath, setLastAutoSaveTime]);
 
   // Open project
   const handleOpen = useCallback(async () => {
@@ -227,8 +355,11 @@ function ProjectPanel({ className, onUIStateLoaded }: ProjectPanelProps) {
         const uiState = loadProjectFile(projectFile);
         
         setProjectFilePath(result.filePath);
-        setLastSaveTime(new Date(projectFile.meta.modifiedAt));
+        const modifiedDate = new Date(projectFile.meta.modifiedAt);
+        setLastSaveTime(modifiedDate);
+        setLastAutoSaveTime(modifiedDate.getTime());
         setHasUnsavedChanges(false);
+        setAutoSaveStatus('idle');
         lastSavedStateRef.current = result.content;
         
         // Notify parent of UI state
@@ -249,7 +380,7 @@ function ProjectPanel({ className, onUIStateLoaded }: ProjectPanelProps) {
     } finally {
       setIsLoading(false);
     }
-  }, [onUIStateLoaded]);
+  }, [onUIStateLoaded, setProjectFilePath, setLastAutoSaveTime]);
 
   // Load recent project
   const handleLoadRecent = useCallback(async (filePath: string) => {
@@ -264,8 +395,11 @@ function ProjectPanel({ className, onUIStateLoaded }: ProjectPanelProps) {
         const uiState = loadProjectFile(projectFile);
         
         setProjectFilePath(result.filePath || filePath);
-        setLastSaveTime(new Date(projectFile.meta.modifiedAt));
+        const modifiedDate = new Date(projectFile.meta.modifiedAt);
+        setLastSaveTime(modifiedDate);
+        setLastAutoSaveTime(modifiedDate.getTime());
         setHasUnsavedChanges(false);
+        setAutoSaveStatus('idle');
         lastSavedStateRef.current = result.content;
         
         // Notify parent of UI state
@@ -283,7 +417,7 @@ function ProjectPanel({ className, onUIStateLoaded }: ProjectPanelProps) {
     } finally {
       setIsLoading(false);
     }
-  }, [onUIStateLoaded]);
+  }, [onUIStateLoaded, setProjectFilePath, setLastAutoSaveTime]);
 
   // Remove recent project
   const handleRemoveRecent = useCallback(async (filePath: string, e: React.MouseEvent) => {
@@ -295,11 +429,14 @@ function ProjectPanel({ className, onUIStateLoaded }: ProjectPanelProps) {
   // New project
   const handleNewProject = useCallback(() => {
     clearProject();
+    useChatStore.getState().clearMessages(); // Clear chat for new session
     setProjectFilePath(null);
     setLastSaveTime(null);
+    setLastAutoSaveTime(null);
     setHasUnsavedChanges(false);
+    setAutoSaveStatus('idle');
     lastSavedStateRef.current = null;
-  }, [clearProject]);
+  }, [clearProject, setProjectFilePath, setLastAutoSaveTime]);
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -411,7 +548,29 @@ function ProjectPanel({ className, onUIStateLoaded }: ProjectPanelProps) {
           </div>
         )}
         
-        {lastSaveTime && !saveError && (
+        {/* Auto-save status indicator */}
+        {autoSaveStatus === 'saving' && (
+          <div className="flex items-center gap-1 text-[10px] text-amber-400 mb-2 animate-pulse">
+            <RotateCcw className="w-3 h-3 animate-spin" />
+            Auto-saving...
+          </div>
+        )}
+        
+        {autoSaveStatus === 'saved' && (
+          <div className="flex items-center gap-1 text-[10px] text-green-400 mb-2">
+            <CheckCircle2 className="w-3 h-3" />
+            Auto-saved
+          </div>
+        )}
+        
+        {autoSaveStatus === 'error' && (
+          <div className="flex items-center gap-1 text-[10px] text-red-400 mb-2">
+            <AlertCircle className="w-3 h-3" />
+            Auto-save failed
+          </div>
+        )}
+        
+        {lastSaveTime && autoSaveStatus === 'idle' && !saveError && (
           <div className="flex items-center gap-1 text-[10px] text-sz-text-muted mb-2">
             <CheckCircle2 className="w-3 h-3 text-green-400" />
             Saved {lastSaveTime.toLocaleTimeString()}

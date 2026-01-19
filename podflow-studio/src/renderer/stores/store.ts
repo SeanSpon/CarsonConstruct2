@@ -202,6 +202,7 @@ interface AppState {
   
   updateClipStatus: (clipId: string, status: Clip['status']) => void;
   updateClipTrim: (clipId: string, trimStartOffset: number, trimEndOffset: number) => void;
+  updateClipHook: (clipId: string, hookText: string, title?: string) => void;
   
   updateDeadSpaceRemove: (deadSpaceId: string, remove: boolean) => void;
   setAllDeadSpacesRemove: (remove: boolean) => void;
@@ -948,6 +949,20 @@ export const useStore = create<AppState>()(
           ),
         }));
       },
+      
+      updateClipHook: (clipId, hookText, title) => {
+        const state = get();
+        // Save history before making changes
+        get()._addHistory(captureHistoryState(state));
+        
+        set((state) => ({
+          clips: state.clips.map((clip) =>
+            clip.id === clipId 
+              ? { ...clip, hookText, ...(title ? { title } : {}) } 
+              : clip
+          ),
+        }));
+      },
 
       // Dead space actions
       updateDeadSpaceRemove: (deadSpaceId, remove) => {
@@ -1278,6 +1293,7 @@ export const useStore = create<AppState>()(
         lastRoute: state.lastRoute,
         // Project file state
         projectFilePath: state.projectFilePath,
+        lastAutoSaveTime: state.lastAutoSaveTime,
         // Media library - persist items for offline use
         mediaLibrary: state.mediaLibrary,
         // Note: past/future (history) are intentionally NOT persisted

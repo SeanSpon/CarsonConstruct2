@@ -1,5 +1,6 @@
 import { memo, useState, useCallback, useEffect, useRef } from 'react';
 import { useStore } from '../../stores/store';
+import { useChatStore } from '../../stores/chatStore';
 import { estimateAiCost, formatCost } from '../../types';
 import { createProjectFile, serializeProjectFile, loadProjectFile, parseProjectFile } from '../../stores/projectFile';
 import type { Clip, QACheck, AudioTrack } from '../../types';
@@ -851,27 +852,26 @@ function EditorView() {
   
   // New Project - clear current project and show modal
   const handleNewProject = useCallback(() => {
+    const clearAllState = () => {
+      useStore.getState().clearProject();
+      useChatStore.getState().clearMessages(); // Clear chat history for new project
+      setProjectFilePath(null);
+      setSelectedClipId(null);
+      // Trigger showing the new project modal
+      setShowNewProjectModalTrigger(true);
+    };
+    
     if (project) {
       setConfirmModal({
         isOpen: true,
         title: 'Create New Project?',
         message: 'Any unsaved changes will be lost. Are you sure you want to create a new project?',
         variant: 'danger',
-        onConfirm: () => {
-          useStore.getState().clearProject();
-          setProjectFilePath(null);
-          setSelectedClipId(null);
-          // Trigger showing the new project modal
-          setShowNewProjectModalTrigger(true);
-        },
+        onConfirm: clearAllState,
       });
       return;
     }
-    useStore.getState().clearProject();
-    setProjectFilePath(null);
-    setSelectedClipId(null);
-    // Trigger showing the new project modal
-    setShowNewProjectModalTrigger(true);
+    clearAllState();
   }, [project]);
   
   // Open Project (.podflow file)
@@ -1005,12 +1005,61 @@ Ctrl+J - Toggle AI Chat`,
   const handleShowAbout = useCallback(() => {
     setAlertModal({
       isOpen: true,
-      title: 'About SeeZee Studio',
+      title: 'About PodFlow Studio',
       message: `AI-powered podcast clip detection and editing.
 
 Version 1.0.0
 
 All processing happens locally on your machine. Nothing is uploaded to external servers.`,
+      variant: 'info',
+    });
+  }, []);
+  
+  const handleShowDocs = useCallback(() => {
+    setAlertModal({
+      isOpen: true,
+      title: 'PodFlow Studio Documentation',
+      message: `GETTING STARTED
+1. Import a video or audio file (File > Import Video or drag & drop)
+2. The project auto-saves to a .podflow file next to your video
+3. Use AI detection to find clip-worthy moments
+
+PANELS
+• Project Panel (left) - Browse files, recent projects, media library
+• Effects Panel (right) - Apply AI effects and video/audio adjustments
+• AI Chat (right) - Ask the AI assistant for editing help
+• QA Panel - Quality check your clips before export
+
+KEYBOARD SHORTCUTS
+Space        Play/Pause
+A            Accept clip
+R            Reject clip
+Tab          Next clip
+Shift+Tab    Previous clip
+Left/Right   Seek 1s (Shift for 5s)
+Ctrl+S       Save project
+Ctrl+Shift+S Save As
+Ctrl+O       Open project
+Ctrl+N       New project
+Ctrl+J       Toggle AI Chat
+Ctrl+Z       Undo
+Ctrl+Shift+Z Redo
+
+PROJECT FILES
+• .podflow files contain your full project state
+• Auto-saves every 30 seconds
+• Projects are saved next to your source video
+
+AI DETECTION
+• Finds engaging moments in podcasts/videos
+• Detects patterns like hooks, debates, stories
+• Generates titles and hook text for clips
+
+EXPORT OPTIONS
+• Individual clips as separate files
+• Clips compilation (all clips joined)
+• Full video with dead spaces removed
+• Export to Premiere Pro (FCP XML, EDL)`,
       variant: 'info',
     });
   }, []);
@@ -1056,6 +1105,15 @@ All processing happens locally on your machine. Nothing is uploaded to external 
       setIsPlaying(false);
     }
   }, []);
+  
+  const handleChatShowExportPreview = useCallback((_clipIds: string[]) => {
+    // The clipIds parameter is provided for context, but the export modal
+    // will show all accepted clips (which create_vod_compilation already set)
+    const acceptedClips = clips.filter(c => c.status === 'accepted');
+    if (acceptedClips.length > 0) {
+      setShowExportPreview(true);
+    }
+  }, [clips]);
   
   const getChatCurrentTime = useCallback(() => currentTime, [currentTime]);
   const getChatSelectedClipId = useCallback(() => selectedClipId, [selectedClipId]);
@@ -1223,6 +1281,8 @@ All processing happens locally on your machine. Nothing is uploaded to external 
     <div className="h-screen w-screen flex flex-col bg-sz-bg text-sz-text overflow-hidden">
       <Header 
         onSettingsClick={() => setShowSettings(true)}
+        onHelpClick={handleShowShortcuts}
+        onDocsClick={handleShowDocs}
         // File menu
         onNewProject={handleNewProject}
         onOpenProject={handleOpenProjectFile}
@@ -1401,6 +1461,7 @@ All processing happens locally on your machine. Nothing is uploaded to external 
                   onTrimClip={handleChatTrimClip}
                   onPlayVideo={handleChatPlayVideo}
                   onPauseVideo={handleChatPauseVideo}
+                  onShowExportPreview={handleChatShowExportPreview}
                   getCurrentTime={getChatCurrentTime}
                   getSelectedClipId={getChatSelectedClipId}
                   getIsPlaying={getChatIsPlaying}

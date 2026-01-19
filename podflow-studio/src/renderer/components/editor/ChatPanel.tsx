@@ -126,93 +126,177 @@ const toolFriendlyNames: Record<string, string> = {
   play_pause: 'Controlling playback',
 };
 
-// Tool call component - enhanced with better visuals
+// Tool call component - ENHANCED with progress bars, animations and beautiful visuals
 function ToolCallDisplay({ toolCall }: { toolCall: ToolCall }) {
   const [showDetails, setShowDetails] = useState(false);
+  const [progress, setProgress] = useState(0);
+  const [elapsedTime, setElapsedTime] = useState(0);
   
-  const isRunning = toolCall.status === 'running' || toolCall.status === 'pending';
+  const isRunning = toolCall.status === 'running';
+  const isPending = toolCall.status === 'pending';
   const isSuccess = toolCall.status === 'success';
   const isError = toolCall.status === 'error';
+  const isActive = isRunning || isPending;
+  
+  // Animate progress bar when running
+  useEffect(() => {
+    if (!isRunning) {
+      if (isSuccess) setProgress(100);
+      return;
+    }
+    
+    const interval = setInterval(() => {
+      setProgress((prev) => Math.min(90, prev + Math.random() * 8));
+    }, 300);
+    
+    return () => clearInterval(interval);
+  }, [isRunning, isSuccess]);
+  
+  // Track elapsed time
+  useEffect(() => {
+    if (!isActive) return;
+    
+    const start = Date.now();
+    const interval = setInterval(() => {
+      setElapsedTime(Math.floor((Date.now() - start) / 100) / 10);
+    }, 100);
+    
+    return () => clearInterval(interval);
+  }, [isActive]);
   
   const statusColors = {
-    pending: 'border-cyan-500/30 bg-cyan-500/5',
-    running: 'border-cyan-500/50 bg-cyan-500/10',
-    success: 'border-emerald-500/30 bg-emerald-500/5',
-    error: 'border-red-500/30 bg-red-500/5',
+    pending: 'border-cyan-500/30 bg-gradient-to-r from-cyan-500/10 to-transparent',
+    running: 'border-cyan-500/50 bg-gradient-to-r from-cyan-500/15 via-purple-500/5 to-transparent shadow-lg shadow-cyan-500/10',
+    success: 'border-emerald-500/30 bg-gradient-to-r from-emerald-500/10 to-transparent',
+    error: 'border-red-500/30 bg-gradient-to-r from-red-500/10 to-transparent',
   }[toolCall.status];
 
   const statusIcon = {
     pending: (
       <div className="flex items-center gap-1.5">
-        <div className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse" />
-        <span className="text-cyan-400">Queued</span>
+        <div className="relative">
+          <div className="w-2 h-2 rounded-full bg-cyan-400/50" />
+          <div className="absolute inset-0 w-2 h-2 rounded-full bg-cyan-400 animate-ping" />
+        </div>
+        <span className="text-cyan-400 text-[10px]">Queued</span>
       </div>
     ),
     running: (
       <div className="flex items-center gap-1.5">
-        <Loader2 className="w-3.5 h-3.5 animate-spin text-cyan-400" />
-        <span className="text-cyan-400">Running</span>
+        <div className="relative">
+          <Loader2 className="w-4 h-4 animate-spin text-cyan-400" />
+          <div className="absolute inset-0 bg-cyan-400/20 rounded-full blur-sm" />
+        </div>
+        <span className="text-cyan-400 font-medium">{elapsedTime.toFixed(1)}s</span>
       </div>
     ),
     success: (
-      <div className="flex items-center gap-1.5">
-        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
-        <span className="text-emerald-400">Done</span>
+      <div className="flex items-center gap-1.5 animate-success-pop">
+        <div className="relative">
+          <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+          <div className="absolute inset-0 bg-emerald-400/30 rounded-full blur-sm animate-pulse" />
+        </div>
+        <span className="text-emerald-400 font-medium">Done!</span>
       </div>
     ),
     error: (
       <div className="flex items-center gap-1.5">
-        <XCircle className="w-3.5 h-3.5 text-red-400" />
-        <span className="text-red-400">Failed</span>
+        <XCircle className="w-4 h-4 text-red-400" />
+        <span className="text-red-400 font-medium">Failed</span>
       </div>
     ),
   }[toolCall.status];
   
   const friendlyName = toolFriendlyNames[toolCall.name] || toolCall.name;
+  const iconColor = toolCategoryColors[toolCall.name] || 'text-cyan-400';
   
   return (
-    <div className={`my-2 rounded-lg border ${statusColors} overflow-hidden transition-all duration-300`}>
+    <div className={`my-2 rounded-xl border ${statusColors} overflow-hidden transition-all duration-500 ${isRunning ? 'animate-pulse-subtle' : ''}`}>
+      {/* Progress bar at top */}
+      {isActive && (
+        <div className="h-1 bg-cyan-900/20">
+          <div 
+            className="h-full bg-gradient-to-r from-cyan-500 via-cyan-400 to-purple-500 transition-all duration-300 ease-out"
+            style={{ width: `${progress}%` }}
+          />
+        </div>
+      )}
+      
       <button
         onClick={() => setShowDetails(!showDetails)}
-        className="w-full flex items-center gap-2 px-3 py-2.5 text-xs hover:bg-white/5 transition-colors"
+        className="w-full flex items-center gap-2.5 px-3 py-3 text-xs hover:bg-white/5 transition-colors"
       >
-        {showDetails ? (
-          <ChevronDown className="w-3.5 h-3.5 text-sz-text-muted" />
-        ) : (
+        {/* Expand/collapse icon */}
+        <div className={`transition-transform duration-200 ${showDetails ? 'rotate-90' : ''}`}>
           <ChevronRight className="w-3.5 h-3.5 text-sz-text-muted" />
-        )}
-        <span className={`${toolCategoryColors[toolCall.name] || 'text-cyan-400'}`}>
-          {toolIcons[toolCall.name] || <Wrench className="w-4 h-4" />}
+        </div>
+        
+        {/* Tool icon with glow */}
+        <div className="relative">
+          {isRunning && (
+            <div className={`absolute inset-0 ${iconColor.replace('text-', 'bg-').replace('-400', '-400/30')} rounded blur-md animate-pulse`} />
+          )}
+          <span className={`relative ${iconColor}`}>
+            {toolIcons[toolCall.name] || <Wrench className="w-4 h-4" />}
+          </span>
+        </div>
+        
+        {/* Tool name */}
+        <span className={`font-medium ${isRunning ? 'text-cyan-300' : 'text-sz-text'}`}>
+          {friendlyName}
         </span>
-        <span className="text-sz-text font-medium">{friendlyName}</span>
+        
+        {/* Running indicator dots */}
+        {isRunning && (
+          <div className="flex gap-0.5 ml-1">
+            <div className="w-1 h-1 rounded-full bg-cyan-400 animate-bounce" style={{ animationDelay: '0ms' }} />
+            <div className="w-1 h-1 rounded-full bg-cyan-400 animate-bounce" style={{ animationDelay: '100ms' }} />
+            <div className="w-1 h-1 rounded-full bg-cyan-400 animate-bounce" style={{ animationDelay: '200ms' }} />
+          </div>
+        )}
+        
         <span className="flex-1" />
         {statusIcon}
       </button>
       
+      {/* Details section */}
       {showDetails && (
-        <div className="px-3 pb-3 space-y-2 text-xs border-t border-white/5">
+        <div className="px-3 pb-3 space-y-2 text-xs border-t border-white/5 animate-slide-down">
           <div className="pt-2">
-            <div className="text-sz-text-muted mb-1 flex items-center gap-1">
-              <code className="text-[10px] text-cyan-400/70">{toolCall.name}</code>
+            <div className="text-sz-text-muted mb-1.5 flex items-center gap-2">
+              <code className="text-[10px] px-1.5 py-0.5 rounded bg-cyan-500/10 text-cyan-400/80 font-mono">
+                {toolCall.name}
+              </code>
+              {toolCall.status === 'success' && (
+                <span className="text-[9px] text-emerald-400/60">✓ Executed successfully</span>
+              )}
             </div>
-            <pre className="bg-black/30 p-2 rounded-md overflow-x-auto text-sz-text-secondary font-mono text-[10px]">
+            <pre className="bg-black/40 p-2.5 rounded-lg overflow-x-auto text-sz-text-secondary font-mono text-[10px] border border-white/5">
               {JSON.stringify(toolCall.arguments, null, 2)}
             </pre>
           </div>
+          
           {toolCall.result !== undefined && (
-            <div>
-              <div className="text-emerald-400/70 mb-1">Result:</div>
-              <pre className="bg-black/30 p-2 rounded-md overflow-x-auto text-sz-text-secondary font-mono text-[10px] max-h-32 overflow-y-auto">
+            <div className="animate-fade-in">
+              <div className="text-emerald-400/80 mb-1.5 flex items-center gap-1.5">
+                <CheckCircle2 className="w-3 h-3" />
+                <span>Result:</span>
+              </div>
+              <pre className="bg-emerald-500/5 border border-emerald-500/20 p-2.5 rounded-lg overflow-x-auto text-sz-text-secondary font-mono text-[10px] max-h-40 overflow-y-auto scrollbar-thin">
                 {typeof toolCall.result === 'string' 
                   ? toolCall.result 
                   : JSON.stringify(toolCall.result, null, 2)}
               </pre>
             </div>
           )}
+          
           {toolCall.error && (
-            <div>
-              <div className="text-red-400 mb-1">Error:</div>
-              <pre className="bg-red-500/10 p-2 rounded-md overflow-x-auto text-red-400 font-mono text-[10px]">
+            <div className="animate-shake">
+              <div className="text-red-400 mb-1.5 flex items-center gap-1.5">
+                <XCircle className="w-3 h-3" />
+                <span>Error:</span>
+              </div>
+              <pre className="bg-red-500/10 border border-red-500/20 p-2.5 rounded-lg overflow-x-auto text-red-400 font-mono text-[10px]">
                 {toolCall.error}
               </pre>
             </div>
@@ -223,42 +307,101 @@ function ToolCallDisplay({ toolCall }: { toolCall: ToolCall }) {
   );
 }
 
-// Thinking block component - enhanced with cyan theme
+// Thinking block component - ENHANCED with beautiful visualizations
 function ThinkingBlock({ 
   thinking, 
   collapsed, 
-  onToggle 
+  onToggle,
+  isActive = false,
 }: { 
   thinking: string; 
   collapsed?: boolean; 
   onToggle: () => void;
+  isActive?: boolean;
 }) {
+  const [displayThinking, setDisplayThinking] = useState('');
+  
+  // Stream thinking text if active
+  useEffect(() => {
+    if (!isActive || collapsed) {
+      setDisplayThinking(thinking);
+      return;
+    }
+    
+    let index = 0;
+    const interval = setInterval(() => {
+      if (index < thinking.length) {
+        setDisplayThinking(thinking.slice(0, index + 1));
+        index++;
+      } else {
+        clearInterval(interval);
+      }
+    }, 8);
+    
+    return () => clearInterval(interval);
+  }, [thinking, isActive, collapsed]);
+  
   if (!thinking) return null;
   
   return (
-    <div className="my-2 rounded-lg border border-cyan-500/20 bg-gradient-to-r from-cyan-500/5 to-transparent overflow-hidden">
+    <div className={`my-2 rounded-xl border overflow-hidden transition-all duration-300 ${
+      isActive 
+        ? 'border-cyan-500/40 bg-gradient-to-r from-cyan-500/10 via-purple-500/5 to-transparent shadow-lg shadow-cyan-500/10' 
+        : 'border-cyan-500/20 bg-gradient-to-r from-cyan-500/5 to-transparent'
+    }`}>
       <button
         onClick={onToggle}
         className="w-full flex items-center gap-2 px-3 py-2.5 text-xs hover:bg-cyan-500/10 transition-colors"
       >
         {collapsed ? (
-          <ChevronRight className="w-3.5 h-3.5 text-cyan-400" />
+          <ChevronRight className="w-3.5 h-3.5 text-cyan-400 transition-transform" />
         ) : (
-          <ChevronDown className="w-3.5 h-3.5 text-cyan-400" />
+          <ChevronDown className="w-3.5 h-3.5 text-cyan-400 transition-transform" />
         )}
-        <Brain className="w-3.5 h-3.5 text-cyan-400 animate-pulse" />
-        <span className="text-cyan-400 font-medium">Thinking...</span>
-        <div className="flex gap-0.5 ml-1">
-          <div className="w-1 h-1 rounded-full bg-cyan-400 animate-bounce" style={{ animationDelay: '0ms' }} />
-          <div className="w-1 h-1 rounded-full bg-cyan-400 animate-bounce" style={{ animationDelay: '150ms' }} />
-          <div className="w-1 h-1 rounded-full bg-cyan-400 animate-bounce" style={{ animationDelay: '300ms' }} />
+        
+        {/* Animated brain with glow effect */}
+        <div className="relative">
+          {isActive && (
+            <div className="absolute inset-0 bg-cyan-400/30 rounded-full blur-md animate-pulse" />
+          )}
+          <Brain className={`w-4 h-4 text-cyan-400 relative ${isActive ? 'animate-pulse' : ''}`} />
         </div>
+        
+        <span className="text-cyan-400 font-medium">
+          {isActive ? 'Thinking...' : 'View Thinking'}
+        </span>
+        
+        {isActive && (
+          <div className="flex gap-0.5 ml-1">
+            <div className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-bounce" style={{ animationDelay: '0ms' }} />
+            <div className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-bounce" style={{ animationDelay: '100ms' }} />
+            <div className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-bounce" style={{ animationDelay: '200ms' }} />
+          </div>
+        )}
+        
+        {/* Character count badge */}
+        <span className="ml-auto text-[10px] text-cyan-400/50 font-mono">
+          {thinking.length} chars
+        </span>
       </button>
       
       {!collapsed && (
         <div className="px-3 pb-3 border-t border-cyan-500/10">
-          <div className="text-xs text-sz-text-secondary whitespace-pre-wrap font-mono leading-relaxed pt-2">
-            {thinking}
+          {/* Thinking progress indicator */}
+          {isActive && (
+            <div className="h-0.5 bg-cyan-900/20 rounded-full overflow-hidden mb-2">
+              <div 
+                className="h-full bg-gradient-to-r from-cyan-500 to-purple-500 rounded-full transition-all duration-300"
+                style={{ width: `${Math.min(100, (displayThinking.length / Math.max(1, thinking.length)) * 100)}%` }}
+              />
+            </div>
+          )}
+          
+          <div className="text-xs text-sz-text-secondary whitespace-pre-wrap font-mono leading-relaxed pt-1 max-h-48 overflow-y-auto scrollbar-thin scrollbar-thumb-cyan-500/20">
+            {displayThinking}
+            {isActive && displayThinking.length < thinking.length && (
+              <span className="inline-block w-1.5 h-3 bg-cyan-400/50 ml-0.5 animate-pulse" />
+            )}
           </div>
         </div>
       )}
@@ -266,27 +409,127 @@ function ThinkingBlock({
   );
 }
 
-// Loading indicator when bot is processing
+// Animated streaming status messages
+const streamingStatuses = [
+  'Analyzing your request...',
+  'Thinking about clips...',
+  'Processing context...',
+  'Formulating response...',
+  'Almost there...',
+];
+
+// Loading indicator when bot is processing - ENHANCED with more visual feedback
 function BotLoadingIndicator() {
+  const [statusIndex, setStatusIndex] = useState(0);
+  const [dots, setDots] = useState('');
+  
+  // Cycle through status messages
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setStatusIndex((prev) => (prev + 1) % streamingStatuses.length);
+    }, 2500);
+    return () => clearInterval(interval);
+  }, []);
+  
+  // Animate dots
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setDots((prev) => (prev.length >= 3 ? '' : prev + '.'));
+    }, 400);
+    return () => clearInterval(interval);
+  }, []);
+  
   return (
-    <div className="flex gap-3">
-      {/* Avatar with pulse */}
-      <div className="flex-shrink-0 w-8 h-8 rounded-lg bg-gradient-to-br from-cyan-500/30 to-cyan-600/20 flex items-center justify-center ring-2 ring-cyan-500/30 animate-pulse">
-        <Clapperboard className="w-4 h-4 text-cyan-400" />
+    <div className="flex gap-3 animate-fade-in">
+      {/* Avatar with enhanced pulse and glow */}
+      <div className="relative flex-shrink-0">
+        <div className="absolute inset-0 bg-cyan-500/20 rounded-lg blur-md animate-pulse" />
+        <div className="relative w-8 h-8 rounded-lg bg-gradient-to-br from-cyan-500/40 to-cyan-600/30 flex items-center justify-center ring-2 ring-cyan-500/40 shadow-lg shadow-cyan-500/20">
+          <Clapperboard className="w-4 h-4 text-cyan-400 animate-pulse" />
+        </div>
       </div>
       
-      {/* Loading content */}
+      {/* Loading content with enhanced visuals */}
       <div className="flex-1">
-        <div className="flex items-center gap-2 px-3 py-2.5 rounded-lg bg-sz-bg-secondary/80 border border-cyan-500/20 max-w-[200px]">
-          <div className="flex gap-1">
-            <div className="w-2 h-2 rounded-full bg-cyan-400 animate-bounce" style={{ animationDelay: '0ms' }} />
-            <div className="w-2 h-2 rounded-full bg-cyan-400 animate-bounce" style={{ animationDelay: '150ms' }} />
-            <div className="w-2 h-2 rounded-full bg-cyan-400 animate-bounce" style={{ animationDelay: '300ms' }} />
+        <div className="flex flex-col gap-2 px-4 py-3 rounded-xl bg-gradient-to-r from-cyan-500/10 to-transparent border border-cyan-500/20 max-w-[280px] backdrop-blur-sm">
+          {/* Animated brain icon with particles */}
+          <div className="flex items-center gap-3">
+            <div className="relative">
+              <Brain className="w-5 h-5 text-cyan-400 animate-pulse" />
+              {/* Particle effects */}
+              <div className="absolute -top-1 -right-1 w-1.5 h-1.5 bg-cyan-400 rounded-full animate-ping" />
+              <div className="absolute -bottom-0.5 -left-0.5 w-1 h-1 bg-cyan-300 rounded-full animate-ping" style={{ animationDelay: '300ms' }} />
+            </div>
+            <div className="flex flex-col">
+              <span className="text-xs font-medium text-cyan-400">
+                {streamingStatuses[statusIndex]}{dots}
+              </span>
+            </div>
           </div>
-          <span className="text-xs text-cyan-400/80 ml-1">Clip Bot is thinking...</span>
+          
+          {/* Progress bar */}
+          <div className="h-1 bg-cyan-900/30 rounded-full overflow-hidden">
+            <div className="h-full bg-gradient-to-r from-cyan-500 to-cyan-300 rounded-full animate-progress-indeterminate" />
+          </div>
+          
+          {/* Bouncing dots */}
+          <div className="flex items-center gap-1 mt-1">
+            <div className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-bounce" style={{ animationDelay: '0ms' }} />
+            <div className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-bounce" style={{ animationDelay: '100ms' }} />
+            <div className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-bounce" style={{ animationDelay: '200ms' }} />
+            <span className="text-[10px] text-cyan-400/60 ml-2">Clip Bot is working</span>
+          </div>
         </div>
       </div>
     </div>
+  );
+}
+
+// Live streaming text component - types out text character by character
+function StreamingText({ text, isComplete }: { text: string; isComplete: boolean }) {
+  const [displayedText, setDisplayedText] = useState('');
+  const [cursorVisible, setCursorVisible] = useState(true);
+  
+  useEffect(() => {
+    if (isComplete) {
+      setDisplayedText(text);
+      return;
+    }
+    
+    let index = 0;
+    const chars = text.split('');
+    
+    const interval = setInterval(() => {
+      if (index < chars.length) {
+        setDisplayedText(text.slice(0, index + 1));
+        index++;
+      } else {
+        clearInterval(interval);
+      }
+    }, 15); // Fast but visible typing speed
+    
+    return () => clearInterval(interval);
+  }, [text, isComplete]);
+  
+  // Blinking cursor
+  useEffect(() => {
+    if (isComplete) {
+      setCursorVisible(false);
+      return;
+    }
+    const interval = setInterval(() => {
+      setCursorVisible((v) => !v);
+    }, 530);
+    return () => clearInterval(interval);
+  }, [isComplete]);
+  
+  return (
+    <span>
+      {displayedText}
+      {!isComplete && cursorVisible && (
+        <span className="inline-block w-0.5 h-4 bg-cyan-400 ml-0.5 animate-pulse" />
+      )}
+    </span>
   );
 }
 
@@ -398,6 +641,7 @@ function MessageDisplay({
             thinking={message.thinking}
             collapsed={message.thinkingCollapsed}
             onToggle={onToggleThinking}
+            isActive={message.isStreaming}
           />
         )}
         
@@ -409,17 +653,31 @@ function MessageDisplay({
         {/* Message content */}
         {message.content && (
           <div className={`
-            inline-block px-3 py-2.5 rounded-lg max-w-full select-text
+            inline-block px-4 py-3 rounded-xl max-w-full select-text transition-all duration-300
             ${isUser 
-              ? 'bg-sz-accent text-white' 
-              : 'bg-sz-bg-secondary/80 text-sz-text border border-sz-border/50'}
+              ? 'bg-gradient-to-r from-sz-accent to-sz-accent/90 text-white shadow-lg shadow-sz-accent/20' 
+              : 'bg-gradient-to-r from-sz-bg-secondary/90 to-sz-bg-secondary/70 text-sz-text border border-sz-border/30 backdrop-blur-sm'}
+            ${message.isStreaming && !isUser ? 'ring-1 ring-cyan-500/30 shadow-lg shadow-cyan-500/10' : ''}
           `}>
             <div className="text-sm whitespace-pre-wrap break-words leading-relaxed select-text">
-              {message.content}
-              {message.isStreaming && (
-                <span className="inline-block w-1.5 h-4 bg-cyan-400 animate-pulse ml-0.5 rounded-sm" />
+              {message.isStreaming && !isUser ? (
+                <StreamingText text={message.content} isComplete={false} />
+              ) : (
+                message.content
               )}
             </div>
+            
+            {/* Streaming indicator */}
+            {message.isStreaming && !isUser && (
+              <div className="flex items-center gap-2 mt-2 pt-2 border-t border-cyan-500/10">
+                <div className="flex gap-0.5">
+                  <div className="w-1 h-1 rounded-full bg-cyan-400 animate-bounce" style={{ animationDelay: '0ms' }} />
+                  <div className="w-1 h-1 rounded-full bg-cyan-400 animate-bounce" style={{ animationDelay: '100ms' }} />
+                  <div className="w-1 h-1 rounded-full bg-cyan-400 animate-bounce" style={{ animationDelay: '200ms' }} />
+                </div>
+                <span className="text-[10px] text-cyan-400/60">Generating response...</span>
+              </div>
+            )}
           </div>
         )}
         
@@ -440,6 +698,7 @@ interface ChatPanelProps {
   onTrimClip?: (clipId: string, trimStart: number, trimEnd: number) => void;
   onPlayVideo?: () => void;
   onPauseVideo?: () => void;
+  onShowExportPreview?: (clipIds: string[]) => void;
   // Current state getters
   getCurrentTime?: () => number;
   getSelectedClipId?: () => string | null;
@@ -453,6 +712,7 @@ function ChatPanel({
   onTrimClip,
   onPlayVideo,
   onPauseVideo,
+  onShowExportPreview,
   getCurrentTime,
   getSelectedClipId,
   getIsPlaying,
@@ -487,6 +747,7 @@ function ChatPanel({
     selectedClipId: storeSelectedClipId,
     updateClipStatus,
     updateClipTrim,
+    updateClipHook,
     aiSettings,
     settings: detectionSettings,
     updateSettings,
@@ -1131,7 +1392,7 @@ function ChatPanel({
         case 'create_vod_compilation': {
           // This tool selects the best clips to create a compilation of target duration
           const targetDuration = (args.targetDurationMinutes as number) ?? 20;
-          const clipCount = (args.clipCount as number) ?? 10;
+          const maxClipCount = (args.clipCount as number) ?? 30; // Allow more clips to fill duration
           const targetDurationSeconds = targetDuration * 60;
           const vibe = (args.vibe as string) ?? 'best_moments';
           const includeTransitions = (args.includeTransitions as boolean) ?? true;
@@ -1140,23 +1401,53 @@ function ChatPanel({
             throw new Error('No clips available. Run detection first to find viral moments.');
           }
           
-          // Sort clips by score
+          // Sort clips by score (best first)
           const sortedClips = [...clips].sort((a, b) => b.finalScore - a.finalScore);
           
           // Select clips to match target duration
           const selectedClips: typeof clips = [];
           let totalDuration = 0;
           const transitionDuration = includeTransitions ? 0.5 : 0;
+          const selectedIds = new Set<string>();
           
+          // Phase 1: Add best clips until we reach or slightly exceed target
           for (const clip of sortedClips) {
-            if (selectedClips.length >= clipCount) break;
+            if (selectedClips.length >= maxClipCount) break;
+            if (selectedIds.has(clip.id)) continue;
             
             const clipDuration = clip.duration + (selectedClips.length > 0 ? transitionDuration : 0);
             
-            // Check if adding this clip would exceed target too much
-            if (totalDuration + clipDuration <= targetDurationSeconds * 1.1) { // Allow 10% overage
-              selectedClips.push(clip);
-              totalDuration += clipDuration;
+            // If we're still under target, add the clip
+            if (totalDuration < targetDurationSeconds) {
+              // Only add if it won't exceed target by more than 15%
+              if (totalDuration + clipDuration <= targetDurationSeconds * 1.15) {
+                selectedClips.push(clip);
+                selectedIds.add(clip.id);
+                totalDuration += clipDuration;
+              }
+            } else {
+              // We've reached target, stop adding
+              break;
+            }
+          }
+          
+          // Phase 2: If still under target by more than 10%, try to fill the gap with smaller clips
+          if (totalDuration < targetDurationSeconds * 0.9) {
+            const remainingTime = targetDurationSeconds - totalDuration;
+            
+            // Look for clips that fit the remaining time gap
+            for (const clip of sortedClips) {
+              if (selectedIds.has(clip.id)) continue;
+              if (selectedClips.length >= maxClipCount) break;
+              
+              const clipDuration = clip.duration + transitionDuration;
+              
+              // Add clips that help fill the gap without going too far over
+              if (clipDuration <= remainingTime * 1.5 && totalDuration + clipDuration <= targetDurationSeconds * 1.15) {
+                selectedClips.push(clip);
+                selectedIds.add(clip.id);
+                totalDuration += clipDuration;
+              }
             }
           }
           
@@ -1165,10 +1456,9 @@ function ChatPanel({
             updateClipStatus(clip.id, 'accepted');
           });
           
-          // Reject clips not selected
-          const selectedIds = new Set(selectedClips.map(c => c.id));
-          clips.filter(c => !selectedIds.has(c.id) && c.status !== 'rejected').forEach(clip => {
-            // Don't auto-reject, just leave them pending
+          // Set other clips to pending (don't auto-reject)
+          clips.filter(c => !selectedIds.has(c.id) && c.status === 'accepted').forEach(clip => {
+            updateClipStatus(clip.id, 'pending');
           });
           
           // Order the clips based on vibe
@@ -1204,6 +1494,13 @@ function ChatPanel({
               break;
           }
           
+          // Calculate how close we got to target
+          const durationAccuracy = Math.round((totalDuration / targetDurationSeconds) * 100);
+          const durationDiff = totalDuration - targetDurationSeconds;
+          const durationMessage = durationDiff >= 0 
+            ? `${formatTimestamp(Math.abs(durationDiff))} over target`
+            : `${formatTimestamp(Math.abs(durationDiff))} under target`;
+          
           result = {
             success: true,
             compilation: {
@@ -1211,6 +1508,9 @@ function ChatPanel({
               totalDuration: Math.round(totalDuration),
               totalDurationFormatted: formatTimestamp(totalDuration),
               targetDuration: targetDurationSeconds,
+              targetDurationFormatted: formatTimestamp(targetDurationSeconds),
+              durationAccuracy: `${durationAccuracy}%`,
+              durationNote: durationMessage,
               vibe,
               includeTransitions,
               transitionType: includeTransitions ? 'crossfade' : 'none',
@@ -1227,10 +1527,113 @@ function ChatPanel({
             orderReason,
             nextSteps: [
               'Review the selected clips in the timeline',
-              'Use the trim tool to fine-tune boundaries if needed',
-              includeTransitions ? 'Transitions will be added automatically during export' : 'No transitions will be added',
-              'Export when ready!',
+              'Export modal will open automatically',
             ],
+          };
+          
+          // Trigger export preview modal with the selected clips
+          if (onShowExportPreview) {
+            // Use setTimeout to allow the tool result to be displayed first
+            setTimeout(() => {
+              onShowExportPreview(selectedClips.map(c => c.id));
+            }, 500);
+          }
+          break;
+        }
+        
+        case 'regenerate_hooks': {
+          // Regenerate hook text for clips based on a theme
+          const theme = args.theme as string;
+          const clipIds = args.clipIds as string[] | undefined;
+          
+          if (!theme) {
+            throw new Error('Theme is required for hook regeneration');
+          }
+          
+          // Get clips to regenerate hooks for
+          const targetClips = clipIds 
+            ? clips.filter(c => clipIds.includes(c.id))
+            : clips.filter(c => c.status === 'accepted');
+          
+          if (targetClips.length === 0) {
+            throw new Error('No clips found to regenerate hooks for. Accept some clips first.');
+          }
+          
+          const regeneratedHooks: Array<{ clipId: string; oldHook: string; newHook: string; newTitle?: string }> = [];
+          
+          // Generate new hooks for each clip using AI
+          for (const clip of targetClips) {
+            const clipTranscript = getTranscriptForRange(clip.startTime, clip.endTime);
+            
+            if (!clipTranscript || clipTranscript.length < 10) {
+              continue; // Skip clips without transcript
+            }
+            
+            try {
+              // Call AI to generate themed hook
+              const hookResponse = await window.api.chatWithAI({
+                messages: [{
+                  role: 'user',
+                  content: `Generate a ${theme} hook for this podcast clip.
+
+Clip transcript (${clip.duration?.toFixed(0) || 30}s):
+"${clipTranscript.slice(0, 800)}"
+
+Requirements:
+1. hookText: A punchy 5-8 word caption that captures the ${theme} essence (for the first 3 seconds)
+2. title: An engaging 8-12 word title that emphasizes the ${theme} theme
+
+Return ONLY valid JSON with "hookText" and "title" fields, no explanation.`
+                }],
+                tools: false,
+                systemPrompt: `You are a social media expert who creates viral ${theme} content. Generate hooks that emphasize the ${theme} aspects of the content. Be authentic - don't make up content that isn't there.`,
+                providerConfig,
+              });
+              
+              if (hookResponse.success && hookResponse.content) {
+                try {
+                  // Parse the JSON response
+                  let jsonContent = hookResponse.content.trim();
+                  if (jsonContent.startsWith('```')) {
+                    jsonContent = jsonContent.split('```')[1];
+                    if (jsonContent.startsWith('json')) {
+                      jsonContent = jsonContent.slice(4);
+                    }
+                  }
+                  
+                  const hookData = JSON.parse(jsonContent);
+                  const newHook = hookData.hookText || hookData.hook || '';
+                  const newTitle = hookData.title || '';
+                  
+                  if (newHook) {
+                    updateClipHook(clip.id, newHook, newTitle || undefined);
+                    regeneratedHooks.push({
+                      clipId: clip.id,
+                      oldHook: clip.hookText || '',
+                      newHook,
+                      newTitle: newTitle || undefined,
+                    });
+                  }
+                } catch (parseErr) {
+                  console.error('Failed to parse hook response:', parseErr);
+                }
+              }
+            } catch (err) {
+              console.error(`Failed to regenerate hook for clip ${clip.id}:`, err);
+            }
+          }
+          
+          result = {
+            success: true,
+            theme,
+            clipsProcessed: targetClips.length,
+            hooksRegenerated: regeneratedHooks.length,
+            regeneratedHooks: regeneratedHooks.map(h => ({
+              clipId: h.clipId,
+              newHook: h.newHook,
+              newTitle: h.newTitle,
+            })),
+            message: `Regenerated ${regeneratedHooks.length} hooks with "${theme}" theme`,
           };
           break;
         }
@@ -1435,14 +1838,17 @@ function ChatPanel({
     onTrimClip,
     onPlayVideo,
     onPauseVideo,
+    onShowExportPreview,
     getCurrentTime,
     getSelectedClipId,
     getIsPlaying,
     updateClipStatus,
     updateClipTrim,
+    updateClipHook,
     updateToolCall,
     aiSettings,
     setDetecting,
+    providerConfig,
   ]);
   
   // Build system prompt with current context
@@ -1518,10 +1924,21 @@ detect_highlights:
 
 ## Available Tools
 
-**Core**: run_detection, create_vod_compilation
+**Core**: run_detection, create_vod_compilation, regenerate_hooks
 **Analysis**: analyze_clip_quality, detect_highlights, compare_clips
 **Actions**: smart_trim_clip, auto_review_clips, set_clip_status
 **Basic**: seek_to_time, select_clip, play_pause, get_project_state
+
+## Customizing Content for User's Goals
+
+When the user requests specific themes (e.g., "inspiring moments", "funny clips", "educational content"):
+1. Use run_detection to find clips first
+2. Use create_vod_compilation to select clips for the target duration
+3. Use regenerate_hooks with the user's theme to customize hook text
+
+regenerate_hooks parameters:
+- theme: The vibe/theme to use (e.g., "inspiring", "funny", "educational", "motivational")
+- clipIds: Optional - specific clips to regenerate hooks for (defaults to accepted clips)
 
 Be friendly and helpful. When using tools, ACTUALLY CALL THEM via function calling.`;
   }, [project, clips, transcript]);
@@ -1730,76 +2147,142 @@ Be friendly and helpful. When using tools, ACTUALLY CALL THEM via function calli
   
   return (
     <div className={`flex flex-col h-full bg-sz-bg-secondary rounded-sz-lg border border-sz-border ${className}`}>
-      {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-sz-border bg-gradient-to-r from-cyan-500/5 to-transparent">
+      {/* Header - Enhanced with visual feedback */}
+      <div className={`flex items-center justify-between px-4 py-3 border-b transition-all duration-300 ${
+        isLoading 
+          ? 'border-cyan-500/30 bg-gradient-to-r from-cyan-500/10 via-purple-500/5 to-transparent' 
+          : 'border-sz-border bg-gradient-to-r from-cyan-500/5 to-transparent'
+      }`}>
         <div className="flex items-center gap-2.5">
-          <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-cyan-500/30 to-cyan-600/20 flex items-center justify-center ring-1 ring-cyan-500/30">
-            <Clapperboard className="w-4 h-4 text-cyan-400" />
+          {/* Animated avatar */}
+          <div className="relative">
+            {isLoading && (
+              <div className="absolute inset-0 bg-cyan-500/30 rounded-lg blur-md animate-pulse" />
+            )}
+            <div className={`relative w-8 h-8 rounded-lg bg-gradient-to-br from-cyan-500/30 to-cyan-600/20 flex items-center justify-center ring-1 transition-all duration-300 ${
+              isLoading ? 'ring-cyan-500/50 shadow-lg shadow-cyan-500/20' : 'ring-cyan-500/30'
+            }`}>
+              <Clapperboard className={`w-4 h-4 text-cyan-400 ${isLoading ? 'animate-pulse' : ''}`} />
+            </div>
           </div>
+          
           <div className="flex flex-col">
             <span className="font-semibold text-sz-text text-sm">Clip Bot</span>
             <div className="flex items-center gap-1.5">
               {isLoading ? (
-                <div className="flex items-center gap-1">
-                  <CircleDot className="w-2.5 h-2.5 text-cyan-400 animate-pulse" />
-                  <span className="text-[10px] text-cyan-400">Working...</span>
+                <div className="flex items-center gap-1.5">
+                  <div className="relative">
+                    <CircleDot className="w-2.5 h-2.5 text-cyan-400" />
+                    <div className="absolute inset-0 w-2.5 h-2.5 rounded-full bg-cyan-400 animate-ping opacity-75" />
+                  </div>
+                  <span className="text-[10px] text-cyan-400 font-medium">Working</span>
+                  <div className="flex gap-0.5">
+                    <div className="w-1 h-1 rounded-full bg-cyan-400 animate-bounce" style={{ animationDelay: '0ms' }} />
+                    <div className="w-1 h-1 rounded-full bg-cyan-400 animate-bounce" style={{ animationDelay: '100ms' }} />
+                    <div className="w-1 h-1 rounded-full bg-cyan-400 animate-bounce" style={{ animationDelay: '200ms' }} />
+                  </div>
                 </div>
               ) : (
                 <>
                   <CircleDot className="w-2.5 h-2.5 text-emerald-400" />
-                  <span className="text-[10px] text-sz-text-muted">Ready</span>
+                  <span className="text-[10px] text-sz-text-muted">Ready to help</span>
                 </>
               )}
               {/* Provider indicator badge */}
               {lastUsedProvider && (
-                <span className={`px-1.5 py-0.5 rounded text-[9px] font-medium ml-1 ${providerColors[lastUsedProvider] || 'bg-sz-bg-tertiary text-sz-text-muted'}`}>
+                <span className={`px-1.5 py-0.5 rounded text-[9px] font-medium ml-1 transition-all ${providerColors[lastUsedProvider] || 'bg-sz-bg-tertiary text-sz-text-muted'}`}>
                   {providerLabels[lastUsedProvider] || lastUsedProvider}
                 </span>
               )}
             </div>
           </div>
         </div>
+        
         <div className="flex items-center gap-1">
+          {/* Message count badge */}
+          {messages.length > 0 && (
+            <span className="text-[10px] text-sz-text-muted px-2 py-0.5 rounded-full bg-sz-bg-tertiary mr-1">
+              {messages.length} msg{messages.length > 1 ? 's' : ''}
+            </span>
+          )}
           <button
             onClick={clearMessages}
-            className="p-1.5 hover:bg-sz-bg-hover rounded-lg transition-colors"
+            className="p-1.5 hover:bg-sz-bg-hover rounded-lg transition-colors group"
             title="Clear chat"
           >
-            <Trash2 className="w-4 h-4 text-sz-text-muted hover:text-sz-text" />
+            <Trash2 className="w-4 h-4 text-sz-text-muted group-hover:text-red-400 transition-colors" />
           </button>
         </div>
       </div>
       
       {/* Messages */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-4">
+      <div className="flex-1 overflow-y-auto p-4 space-y-4 scrollbar-thin">
         {messages.length === 0 ? (
-          <div className="text-center py-8">
-            <div className="w-16 h-16 mx-auto rounded-2xl bg-gradient-to-br from-cyan-500/20 to-cyan-600/10 flex items-center justify-center ring-2 ring-cyan-500/20 mb-4">
-              <Clapperboard className="w-8 h-8 text-cyan-400" />
+          <div className="text-center py-6 animate-fade-in">
+            {/* Animated logo with particles */}
+            <div className="relative w-20 h-20 mx-auto mb-4">
+              <div className="absolute inset-0 bg-gradient-to-br from-cyan-500/20 to-purple-500/10 rounded-2xl blur-xl animate-pulse" />
+              <div className="relative w-20 h-20 rounded-2xl bg-gradient-to-br from-cyan-500/30 to-cyan-600/20 flex items-center justify-center ring-2 ring-cyan-500/30 shadow-lg shadow-cyan-500/20">
+                <Clapperboard className="w-10 h-10 text-cyan-400" />
+              </div>
+              {/* Floating particles */}
+              <div className="absolute -top-1 right-2 w-2 h-2 bg-cyan-400 rounded-full animate-float-up" />
+              <div className="absolute top-4 -left-1 w-1.5 h-1.5 bg-purple-400 rounded-full animate-float-up" style={{ animationDelay: '0.5s' }} />
+              <div className="absolute -bottom-1 right-4 w-1 h-1 bg-cyan-300 rounded-full animate-float-up" style={{ animationDelay: '1s' }} />
             </div>
-            <p className="text-sz-text text-base font-semibold">
+            
+            <p className="text-sz-text text-lg font-semibold bg-gradient-to-r from-cyan-400 to-purple-400 bg-clip-text text-transparent">
               Hey! I'm Clip Bot
             </p>
-            <p className="text-sz-text-muted text-xs mt-2 max-w-[220px] mx-auto">
-              I'll help you find viral moments, review clips, and create highlight reels. Try asking:
+            <p className="text-sz-text-muted text-xs mt-2 max-w-[240px] mx-auto">
+              Your AI assistant for finding viral moments, reviewing clips, and creating highlight reels.
             </p>
-            <div className="mt-4 space-y-2 text-xs text-left max-w-[260px] mx-auto">
-              <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-cyan-500/5 border border-cyan-500/10 hover:bg-cyan-500/10 cursor-pointer transition-colors">
-                <Zap className="w-3.5 h-3.5 text-cyan-400" />
-                <span className="text-cyan-400/90">"Find the viral moments"</span>
-              </div>
-              <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-emerald-500/5 border border-emerald-500/10 hover:bg-emerald-500/10 cursor-pointer transition-colors">
-                <CheckCheck className="w-3.5 h-3.5 text-emerald-400" />
-                <span className="text-emerald-400/90">"Help me pick which clips to keep"</span>
-              </div>
-              <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-violet-500/5 border border-violet-500/10 hover:bg-violet-500/10 cursor-pointer transition-colors">
-                <Sparkles className="w-3.5 h-3.5 text-violet-400" />
-                <span className="text-violet-400/90">"What are my top 5 clips?"</span>
-              </div>
-              <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-amber-500/5 border border-amber-500/10 hover:bg-amber-500/10 cursor-pointer transition-colors">
-                <ListOrdered className="w-3.5 h-3.5 text-amber-400" />
-                <span className="text-amber-400/90">"Make a highlight reel"</span>
-              </div>
+            
+            {/* Clickable suggestion buttons */}
+            <div className="mt-5 space-y-2 text-xs text-left max-w-[280px] mx-auto">
+              <p className="text-sz-text-muted text-[10px] uppercase tracking-wider mb-3 text-center">
+                Try asking me to:
+              </p>
+              
+              <button 
+                onClick={() => setInput('Find the viral moments in this video')}
+                className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl bg-gradient-to-r from-cyan-500/10 to-transparent border border-cyan-500/20 hover:border-cyan-500/40 hover:bg-cyan-500/15 hover:shadow-lg hover:shadow-cyan-500/10 cursor-pointer transition-all duration-200 group"
+              >
+                <div className="w-7 h-7 rounded-lg bg-cyan-500/20 flex items-center justify-center group-hover:bg-cyan-500/30 transition-colors">
+                  <Zap className="w-4 h-4 text-cyan-400" />
+                </div>
+                <span className="text-cyan-400/90 group-hover:text-cyan-300 transition-colors">"Find viral moments"</span>
+              </button>
+              
+              <button 
+                onClick={() => setInput('Make a 20 minute highlight reel with the best clips')}
+                className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl bg-gradient-to-r from-amber-500/10 to-transparent border border-amber-500/20 hover:border-amber-500/40 hover:bg-amber-500/15 hover:shadow-lg hover:shadow-amber-500/10 cursor-pointer transition-all duration-200 group"
+              >
+                <div className="w-7 h-7 rounded-lg bg-amber-500/20 flex items-center justify-center group-hover:bg-amber-500/30 transition-colors">
+                  <ListOrdered className="w-4 h-4 text-amber-400" />
+                </div>
+                <span className="text-amber-400/90 group-hover:text-amber-300 transition-colors">"Make a highlight reel"</span>
+              </button>
+              
+              <button 
+                onClick={() => setInput('Auto-review all clips and accept the best ones')}
+                className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl bg-gradient-to-r from-emerald-500/10 to-transparent border border-emerald-500/20 hover:border-emerald-500/40 hover:bg-emerald-500/15 hover:shadow-lg hover:shadow-emerald-500/10 cursor-pointer transition-all duration-200 group"
+              >
+                <div className="w-7 h-7 rounded-lg bg-emerald-500/20 flex items-center justify-center group-hover:bg-emerald-500/30 transition-colors">
+                  <CheckCheck className="w-4 h-4 text-emerald-400" />
+                </div>
+                <span className="text-emerald-400/90 group-hover:text-emerald-300 transition-colors">"Auto-review clips"</span>
+              </button>
+              
+              <button 
+                onClick={() => setInput('What are the top 5 best clips?')}
+                className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl bg-gradient-to-r from-violet-500/10 to-transparent border border-violet-500/20 hover:border-violet-500/40 hover:bg-violet-500/15 hover:shadow-lg hover:shadow-violet-500/10 cursor-pointer transition-all duration-200 group"
+              >
+                <div className="w-7 h-7 rounded-lg bg-violet-500/20 flex items-center justify-center group-hover:bg-violet-500/30 transition-colors">
+                  <Sparkles className="w-4 h-4 text-violet-400" />
+                </div>
+                <span className="text-violet-400/90 group-hover:text-violet-300 transition-colors">"Show top 5 clips"</span>
+              </button>
             </div>
           </div>
         ) : (

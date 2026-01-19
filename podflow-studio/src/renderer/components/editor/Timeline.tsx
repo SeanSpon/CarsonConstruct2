@@ -977,18 +977,8 @@ function Timeline({
                         {sourceVideoName || 'Video'}
                       </span>
                     </div>
-                    {/* Thumbnail strip effect - visual indication of video content */}
-                    <div className="absolute bottom-0 left-0 right-0 h-[calc(100%-12px)] flex">
-                      {Array.from({ length: Math.min(20, Math.ceil(duration / 30)) }).map((_, i) => (
-                        <div
-                          key={i}
-                          className="flex-1 border-r border-blue-400/20 last:border-r-0"
-                          style={{
-                            background: `linear-gradient(180deg, rgba(59,130,246,0.1) 0%, rgba(37,99,235,0.2) 100%)`,
-                          }}
-                        />
-                      ))}
-                    </div>
+                    {/* Clean video body */}
+                    <div className="absolute bottom-0 left-0 right-0 h-[calc(100%-12px)]" />
                   </div>
                 )}
 
@@ -1087,15 +1077,8 @@ function Timeline({
                           <span className="text-[8px] text-violet-300 font-bold">fx</span>
                         )}
                       </div>
-                      {/* Thumbnail strip effect */}
-                      <div className="absolute left-0 right-0 h-[calc(100%-12px)] flex" style={{ top: group ? '16px' : '12px', bottom: 0 }}>
-                        {Array.from({ length: Math.min(10, Math.max(2, Math.ceil((clip.endTime - clip.startTime) / 10))) }).map((_, i) => (
-                          <div
-                            key={i}
-                            className="flex-1 border-r border-white/10 last:border-r-0"
-                          />
-                        ))}
-                      </div>
+                      {/* Clean clip body */}
+                      <div className="absolute left-0 right-0 h-[calc(100%-12px)]" style={{ top: group ? '16px' : '12px', bottom: 0 }} />
                     </div>
                   );
                 })}
@@ -1136,20 +1119,12 @@ function Timeline({
                         <div className="w-2 h-2 border border-emerald-100 border-t-transparent rounded-full animate-spin ml-auto" />
                       )}
                     </div>
-                    {/* Loading or placeholder waveform visual */}
+                    {/* Loading or simple placeholder visual */}
                     <div className="absolute bottom-0 left-0 right-0 h-[calc(100%-12px)] flex items-center justify-center">
                       {isExtractingWaveform ? (
                         <span className="text-[9px] text-emerald-200/70">Loading waveform...</span>
                       ) : (
-                        <div className="flex-1 flex items-center justify-around h-full px-1">
-                          {Array.from({ length: Math.min(80, Math.ceil(duration / 10)) }).map((_, i) => (
-                            <div
-                              key={i}
-                              className="w-0.5 bg-emerald-400/40 rounded-full"
-                              style={{ height: `${20 + Math.sin(i * 0.3) * 15 + (i % 3) * 10}%` }}
-                            />
-                          ))}
-                        </div>
+                        <div className="w-full h-full bg-emerald-500/10" />
                       )}
                     </div>
                   </div>
@@ -1193,49 +1168,13 @@ function Timeline({
                       </div>
                     )}
                     {!audioTrack.waveformData && (
-                      <div className="absolute bottom-1 left-1 right-1 h-[calc(100%-16px)] flex items-center justify-center">
-                        <div className="flex gap-0.5">
-                          {Array.from({ length: 20 }).map((_, i) => (
-                            <div
-                              key={i}
-                              className="w-0.5 bg-emerald-400/60 rounded-full"
-                              style={{ height: `${Math.random() * 80 + 20}%` }}
-                            />
-                          ))}
-                        </div>
-                      </div>
+                      <div className="absolute bottom-0 left-0 right-0 h-[calc(100%-12px)] bg-emerald-500/15" />
                     )}
                   </div>
                 ))}
 
-                {/* Audio track - show speaker segments (visual overlay only) */}
-                {track.type === 'audio' && speakerSegments.length > 0 && speakerSegments.map((seg, i) => {
-                  // Color-code speakers
-                  const speakerColors = [
-                    'bg-blue-500/40 border-blue-500',
-                    'bg-emerald-500/40 border-emerald-500',
-                    'bg-purple-500/40 border-purple-500',
-                    'bg-amber-500/40 border-amber-500',
-                  ];
-                  const speakerIndex = parseInt(seg.speakerId.replace(/\D/g, '') || '0') % speakerColors.length;
-                  const colorClass = speakerColors[speakerIndex];
-                  
-                  return (
-                    <div
-                      key={`speaker-${i}`}
-                      className={`absolute top-0 h-full rounded-sm border ${colorClass} pointer-events-none`}
-                      style={{
-                        left: `${(seg.startTime / duration) * 100}%`,
-                        width: `${((seg.endTime - seg.startTime) / duration) * 100}%`,
-                      }}
-                      title={`${seg.speakerName}: ${seg.startTime.toFixed(1)}s - ${seg.endTime.toFixed(1)}s`}
-                    >
-                      <span className="absolute top-0 left-0.5 text-[8px] text-white/80 truncate max-w-full">
-                        {seg.speakerName}
-                      </span>
-                    </div>
-                  );
-                })}
+                {/* Audio track - speaker segments (hidden for cleaner look, data still available for processing) */}
+                {/* Speaker segment visualization removed - was too cluttered */}
 
                 {/* Music/B-Roll tracks - show audio tracks */}
                 {(track.type === 'music' || track.type === 'broll') && audioTracks.filter(at => 
@@ -1287,19 +1226,11 @@ function Timeline({
                         {audioTrack.muted && <VolumeX className="w-2.5 h-2.5 text-red-300" />}
                       </div>
                       {/* Waveform or placeholder */}
-                      <div className="absolute bottom-0 left-0 right-0 h-[calc(100%-12px)] flex items-center justify-center px-1">
+                      <div className="absolute bottom-0 left-0 right-0 h-[calc(100%-12px)]">
                         {audioTrack.waveformData ? (
                           renderWaveform(audioTrack.waveformData, track.height - 12)
                         ) : (
-                          <div className="flex gap-0.5 h-full items-end pb-1">
-                            {Array.from({ length: 12 }).map((_, i) => (
-                              <div
-                                key={i}
-                                className={`w-0.5 rounded-full ${isMusic ? 'bg-violet-400/60' : 'bg-cyan-400/60'}`}
-                                style={{ height: `${Math.random() * 60 + 20}%` }}
-                              />
-                            ))}
-                          </div>
+                          <div className={`w-full h-full ${isMusic ? 'bg-violet-500/15' : 'bg-cyan-500/15'}`} />
                         )}
                       </div>
                     </div>

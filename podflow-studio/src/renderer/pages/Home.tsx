@@ -2,6 +2,7 @@ import { useState, useCallback, memo, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { FileVideo, Plus, FolderOpen, Trash2, ArrowRight, ChevronRight, Film } from 'lucide-react';
 import { useStore } from '../stores/store';
+import { useChatStore } from '../stores/chatStore';
 import { formatFileSize, formatDuration } from '../types';
 import { Button, LoadingState } from '../components/ui';
 
@@ -89,6 +90,7 @@ function Home() {
 
   const handleClear = useCallback(() => {
     clearProject();
+    useChatStore.getState().clearMessages(); // Clear chat for new session
     setError(null);
   }, [clearProject]);
 

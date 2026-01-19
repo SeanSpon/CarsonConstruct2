@@ -1,5 +1,16 @@
 import { memo } from 'react';
-import { Settings, HelpCircle, Minus, Square, X } from 'lucide-react';
+import { 
+  Settings, 
+  HelpCircle, 
+  Minus, 
+  Square, 
+  X,
+  FolderOpen,
+  Sparkles,
+  MessageSquare,
+  CheckCircle,
+  BookOpen
+} from 'lucide-react';
 import { IconButton } from '../ui';
 import MenuBar, { MenuBarProps } from './MenuBar';
 
@@ -12,6 +23,7 @@ interface RecentProject {
 interface HeaderProps {
   onSettingsClick: () => void;
   onHelpClick?: () => void;
+  onDocsClick?: () => void;
   // Menu bar props
   onNewProject?: () => void;
   onOpenProject?: () => void;
@@ -49,6 +61,7 @@ interface HeaderProps {
 function Header({
   onSettingsClick,
   onHelpClick,
+  onDocsClick,
   // Menu bar props
   onNewProject,
   onOpenProject,
@@ -135,6 +148,73 @@ function Header({
 
       {/* Right controls */}
       <div className="flex items-center gap-1 no-drag">
+        {/* Panel Toggle Buttons */}
+        <div className="flex items-center gap-0.5 mr-2 px-2 py-1 bg-sz-bg rounded-md border border-sz-border">
+          <button
+            onClick={onToggleProjectPanel}
+            className={`px-2 py-1 rounded text-xs font-medium transition-colors flex items-center gap-1.5 ${
+              showProjectPanel 
+                ? 'bg-sz-accent text-white' 
+                : 'text-sz-text-muted hover:text-sz-text hover:bg-sz-bg-hover'
+            }`}
+            title="Toggle Project Panel"
+          >
+            <FolderOpen className="w-3.5 h-3.5" />
+            <span className="hidden xl:inline">Project</span>
+          </button>
+          
+          <button
+            onClick={onToggleEffectsPanel}
+            className={`px-2 py-1 rounded text-xs font-medium transition-colors flex items-center gap-1.5 ${
+              showEffectsPanel 
+                ? 'bg-sz-accent text-white' 
+                : 'text-sz-text-muted hover:text-sz-text hover:bg-sz-bg-hover'
+            }`}
+            title="Toggle Effects Panel"
+          >
+            <Sparkles className="w-3.5 h-3.5" />
+            <span className="hidden xl:inline">Effects</span>
+          </button>
+          
+          <button
+            onClick={onToggleChatPanel}
+            className={`px-2 py-1 rounded text-xs font-medium transition-colors flex items-center gap-1.5 ${
+              showChatPanel 
+                ? 'bg-purple-500 text-white' 
+                : 'text-sz-text-muted hover:text-sz-text hover:bg-sz-bg-hover'
+            }`}
+            title="Toggle AI Chat (Ctrl+J)"
+          >
+            <MessageSquare className="w-3.5 h-3.5" />
+            <span className="hidden xl:inline">AI Chat</span>
+          </button>
+          
+          <button
+            onClick={onToggleQAPanel}
+            className={`px-2 py-1 rounded text-xs font-medium transition-colors flex items-center gap-1.5 ${
+              showQAPanel 
+                ? 'bg-green-500 text-white' 
+                : 'text-sz-text-muted hover:text-sz-text hover:bg-sz-bg-hover'
+            }`}
+            title="Toggle QA Panel"
+          >
+            <CheckCircle className="w-3.5 h-3.5" />
+            <span className="hidden xl:inline">QA</span>
+          </button>
+        </div>
+        
+        {/* Divider */}
+        <div className="h-6 w-px bg-sz-border mx-1" />
+        
+        {/* Documentation */}
+        <IconButton
+          icon={<BookOpen className="w-4 h-4" />}
+          variant="ghost"
+          size="sm"
+          tooltip="Documentation"
+          onClick={onDocsClick}
+        />
+        
         <IconButton
           icon={<Settings className="w-4 h-4" />}
           variant="ghost"
@@ -146,7 +226,7 @@ function Header({
           icon={<HelpCircle className="w-4 h-4" />}
           variant="ghost"
           size="sm"
-          tooltip="Help"
+          tooltip="Help & Shortcuts"
           onClick={onHelpClick}
         />
         

@@ -173,6 +173,25 @@ const TOOL_DEFINITIONS = [
       },
     },
   },
+  {
+    name: 'regenerate_hooks',
+    description: 'Regenerate hook text for clips to match a specific theme or vibe. Use this when the user wants hooks that match their content goals (e.g., "inspiring", "funny", "educational").',
+    input_schema: {
+      type: 'object',
+      properties: {
+        clipIds: { 
+          type: 'array', 
+          items: { type: 'string' },
+          description: 'IDs of clips to regenerate hooks for. If not provided, regenerates for all accepted clips.' 
+        },
+        theme: { 
+          type: 'string', 
+          description: 'The theme/vibe to use for hook generation (e.g., "inspiring", "funny", "educational", "motivational", "thought-provoking")' 
+        },
+      },
+      required: ['theme'],
+    },
+  },
   // ========================================
   // UI CONTROL TOOLS
   // ========================================

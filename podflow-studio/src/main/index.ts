@@ -6,16 +6,6 @@ import { setMainWindow, getMainWindow } from './window';
 import './ipc/fileHandlers';
 import './ipc/detectionHandlers';
 import './ipc/exportHandlers';
-import './ipc/reviewHandlers';
-import './ipc/cloudHandlers';
-import './ipc/premiereExport';
-import './ipc/qaHandlers';
-import './ipc/instagramHandlers';
-import './ipc/styleHandlers';
-import { registerProjectFileHandlers } from './ipc/projectFileHandlers';
-
-// Register project file handlers
-registerProjectFileHandlers();
 
 // Window control handlers
 ipcMain.on('window-minimize', () => {
@@ -45,7 +35,7 @@ declare const MAIN_WINDOW_VITE_DEV_SERVER_URL: string;
 declare const MAIN_WINDOW_VITE_NAME: string;
 
 const createWindow = () => {
-  // Remove the default Electron menu bar (we use a custom menu in the renderer)
+  // Remove the default Electron menu bar
   Menu.setApplicationMenu(null);
 
   const mainWindow = new BrowserWindow({
@@ -53,19 +43,18 @@ const createWindow = () => {
     height: 800,
     minWidth: 960,
     minHeight: 600,
-    useContentSize: true, // Use content area size instead of window frame size
-    backgroundColor: '#0D1117', // Match app background to prevent white flash on resize
-    title: 'Opus AI',
+    useContentSize: true,
+    backgroundColor: '#0D1117',
+    title: 'PodFlow',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: false, // Required for preload scripts to work with contextIsolation
-      webSecurity: false, // Allow loading local files (needed for video playback)
+      sandbox: false,
+      webSecurity: false,
     },
   });
 
-  // Store the window reference so IPC handlers can access it
   setMainWindow(mainWindow);
 
   mainWindow.on('closed', () => {
@@ -84,13 +73,13 @@ const createWindow = () => {
 app.whenReady().then(() => {
   createWindow();
 
-  // Diagnostic: Check if Python is available
+  // Check if Python is available
   const { spawn } = require('child_process');
   const pythonCmd = process.platform === 'win32' ? 'python' : 'python3';
   const pythonTest = spawn(pythonCmd, ['--version']);
   
   pythonTest.on('error', (err: Error) => {
-    console.error('❌ Python NOT available:', err.message);
+    console.error('Python NOT available:', err.message);
     const { dialog } = require('electron');
     dialog.showErrorBox(
       'Python Required',
@@ -99,7 +88,7 @@ app.whenReady().then(() => {
   });
   
   pythonTest.stdout?.on('data', (data: Buffer) => {
-    console.log('✅ Python available:', data.toString().trim());
+    console.log('Python available:', data.toString().trim());
   });
 
   app.on('activate', () => {

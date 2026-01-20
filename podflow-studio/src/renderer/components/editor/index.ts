@@ -10,4 +10,7 @@ export { default as ClipThumbnail } from './ClipThumbnail';
 export { default as StatusBar } from './StatusBar';
 export { default as ProgressOverlay } from './ProgressOverlay';
 export { default as ExportPreviewModal } from './ExportPreviewModal';
+export { default as DetectionSummaryModal } from './DetectionSummaryModal';
 export { default as SettingsModal } from './SettingsModal';
+export { default as WorkflowBar } from './WorkflowBar';
+export { default as EmptyState } from './EmptyState';

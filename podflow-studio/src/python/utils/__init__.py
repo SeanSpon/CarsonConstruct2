@@ -1,7 +1,6 @@
 # Utility modules
 from .mvp_scoring import (
     score_clip,
-    propose_clip_windows,
     snap_to_segment_boundary,
     score_and_select_clips,
     compute_iou,
@@ -14,6 +13,7 @@ from .mvp_candidates import (
     detect_all_candidates,
     candidates_to_json,
     candidates_from_json,
+    propose_clip_windows,
 )
 from .ass_captions import (
     generate_ass_captions,

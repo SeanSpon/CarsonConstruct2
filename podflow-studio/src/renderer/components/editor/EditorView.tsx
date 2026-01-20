@@ -14,8 +14,9 @@ import Timeline from './Timeline';
 import QuickActions from './QuickActions';
 import ClipStrip from './ClipStrip';
 import ProgressOverlay from './ProgressOverlay';
-import ExportPreviewModal from './ExportPreviewModal';
 import SettingsModal from './SettingsModal';
+import WorkflowBar from './WorkflowBar';
+import EmptyState from './EmptyState';
 
 function EditorView() {
   const {
@@ -49,7 +50,6 @@ function EditorView() {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selectedClipId, setSelectedClipId] = useState<string | null>(null);
-  const [showExportPreview, setShowExportPreview] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -252,70 +252,37 @@ function EditorView() {
     setDetecting(false);
   }, [currentJobId, setDetecting]);
 
-  // Show export preview
-  const handleShowExportPreview = useCallback(() => {
-    const acceptedClips = clips.filter(c => c.status === 'accepted');
-    if (acceptedClips.length > 0) {
-      setShowExportPreview(true);
-    }
-  }, [clips]);
-
-  // Export clips
-  const handleExportFromPreview = useCallback(async (selectedClipIds: string[], options?: { vertical: boolean; platform: string; captionsEnabled: boolean; captionStyle: string }) => {
+  // Export all accepted clips directly
+  const handleShowExportPreview = useCallback(async () => {
     if (!project) return;
     
-    const clipsToExport = clips.filter(c => selectedClipIds.includes(c.id));
-    if (clipsToExport.length === 0) return;
-
-    setShowExportPreview(false);
+    const acceptedClips = clips.filter(c => c.status === 'accepted');
+    if (acceptedClips.length === 0) return;
 
     try {
       const outputDir = await window.api.selectOutputDir();
       if (!outputDir) return;
 
-      // Use vertical reel export if requested
-      if (options?.vertical) {
-        const transcript = useStore.getState().transcript;
-        await window.api.exportVerticalReelsBatch({
-          sourceFile: project.filePath,
-          outputDir,
-          clips: clipsToExport.map(c => ({
-            id: c.id,
-            startTime: c.startTime + c.trimStartOffset,
-            endTime: c.endTime + c.trimEndOffset,
-            trimStartOffset: 0,
-            trimEndOffset: 0,
-            title: c.title,
-          })),
-          transcript: transcript || undefined,
-          captionSettings: {
-            enabled: options.captionsEnabled && !!transcript,
-            style: options.captionStyle as 'viral' | 'minimal' | 'bold',
-            fontSize: 56,
-            position: 'bottom',
-          },
-          inputWidth: project.width || 1920,
-          inputHeight: project.height || 1080,
-        });
-      } else {
-        // Standard export
-        await window.api.exportClips({
-          sourceFile: project.filePath,
-          clips: clipsToExport.map(c => ({
-            id: c.id,
-            startTime: c.startTime + c.trimStartOffset,
-            endTime: c.endTime + c.trimEndOffset,
-            trimStartOffset: 0,
-            trimEndOffset: 0,
-            title: c.title,
-            hookText: c.hookText,
-            category: c.category,
-          })),
-          deadSpaces: [],
-          outputDir,
-          settings: exportSettings,
-        });
-      }
+      console.log('[Export] Exporting', acceptedClips.length, 'clips with settings:', exportSettings);
+      
+      const clipsToExport = acceptedClips.map(clip => ({
+        id: clip.id,
+        startTime: clip.startTime + clip.trimStartOffset,
+        endTime: clip.endTime + clip.trimEndOffset,
+        trimStartOffset: 0,
+        trimEndOffset: 0,
+        title: clip.title,
+        hookText: clip.hookText,
+        category: clip.category,
+      }));
+
+      await window.api.exportClips({
+        sourceFile: project.filePath,
+        clips: clipsToExport,
+        deadSpaces: [],
+        outputDir,
+        settings: { ...exportSettings, exportClips: true },
+      });
     } catch (err) {
       console.error('Export failed:', err);
     }
@@ -329,6 +296,7 @@ function EditorView() {
       const outputDir = await window.api.selectOutputDir();
       if (!outputDir) return;
 
+      console.log('[Export] Single clip export with settings:', exportSettings);
       await window.api.exportClips({
         sourceFile: project.filePath,
         clips: [{
@@ -343,7 +311,7 @@ function EditorView() {
         }],
         deadSpaces: [],
         outputDir,
-        settings: exportSettings,
+        settings: { ...exportSettings, exportClips: true },
       });
     } catch (err) {
       console.error('Export failed:', err);
@@ -553,6 +521,8 @@ Ctrl+E - Export accepted clips`,
 
   const hasProject = !!project;
   const hasClips = clips.length > 0;
+  const acceptedCount = clips.filter(c => c.status === 'accepted').length;
+  const pendingCount = clips.filter(c => c.status === 'pending').length;
 
   return (
     <div className="h-screen w-screen flex flex-col bg-sz-bg text-sz-text overflow-hidden">
@@ -576,6 +546,16 @@ Ctrl+E - Export accepted clips`,
         hasSelectedClip={!!selectedClip}
       />
 
+      <WorkflowBar
+        hasProject={hasProject}
+        hasClips={hasClips}
+        acceptedCount={acceptedCount}
+        pendingCount={pendingCount}
+        isDetecting={isDetecting}
+        onDetect={handleStartDetection}
+        onExportAll={handleShowExportPreview}
+      />
+
       <main className="flex-1 flex flex-col overflow-hidden min-h-0">
         {!hasProject ? (
           <DropZone
@@ -588,8 +568,8 @@ Ctrl+E - Export accepted clips`,
             onFileDrop={handleFileDrop}
           />
         ) : (
-          <div className="flex-1 flex flex-col overflow-hidden p-4 gap-3">
-            {/* Video Preview */}
+          <div className="flex-1 flex flex-col overflow-y-auto overflow-x-hidden p-4 gap-3">
+            {/* Video Preview - always show when project loaded */}
             <div className="flex-shrink-0">
               <div className="max-w-4xl mx-auto">
                 <VideoPreview
@@ -606,46 +586,57 @@ Ctrl+E - Export accepted clips`,
               </div>
             </div>
 
-            {/* Quick Actions */}
-            {hasClips && selectedClip && (
-              <div className="flex-shrink-0">
-                <div className="max-w-4xl mx-auto">
-                  <QuickActions
-                    clip={selectedClip}
-                    onAccept={handleAccept}
-                    onReject={handleReject}
-                    onExport={() => handleExportClip(selectedClip)}
-                  />
-                </div>
-              </div>
+            {/* Empty State - show when no clips detected yet */}
+            {!hasClips && !isDetecting && (
+              <EmptyState
+                onDetect={handleStartDetection}
+                isDetecting={isDetecting}
+              />
             )}
 
-            {/* Timeline */}
-            <div className="flex-shrink-0">
-              <Timeline
-                duration={project.duration}
-                currentTime={currentTime}
-                clips={clips}
-                deadSpaces={deadSpaces}
-                selectedClipId={selectedClipId}
-                onSeek={handleTimelineSeek}
-                onSelectClip={handleSelectClip}
-                hasClips={hasClips}
-                isDetecting={isDetecting}
-                onAnalyze={handleStartDetection}
-              />
-            </div>
-
-            {/* Clip Strip */}
+            {/* Content area - show when clips exist */}
             {hasClips && (
-              <div className="flex-1 min-h-0 overflow-hidden">
-                <ClipStrip
-                  clips={clips}
-                  selectedClipId={selectedClipId}
-                  onSelectClip={handleSelectClip}
-                  onExportAll={handleShowExportPreview}
-                />
-              </div>
+              <>
+                {/* Quick Actions */}
+                {selectedClip && (
+                  <div className="flex-shrink-0">
+                    <div className="max-w-4xl mx-auto">
+                      <QuickActions
+                        clip={selectedClip}
+                        onAccept={handleAccept}
+                        onReject={handleReject}
+                        onExport={() => handleExportClip(selectedClip)}
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {/* Timeline */}
+                <div className="flex-shrink-0">
+                  <Timeline
+                    duration={project.duration}
+                    currentTime={currentTime}
+                    clips={clips}
+                    deadSpaces={deadSpaces}
+                    selectedClipId={selectedClipId}
+                    onSeek={handleTimelineSeek}
+                    onSelectClip={handleSelectClip}
+                    hasClips={hasClips}
+                    isDetecting={isDetecting}
+                    onAnalyze={handleStartDetection}
+                  />
+                </div>
+
+                {/* Clip Strip */}
+                <div className="flex-1 min-h-0 overflow-hidden">
+                  <ClipStrip
+                    clips={clips}
+                    selectedClipId={selectedClipId}
+                    onSelectClip={handleSelectClip}
+                    onExportAll={handleShowExportPreview}
+                  />
+                </div>
+              </>
             )}
           </div>
         )}
@@ -664,16 +655,6 @@ Ctrl+E - Export accepted clips`,
         <ProgressOverlay
           progress={detectionProgress}
           onCancel={handleCancelDetection}
-        />
-      )}
-
-      {/* Export Preview Modal */}
-      {showExportPreview && (
-        <ExportPreviewModal
-          clips={clips}
-          hasTranscript={!!useStore.getState().transcript}
-          onExport={handleExportFromPreview}
-          onClose={() => setShowExportPreview(false)}
         />
       )}
 

@@ -76,6 +76,13 @@ interface AppState {
   detectionProgress: DetectionProgress | null;
   detectionError: string | null;
   
+  // Pending detection results (awaiting user review)
+  pendingDetectionResults: {
+    clips: Clip[];
+    deadSpaces: DeadSpace[];
+    transcript: Transcript | null;
+  } | null;
+  
   // Results
   clips: Clip[];
   suggestedClips: Clip[];
@@ -173,6 +180,10 @@ interface AppState {
   setDetectionProgress: (progress: DetectionProgress | null) => void;
   setDetectionError: (error: string | null) => void;
   
+  setPendingDetectionResults: (results: { clips: Clip[]; deadSpaces: DeadSpace[]; transcript: Transcript | null } | null) => void;
+  acceptPendingResults: () => void;
+  rejectPendingResults: () => void;
+  
   setResults: (clips: Clip[], deadSpaces: DeadSpace[], transcript: Transcript | null) => void;
   
   // Actions - Suggested Clips
@@ -226,7 +237,7 @@ interface AppState {
 const defaultSettings: DetectionSettings = {
   targetCount: 10,
   minDuration: 15,
-  maxDuration: 90,
+  maxDuration: 60,
   skipIntro: 30,
   skipOutro: 30,
   useAiEnhancement: true,
@@ -235,9 +246,9 @@ const defaultSettings: DetectionSettings = {
 const defaultExportSettings: ExportSettings = {
   format: 'mp4',
   mode: 'fast',
-  exportClips: false,
-  exportClipsCompilation: true,
-  exportFullVideo: true,
+  exportClips: true,
+  exportClipsCompilation: false,
+  exportFullVideo: false,
   transition: {
     type: 'crossfade',
     duration: 0.5,
@@ -273,6 +284,7 @@ export const useStore = create<AppState>()(
       isDetecting: false,
       detectionProgress: null,
       detectionError: null,
+      pendingDetectionResults: null,
       clips: [],
       suggestedClips: [],
       showSourceLayer: true,
@@ -661,6 +673,34 @@ export const useStore = create<AppState>()(
         detectionError,
         isDetecting: false,
         detectionProgress: null,
+      }),
+      
+      // Pending results actions
+      setPendingDetectionResults: (results) => set({ 
+        pendingDetectionResults: results,
+        isDetecting: false,
+        detectionProgress: null,
+      }),
+      
+      acceptPendingResults: () => {
+        const state = get();
+        if (!state.pendingDetectionResults) return;
+        
+        const { clips, deadSpaces, transcript } = state.pendingDetectionResults;
+        const existingUserClips = state.clips.filter(c => c.id.startsWith('user_'));
+        
+        set({
+          suggestedClips: clips,
+          clips: existingUserClips.length > 0 ? existingUserClips : [],
+          deadSpaces,
+          transcript,
+          pendingDetectionResults: null,
+        });
+      },
+      
+      rejectPendingResults: () => set({ 
+        pendingDetectionResults: null,
+        isDetecting: false,
       }),
 
       // Results actions

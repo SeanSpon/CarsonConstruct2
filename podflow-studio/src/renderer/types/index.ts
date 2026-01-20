@@ -353,11 +353,11 @@ export const DEFAULT_MVP_EXPORT_SETTINGS: MVPExportSettings = {
   targetHeight: 1920,
   burnCaptions: true,
   captionStyle: {
-    fontName: 'Arial Black',
-    fontSize: 72,
-    outline: 4,
-    shadow: 2,
-    maxChars: 32,
+    fontName: 'Montserrat',      // Modern, clean font
+    fontSize: 56,                 // Slightly smaller, more readable
+    outline: 3,                   // Less aggressive outline
+    shadow: 1,                    // Subtle shadow
+    maxChars: 28,                 // Shorter lines for better flow
     maxLines: 2,
   },
 };

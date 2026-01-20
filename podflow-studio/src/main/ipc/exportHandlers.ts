@@ -81,6 +81,12 @@ ipcMain.handle('export-clips', async (_event, data: {
   const { sourceFile, clips, deadSpaces, outputDir, settings } = data;
   const win = getMainWindow();
   
+  console.log('[Export Handler] Received export request:');
+  console.log('  - Source:', sourceFile);
+  console.log('  - Output:', outputDir);
+  console.log('  - Clips:', clips.length);
+  console.log('  - Settings:', JSON.stringify(settings, null, 2));
+  
   if (!win) {
     return { success: false, error: 'Window not found' };
   }
@@ -96,8 +102,12 @@ ipcMain.handle('export-clips', async (_event, data: {
     (settings.exportClipsCompilation ? 1 : 0) + 
     (settings.exportFullVideo ? 1 : 0);
 
+  console.log('[Export Handler] Total tasks:', totalTasks);
+  console.log('[Export Handler] Will export individual clips?', settings.exportClips);
+
   // Export individual clips
   if (settings.exportClips) {
+    console.log('[Export Handler] Starting individual clip export...');
     for (let i = 0; i < clips.length; i++) {
       const clip = clips[i];
       const actualStart = clip.startTime + clip.trimStartOffset;
@@ -110,6 +120,8 @@ ipcMain.handle('export-clips', async (_event, data: {
         .substring(0, 50);
       const outputFile = path.join(outputDir, `${safeName}.${settings.format}`);
 
+      console.log(`[Export Handler] Exporting clip ${i + 1}/${clips.length}:`, outputFile);
+
       win.webContents.send('export-progress', {
         current: completed + 1,
         total: totalTasks,
@@ -119,6 +131,7 @@ ipcMain.handle('export-clips', async (_event, data: {
 
       try {
         await exportSingleClip(sourceFile, outputFile, actualStart, duration, settings.mode);
+        console.log(`[Export Handler] ✓ Clip ${i + 1} exported successfully`);
         
         // Write metadata sidecar JSON
         if (clip.title || clip.hookText || clip.category) {
@@ -135,6 +148,7 @@ ipcMain.handle('export-clips', async (_event, data: {
         
         completed++;
       } catch (err) {
+        console.error(`[Export Handler] ✗ Clip ${i + 1} failed:`, err);
         errors.push(`Failed to export ${clip.title || clip.id}: ${err}`);
       }
     }
@@ -192,12 +206,19 @@ ipcMain.handle('export-clips', async (_event, data: {
   }
 
   // Send completion
+  console.log(`[Export Handler] ✅ Export complete! ${completed} files saved to:`, outputDir);
   win.webContents.send('export-complete', {
     success: errors.length === 0,
     outputDir,
     clipCount: completed,
     errors,
   });
+
+  // Open the folder automatically
+  if (errors.length === 0 && completed > 0) {
+    console.log('[Export Handler] Opening output folder...');
+    shell.openPath(outputDir);
+  }
 
   return { success: errors.length === 0, outputDir };
 });

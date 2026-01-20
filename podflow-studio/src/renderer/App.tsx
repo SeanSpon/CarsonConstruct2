@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { EditorView } from './components/editor';
+import DetectionSummaryModal from './components/editor/DetectionSummaryModal';
 import { useStore } from './stores/store';
 import type { Clip, DeadSpace, Transcript, SpeakerSegment } from './types';
 
@@ -8,7 +9,10 @@ function App() {
     project,
     setDetectionProgress, 
     setDetectionError, 
-    setResults,
+    setPendingDetectionResults,
+    acceptPendingResults,
+    rejectPendingResults,
+    pendingDetectionResults,
     setSpeakerSegments,
     setExportProgress,
     setExporting,
@@ -21,6 +25,16 @@ function App() {
   // Restore session state on mount
   useEffect(() => {
     const state = useStore.getState();
+    
+    // FIX: Force correct export settings if they're wrong
+    if (state.exportSettings.exportClips === false) {
+      console.log('[App] Fixing export settings - enabling individual clip export');
+      state.updateExportSettings({
+        exportClips: true,
+        exportClipsCompilation: false,
+        exportFullVideo: false,
+      });
+    }
     
     // Validate that the persisted project file still exists
     if (state.project?.filePath) {
@@ -93,7 +107,8 @@ function App() {
         speakerName: seg.speakerName || `Speaker ${index + 1}`,
       }));
 
-      setResults(clips, deadSpaces, data.transcript as Transcript | null);
+      setPendingDetectionResults({ clips, deadSpaces, transcript: data.transcript as Transcript | null });
+      console.log('[App] Detection complete - showing summary modal with', clips.length, 'clips');
       setSpeakerSegments(speakers);
       setCurrentJobId(null);
       setLastJobId(data.projectId);
@@ -123,6 +138,11 @@ function App() {
       setExportProgress(null);
       if (data.success) {
         setLastExportDir(data.outputDir);
+        console.log(`✅ Export successful! ${data.clipCount} files saved to:`, data.outputDir);
+        alert(`✅ Export Complete!\n\n${data.clipCount} file(s) saved to:\n${data.outputDir}\n\nFolder opened automatically.`);
+      } else {
+        console.error('❌ Export failed:', data.errors);
+        alert(`❌ Export Failed!\n\n${data.errors.join('\n')}`);
       }
     });
 
@@ -136,7 +156,7 @@ function App() {
   }, [
     setDetectionProgress,
     setDetectionError,
-    setResults,
+    setPendingDetectionResults,
     setSpeakerSegments,
     setExportProgress,
     setExporting,
@@ -145,7 +165,20 @@ function App() {
     setLastJobId,
   ]); // Note: currentJobId is NOT in deps - we use ref instead
 
-  return <EditorView />;
+  return (
+    <>
+      <EditorView />
+      {pendingDetectionResults && (
+        <DetectionSummaryModal
+          clips={pendingDetectionResults.clips}
+          deadSpaces={pendingDetectionResults.deadSpaces}
+          transcript={pendingDetectionResults.transcript}
+          onAccept={acceptPendingResults}
+          onReject={rejectPendingResults}
+        />
+      )}
+    </>
+  );
 }
 
 export default App;

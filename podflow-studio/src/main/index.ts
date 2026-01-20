@@ -84,6 +84,24 @@ const createWindow = () => {
 app.whenReady().then(() => {
   createWindow();
 
+  // Diagnostic: Check if Python is available
+  const { spawn } = require('child_process');
+  const pythonCmd = process.platform === 'win32' ? 'python' : 'python3';
+  const pythonTest = spawn(pythonCmd, ['--version']);
+  
+  pythonTest.on('error', (err: Error) => {
+    console.error('❌ Python NOT available:', err.message);
+    const { dialog } = require('electron');
+    dialog.showErrorBox(
+      'Python Required',
+      `Python 3.8+ must be installed for clip detection to work.\n\nPlease download and install Python from python.org, then restart the app.\n\nCommand attempted: ${pythonCmd}`
+    );
+  });
+  
+  pythonTest.stdout?.on('data', (data: Buffer) => {
+    console.log('✅ Python available:', data.toString().trim());
+  });
+
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
       createWindow();

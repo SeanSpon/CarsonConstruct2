@@ -189,23 +189,34 @@ const startJob = async (data: {
   });
 
   console.log('[Detection] Spawning Python detector:', pythonScript);
+  console.log('[Detection] Python directory:', pythonDir);
+  console.log('[Detection] Python script exists:', fs.existsSync(pythonScript));
 
   // Spawn Python process
+  // Try multiple Python commands in order of preference
+  const pythonCmd = process.platform === 'win32' ? 'python' : 'python3';
   let pythonProcess: ChildProcess;
   try {
-    pythonProcess = spawn('python', [pythonScript, filePath, settingsJson], {
+    pythonProcess = spawn(pythonCmd, ['-u', pythonScript, filePath, settingsJson], {
       cwd: pythonDir,
       env: {
         ...process.env,
         PYTHONUNBUFFERED: '1',
       },
     });
-    console.log('[Detection] Python process started, PID:', pythonProcess.pid);
+    console.log('[Detection] Python process started with command:', pythonCmd, 'PID:', pythonProcess.pid);
   } catch (spawnError: unknown) {
     const errMsg = spawnError instanceof Error ? spawnError.message : String(spawnError);
     console.error('[Detection] Failed to spawn Python:', errMsg);
-    getJobStore().update(projectId, { status: 'failed', error: errMsg });
-    win.webContents.send('detection-error', { projectId, error: `Python spawn failed: ${errMsg}` });
+    console.error('[Detection] Python command attempted:', pythonCmd);
+    console.error('[Detection] Python script path:', pythonScript);
+    console.error('[Detection] Working directory:', pythonDir);
+    console.error('[Detection] Current process cwd:', process.cwd());
+    getJobStore().update(projectId, { status: 'failed', error: `Python not available: ${errMsg}` });
+    win.webContents.send('detection-error', { 
+      projectId, 
+      error: `Python not found. Please install Python 3.8+ from python.org and restart the app. Error: ${errMsg}` 
+    });
     return { success: false, error: errMsg };
   }
 

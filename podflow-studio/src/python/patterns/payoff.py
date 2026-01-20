@@ -12,6 +12,16 @@ import numpy as np
 from utils.baseline import deviation_from_baseline
 
 
+def _format_timestamp(seconds: float) -> str:
+    """Format seconds as HH:MM:SS or MM:SS"""
+    hours = int(seconds // 3600)
+    minutes = int((seconds % 3600) // 60)
+    secs = int(seconds % 60)
+    if hours > 0:
+        return f"{hours}:{minutes:02d}:{secs:02d}"
+    return f"{minutes}:{secs:02d}"
+
+
 def detect_payoff_moments(
     features: Dict,
     bounds: Dict,
@@ -142,17 +152,24 @@ def detect_payoff_moments(
             clip_end = clip_start + max_clip_duration
             clip_duration = max_clip_duration
 
+        # Create unique ID with timestamp
+        timestamp_str = _format_timestamp(clip_start)
+        clip_id = f"payoff_{int(clip_start)}_{len(payoff_moments) + 1}"
+        
         clip = {
-            "id": f"payoff_{len(payoff_moments) + 1}",
+            "id": clip_id,
             "startTime": round(clip_start, 2),
             "endTime": round(clip_end, 2),
             "duration": round(clip_duration, 2),
             "pattern": "payoff",
-            "patternLabel": "Payoff Moment",
+            "patternLabel": f"Payoff @ {timestamp_str}",
             "description": f"{silence['duration']:.1f}s pause → {sustained_duration:.1f}s energy spike",
             "algorithmScore": round(min(100, algorithm_score), 1),
             "silenceDuration": round(silence["duration"], 2),
             "spikeIntensity": round(spike_intensity, 2),
+            # Pre-generate a unique title based on timing (AI will override if available)
+            "title": f"Big Reveal at {timestamp_str}",
+            "hookText": f"Wait for the payoff at {timestamp_str}",
         }
 
         if debug:

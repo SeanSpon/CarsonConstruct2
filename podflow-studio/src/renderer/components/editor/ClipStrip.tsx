@@ -1,5 +1,5 @@
 import { memo, useRef, useCallback } from 'react';
-import { ChevronLeft, ChevronRight, Download } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Download, Smartphone } from 'lucide-react';
 import type { Clip } from '../../types';
 import { Button, IconButton } from '../ui';
 import ClipThumbnail from './ClipThumbnail';
@@ -9,9 +9,10 @@ interface ClipStripProps {
   selectedClipId: string | null;
   onSelectClip: (clipId: string) => void;
   onExportAll: () => void;
+  onExportReels?: () => void;
 }
 
-function ClipStrip({ clips, selectedClipId, onSelectClip, onExportAll }: ClipStripProps) {
+function ClipStrip({ clips, selectedClipId, onSelectClip, onExportAll, onExportReels }: ClipStripProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const acceptedCount = clips.filter(c => c.status === 'accepted').length;
@@ -57,14 +58,25 @@ function ClipStrip({ clips, selectedClipId, onSelectClip, onExportAll }: ClipStr
           />
           
           {acceptedCount > 0 && (
-            <Button
-              variant="primary"
-              size="xs"
-              leftIcon={<Download className="w-3 h-3" />}
-              onClick={onExportAll}
-            >
-              Export All ({acceptedCount})
-            </Button>
+            <>
+              <Button
+                variant="secondary"
+                size="xs"
+                leftIcon={<Smartphone className="w-3 h-3" />}
+                onClick={onExportReels}
+                title="Export all accepted clips as vertical reels for TikTok, Instagram, YouTube Shorts"
+              >
+                Reels
+              </Button>
+              <Button
+                variant="primary"
+                size="xs"
+                leftIcon={<Download className="w-3 h-3" />}
+                onClick={onExportAll}
+              >
+                Export ({acceptedCount})
+              </Button>
+            </>
           )}
         </div>
       </div>

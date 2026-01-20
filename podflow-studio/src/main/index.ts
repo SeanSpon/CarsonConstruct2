@@ -1,6 +1,6 @@
-import { app, BrowserWindow, Menu } from 'electron';
+import { app, BrowserWindow, Menu, ipcMain } from 'electron';
 import path from 'node:path';
-import { setMainWindow } from './window';
+import { setMainWindow, getMainWindow } from './window';
 
 // Import IPC handlers - this registers them with ipcMain
 import './ipc/fileHandlers';
@@ -9,23 +9,37 @@ import './ipc/exportHandlers';
 import './ipc/reviewHandlers';
 import './ipc/cloudHandlers';
 import './ipc/premiereExport';
-import './ipc/cameraHandlers';
 import './ipc/qaHandlers';
-import './ipc/mediaLibraryHandlers';
-import { registerAiEffectsHandlers } from './ipc/aiEffectsHandlers';
+import './ipc/instagramHandlers';
+import './ipc/styleHandlers';
 import { registerProjectFileHandlers } from './ipc/projectFileHandlers';
-import { registerChatHandlers } from './ipc/chatHandlers';
-
-// Register AI effects handlers
-registerAiEffectsHandlers();
 
 // Register project file handlers
 registerProjectFileHandlers();
 
-// Register chat handlers
-registerChatHandlers();
+// Window control handlers
+ipcMain.on('window-minimize', () => {
+  const win = getMainWindow();
+  if (win) win.minimize();
+});
 
-console.log('=== [MAIN] All imports complete, IPC handlers registered ===');
+ipcMain.on('window-maximize', () => {
+  const win = getMainWindow();
+  if (win) {
+    if (win.isMaximized()) {
+      win.unmaximize();
+    } else {
+      win.maximize();
+    }
+  }
+});
+
+ipcMain.on('window-close', () => {
+  const win = getMainWindow();
+  if (win) win.close();
+});
+
+console.log('=== [MAIN] IPC handlers registered ===');
 
 declare const MAIN_WINDOW_VITE_DEV_SERVER_URL: string;
 declare const MAIN_WINDOW_VITE_NAME: string;
@@ -41,7 +55,7 @@ const createWindow = () => {
     minHeight: 600,
     useContentSize: true, // Use content area size instead of window frame size
     backgroundColor: '#0D1117', // Match app background to prevent white flash on resize
-    title: 'PodFlow Studio',
+    title: 'Opus AI',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,

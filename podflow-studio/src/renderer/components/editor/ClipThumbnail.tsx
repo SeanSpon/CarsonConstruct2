@@ -24,7 +24,8 @@ const patternBgColors: Record<string, string> = {
   debate: 'bg-[#F97316]',
 };
 
-const patternLabels: Record<string, string> = {
+// Fallback pattern labels (short form for thumbnails)
+const patternLabelsFallback: Record<string, string> = {
   payoff: 'Payoff',
   monologue: 'Mono',
   laughter: 'Laugh',
@@ -80,18 +81,26 @@ function ClipThumbnail({ clip, isSelected, onClick }: ClipThumbnailProps) {
 
       {/* Info */}
       <div className="p-2 bg-sz-bg-tertiary">
-        {/* Duration */}
-        <div className="flex items-center gap-1 text-[10px] text-sz-text-muted mb-1">
-          <Clock className="w-3 h-3" />
-          {formatDuration(actualDuration)}
-        </div>
-
-        {/* Pattern */}
-        <div className={`
-          text-[10px] font-medium
-          ${isSelected ? 'text-sz-text' : 'text-sz-text-secondary'}
-        `}>
-          {patternLabels[clip.pattern] || clip.pattern}
+        {/* Title - display actual clip title if available */}
+        {clip.title && (
+          <div className={`
+            text-[10px] font-medium truncate mb-0.5
+            ${isSelected ? 'text-sz-text' : 'text-sz-text-secondary'}
+          `} title={clip.title}>
+            {clip.title}
+          </div>
+        )}
+        
+        {/* Duration + Pattern */}
+        <div className="flex items-center gap-1.5 text-[10px] text-sz-text-muted">
+          <div className="flex items-center gap-0.5">
+            <Clock className="w-2.5 h-2.5" />
+            {formatDuration(actualDuration)}
+          </div>
+          <span className="text-sz-text-muted/50">·</span>
+          <span className={`truncate ${patternColors[clip.pattern]?.replace('border-', 'text-') || 'text-sz-accent'}`}>
+            {clip.patternLabel || patternLabelsFallback[clip.pattern] || clip.pattern}
+          </span>
         </div>
       </div>
     </button>

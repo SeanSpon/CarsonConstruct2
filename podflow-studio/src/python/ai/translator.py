@@ -127,6 +127,48 @@ def _limit_words(text: str, max_words: int) -> str:
     return " ".join(words[:max_words]).strip()
 
 
+def _format_timestamp(seconds: float) -> str:
+    """Format seconds as HH:MM:SS or MM:SS"""
+    hours = int(seconds // 3600)
+    minutes = int((seconds % 3600) // 60)
+    secs = int(seconds % 60)
+    if hours > 0:
+        return f"{hours}:{minutes:02d}:{secs:02d}"
+    return f"{minutes}:{secs:02d}"
+
+
+def _extract_key_phrase(transcript: str) -> str:
+    """Extract a meaningful key phrase from transcript for title generation."""
+    if not transcript:
+        return ""
+    
+    # Clean up the transcript
+    text = transcript.strip()
+    
+    # Look for phrases with strong words
+    strong_words = ["never", "always", "best", "worst", "love", "hate", "think", 
+                   "believe", "truth", "secret", "crazy", "amazing", "actually",
+                   "important", "problem", "answer", "reason", "way"]
+    
+    sentences = re.split(r'[.!?]+', text)
+    for sentence in sentences:
+        sentence = sentence.strip()
+        if len(sentence) < 10:
+            continue
+        words_lower = sentence.lower()
+        for word in strong_words:
+            if word in words_lower:
+                return _limit_words(sentence, 8)
+    
+    # Fallback: use first meaningful sentence
+    for sentence in sentences:
+        sentence = sentence.strip()
+        if len(sentence) >= 15:
+            return _limit_words(sentence, 8)
+    
+    return _limit_words(text, 8)
+
+
 def _fallback_meaningcard(clip_card: ClipCard, context_pack: Dict[str, Any]) -> MeaningCard:
     """
     Generate a MeaningCard using heuristic rules when AI is unavailable.
@@ -139,6 +181,9 @@ def _fallback_meaningcard(clip_card: ClipCard, context_pack: Dict[str, Any]) -> 
     min_seconds = constraints.get("min_seconds")
     max_seconds = constraints.get("max_seconds")
     
+    # Get timestamp for unique naming
+    timestamp_str = _format_timestamp(clip_card.start)
+    
     # Check duration constraints
     duration_ok = True
     if isinstance(min_seconds, (int, float)) and clip_card.duration < float(min_seconds):
@@ -150,37 +195,53 @@ def _fallback_meaningcard(clip_card: ClipCard, context_pack: Dict[str, Any]) -> 
     ends_with_punct = bool(transcript) and transcript[-1] in ".!?"
     complete_thought = bool(transcript) and ends_with_punct and duration_ok
 
-    # Map patterns to categories
+    # Map patterns to categories and descriptive labels
     category_map = {
         "laughter": "funny",
         "debate": "hot_take",
         "monologue": "insightful",
         "payoff": "story",
     }
+    pattern_labels = {
+        "laughter": "Hilarious",
+        "debate": "Heated",
+        "monologue": "Passionate",
+        "payoff": "Epic",
+    }
     category = "other"
+    pattern_label = "Interesting"
     for pattern in clip_card.patterns:
         if pattern in category_map:
             category = category_map[pattern]
+            pattern_label = pattern_labels.get(pattern, "Interesting")
             break
 
+    # Extract key phrase from transcript for more meaningful titles
+    key_phrase = _extract_key_phrase(transcript)
+    
     # Generate summary and hook from transcript
     if transcript:
         summary = _first_sentence(transcript)
         summary = _limit_words(summary, 28)
-        hook_text = _limit_words(transcript, 14)
+        # Make hook text more engaging
+        hook_text = f'"{_limit_words(transcript, 10)}"'
     else:
-        summary = f"{category.title()} clip candidate."
-        hook_text = f"{category.title()} moment worth reviewing"
+        summary = f"{pattern_label} moment at {timestamp_str}."
+        hook_text = f"Watch what happens at {timestamp_str}"
 
-    # Generate title candidates
-    title_seed = hook_text if transcript else summary
-    title_seed = _limit_words(title_seed, 10)
-    title_candidates = [
-        f"{category.title()} moment: {title_seed}",
-        f"Why this {category.replace('_', ' ')} moment stands out",
-    ]
-    if transcript:
-        title_candidates.append(_limit_words(summary, 10))
+    # Generate UNIQUE title candidates with timestamp and content
+    if key_phrase:
+        title_candidates = [
+            f'"{key_phrase}"',
+            f"{pattern_label}: {_limit_words(key_phrase, 6)}",
+            f"At {timestamp_str}: {_limit_words(key_phrase, 5)}",
+        ]
+    else:
+        title_candidates = [
+            f"{pattern_label} Moment @ {timestamp_str}",
+            f"Must-See @ {timestamp_str}",
+            f"{category.title()} Clip ({timestamp_str})",
+        ]
 
     # Determine flags
     flags = []

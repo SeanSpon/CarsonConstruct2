@@ -18,7 +18,7 @@ import json
 import tempfile
 import os
 
-CACHE_VERSION = 1
+CACHE_VERSION = 3  # Bumped for MVP mode support
 
 def send_progress(progress: int, message: str):
     """Send progress update to Electron via stdout"""
@@ -40,6 +40,12 @@ def send_error(error: str):
     """Send error message"""
     print(f"ERROR:{error}", flush=True)
 
+def should_skip_stage(output_path: str, force: bool = False) -> bool:
+    """Check if stage output exists and should be skipped."""
+    if force:
+        return False
+    return os.path.exists(output_path) and os.path.getsize(output_path) > 0
+
 def _safe_read_json(path: str):
     try:
         with open(path, "r", encoding="utf-8") as handle:
@@ -47,10 +53,10 @@ def _safe_read_json(path: str):
     except (OSError, json.JSONDecodeError):
         return None
 
-def _write_json(path: str, payload: dict):
+def _write_json(path: str, payload: dict, indent: int = None):
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w", encoding="utf-8") as handle:
-        json.dump(payload, handle, ensure_ascii=True)
+        json.dump(payload, handle, ensure_ascii=True, indent=indent)
 
 def _algo_cache_key(input_hash: str, settings: dict) -> str:
     payload = {
@@ -194,8 +200,255 @@ def normalize_audio(y, sr):
     
     return y
 
+
+def run_mvp_pipeline(video_path: str, settings: dict):
+    """
+    MVP Detection Pipeline with deterministic scoring and stage resume.
+    
+    Stages:
+    A) Extract audio -> audio.wav
+    B) Transcribe -> transcript.json
+    C) Compute features -> features.json
+    D) Detect candidates -> candidates.json
+    E) Score + de-dupe -> clips.json
+    F) Export clips (handled by Electron)
+    G) Caption burn (handled by Electron)
+    """
+    import numpy as np
+    import librosa
+    
+    from features import extract_features, features_to_json, features_from_json
+    from utils.mvp_candidates import detect_all_candidates, candidates_to_json, candidates_from_json
+    from utils.mvp_scoring import score_and_select_clips
+    
+    # Settings
+    job_dir = settings.get("job_dir") or settings.get("cache_dir")
+    force = settings.get("force_rerun", False)
+    openai_key = settings.get("openai_api_key", "")
+    ffmpeg_path = settings.get("ffmpeg_path")
+    top_n = settings.get("target_count", 10)
+    skip_intro = settings.get("skip_intro", 30)
+    skip_outro = settings.get("skip_outro", 30)
+    
+    if not job_dir:
+        send_error("MVP mode requires job_dir or cache_dir")
+        sys.exit(1)
+    
+    os.makedirs(job_dir, exist_ok=True)
+    
+    # Output paths
+    audio_path = os.path.join(job_dir, "audio.wav")
+    features_path = os.path.join(job_dir, "features.json")
+    transcript_path = os.path.join(job_dir, "transcript.json")
+    candidates_path = os.path.join(job_dir, "candidates.json")
+    clips_path = os.path.join(job_dir, "clips.json")
+    
+    # Stage A: Extract audio
+    if not should_skip_stage(audio_path, force):
+        send_progress(5, "Stage A: Extracting audio...")
+        try:
+            extract_audio_ffmpeg(video_path, audio_path, ffmpeg_path)
+        except Exception as e:
+            send_error(f"Failed to extract audio: {e}")
+            sys.exit(1)
+    else:
+        send_progress(5, "Stage A: Audio exists, skipping...")
+    
+    # Stage B: Transcribe
+    transcript = None
+    if not should_skip_stage(transcript_path, force):
+        if openai_key:
+            send_progress(20, "Stage B: Transcribing with Whisper...")
+            try:
+                from ai.transcription import transcribe_with_whisper
+                transcript = transcribe_with_whisper(audio_path, openai_key)
+                _write_json(transcript_path, transcript, indent=2)
+            except Exception as e:
+                send_progress(20, f"Transcription failed: {e}, continuing without...")
+                transcript = {"segments": [], "words": [], "text": ""}
+                _write_json(transcript_path, transcript, indent=2)
+        else:
+            send_progress(20, "Stage B: No API key, creating empty transcript...")
+            transcript = {"segments": [], "words": [], "text": ""}
+            _write_json(transcript_path, transcript, indent=2)
+    else:
+        send_progress(20, "Stage B: Transcript exists, loading...")
+        transcript = _safe_read_json(transcript_path) or {"segments": [], "words": [], "text": ""}
+    
+    # Stage C: Compute features
+    features = None
+    duration = 0
+    if not should_skip_stage(features_path, force):
+        send_progress(35, "Stage C: Computing audio features...")
+        try:
+            y, sr = librosa.load(audio_path, sr=22050)
+            y = normalize_audio(y, sr)
+            duration = librosa.get_duration(y=y, sr=sr)
+            
+            # Extract features with MVP settings
+            feature_settings = {
+                "mvp_mode": True,
+                "hop_s": settings.get("hop_s", 0.10),
+                "rms_window_s": settings.get("rms_window_s", 0.40),
+                "baseline_window_s": settings.get("baseline_window_s", 20.0),
+                "silence_threshold_db": settings.get("silence_threshold_db", -35),
+            }
+            features = extract_features(y, sr, settings=feature_settings, transcript=transcript)
+            features["duration"] = duration
+            
+            # Save to JSON
+            features_json = features_to_json(features)
+            _write_json(features_path, features_json, indent=2)
+            
+        except Exception as e:
+            send_error(f"Failed to compute features: {e}")
+            sys.exit(1)
+    else:
+        send_progress(35, "Stage C: Features exist, loading...")
+        features_json = _safe_read_json(features_path)
+        if features_json:
+            features = features_from_json(features_json)
+            duration = features.get("duration", 0)
+        else:
+            send_error("Failed to load cached features")
+            sys.exit(1)
+    
+    # Define analysis bounds
+    start_time = skip_intro
+    end_time = max(start_time + 10, duration - skip_outro)
+    
+    bounds = {
+        "start_time": start_time,
+        "end_time": end_time,
+        "min_duration": settings.get("min_duration", 15),
+        "max_duration": settings.get("max_duration", 90),
+    }
+    
+    # Stage D: Detect candidates
+    candidates = []
+    if not should_skip_stage(candidates_path, force):
+        send_progress(50, "Stage D: Detecting candidate moments...")
+        try:
+            detection_settings = {
+                "hop_s": settings.get("hop_s", 0.10),
+                "spike_threshold_db": settings.get("spike_threshold_db", 8.0),
+                "spike_sustain_s": settings.get("spike_sustain_s", 0.7),
+                "silence_threshold_db": settings.get("silence_threshold_db", -35),
+                "silence_run_s": settings.get("silence_run_s", 1.2),
+                "contrast_window_s": settings.get("contrast_window_s", 2.0),
+                "laughter_z_rms": settings.get("laughter_z_rms", 1.5),
+                "laughter_gap_s": settings.get("laughter_gap_s", 0.3),
+                "laughter_min_s": settings.get("laughter_min_s", 1.0),
+            }
+            candidates = detect_all_candidates(features, bounds, detection_settings)
+            
+            send_progress(60, f"Found {len(candidates)} candidate moments")
+            
+            candidates_json = candidates_to_json(candidates)
+            _write_json(candidates_path, candidates_json, indent=2)
+            
+        except Exception as e:
+            send_error(f"Failed to detect candidates: {e}")
+            sys.exit(1)
+    else:
+        send_progress(50, "Stage D: Candidates exist, loading...")
+        candidates_json = _safe_read_json(candidates_path)
+        if candidates_json:
+            candidates = candidates_from_json(candidates_json)
+        else:
+            send_error("Failed to load cached candidates")
+            sys.exit(1)
+    
+    # Stage E: Score and select clips
+    send_progress(70, "Stage E: Scoring and selecting clips...")
+    try:
+        scoring_settings = {
+            "clip_lengths": settings.get("clip_lengths", [12, 18, 24, 35]),
+            "min_clip_s": settings.get("min_clip_s", 8),
+            "max_clip_s": settings.get("max_clip_s", 45),
+            "snap_window_s": settings.get("snap_window_s", 2.0),
+            "start_padding_s": settings.get("start_padding_s", 0.6),
+            "end_padding_s": settings.get("end_padding_s", 0.8),
+            "iou_threshold": settings.get("iou_threshold", 0.6),
+            "top_n": top_n,
+        }
+        features["duration"] = duration
+        clips = score_and_select_clips(candidates, features, transcript, scoring_settings)
+        
+        send_progress(85, f"Selected {len(clips)} final clips")
+        
+        # Save clips.json with params
+        clips_output = {
+            "clips": clips,
+            "params": {
+                "top_n": top_n,
+                "clip_lengths_tried": scoring_settings["clip_lengths"],
+                "iou_threshold": scoring_settings["iou_threshold"],
+            }
+        }
+        _write_json(clips_path, clips_output, indent=2)
+        
+    except Exception as e:
+        send_error(f"Failed to score clips: {e}")
+        sys.exit(1)
+    
+    # The clips from score_and_select_clips are already in the right format
+    # Just add any missing fields for UI compatibility
+    final_clips = []
+    for i, clip in enumerate(clips):
+        final_clip = {
+            "id": clip.get("id", f"clip_{i+1:03d}"),
+            "startTime": clip.get("startTime", clip.get("start", 0)),
+            "endTime": clip.get("endTime", clip.get("end", 0)),
+            "duration": clip.get("duration", 0),
+            "pattern": clip.get("pattern", "payoff"),
+            "patternLabel": clip.get("patternLabel", f"Clip @ {_format_timestamp(clip.get('startTime', 0))}"),
+            "description": clip.get("description", ""),
+            "algorithmScore": clip.get("algorithmScore", clip.get("score", 0)),
+            "finalScore": clip.get("finalScore", clip.get("score", 0)),
+            "hookStrength": clip.get("hookStrength", 50),
+            "hookMultiplier": clip.get("hookMultiplier", 1.0),
+            "trimStartOffset": clip.get("trimStartOffset", 0),
+            "trimEndOffset": clip.get("trimEndOffset", 0),
+            "status": clip.get("status", "pending"),
+            "title": clip.get("title") or f"Clip {i+1}",
+            # MVP-specific fields
+            "score_breakdown": clip.get("score_breakdown"),
+            "source_candidate": clip.get("source_candidate"),
+            "snapped": clip.get("snapped", False),
+            "snap_reason": clip.get("snap_reason", ""),
+        }
+        final_clips.append(final_clip)
+    
+    send_progress(95, f"Complete! Found {len(final_clips)} clips")
+    
+    # Send results
+    debug_payload = {
+        "mvp_mode": True,
+        "job_dir": job_dir,
+        "candidates_count": len(candidates),
+        "clips_count": len(final_clips),
+    }
+    send_result(final_clips, [], transcript, [], debug=debug_payload)
+
+
+def _format_timestamp(seconds: float) -> str:
+    """Format seconds as HH:MM:SS or MM:SS"""
+    hours = int(seconds // 3600)
+    minutes = int((seconds % 3600) // 60)
+    secs = int(seconds % 60)
+    if hours > 0:
+        return f"{hours}:{minutes:02d}:{secs:02d}"
+    return f"{minutes}:{secs:02d}"
+
+
 def main(video_path: str, settings: dict):
     """Main detection pipeline"""
+    
+    # Check for MVP mode
+    mvp_mode = settings.get("mvp_mode", False)
+    if mvp_mode:
+        return run_mvp_pipeline(video_path, settings)
     
     target_count = settings.get("target_count", 10)
     min_duration = settings.get("min_duration", 15)
@@ -532,7 +785,7 @@ def main(video_path: str, settings: dict):
             )
         final_clips = final_clips[:target_count]
 
-        send_progress(95, f"Complete! Found {len(final_clips)} clips")
+        send_progress(96, f"Complete! Found {len(final_clips)} clips")
 
         debug_payload = None
         if debug:

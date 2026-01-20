@@ -13,6 +13,16 @@ from scipy.signal import find_peaks
 from utils.baseline import deviation_from_baseline
 
 
+def _format_timestamp(seconds: float) -> str:
+    """Format seconds as HH:MM:SS or MM:SS"""
+    hours = int(seconds // 3600)
+    minutes = int((seconds % 3600) // 60)
+    secs = int(seconds % 60)
+    if hours > 0:
+        return f"{hours}:{minutes:02d}:{secs:02d}"
+    return f"{minutes}:{secs:02d}"
+
+
 def detect_laughter_moments(
     features: Dict,
     bounds: Dict,
@@ -114,15 +124,22 @@ def detect_laughter_moments(
         burst_score = min(30.0, (peak_count / 6.0) * 30.0)
         algorithm_score = intensity_score + duration_score + burst_score
 
+        # Create unique ID with timestamp
+        timestamp_str = _format_timestamp(clip_start)
+        clip_id = f"laughter_{int(clip_start)}_{len(laughter_clips) + 1}"
+        
         clip = {
-            "id": f"laughter_{len(laughter_clips) + 1}",
+            "id": clip_id,
             "startTime": round(clip_start, 2),
             "endTime": round(clip_end, 2),
             "duration": round(clip_duration, 2),
             "pattern": "laughter",
-            "patternLabel": "Laughter Moment",
-            "description": f"{region_duration:.1f}s laughter burst cluster",
+            "patternLabel": f"Laughter @ {timestamp_str}",
+            "description": f"{region_duration:.1f}s laughter burst with {peak_count} peaks",
             "algorithmScore": round(min(100, algorithm_score), 1),
+            # Pre-generate a unique title based on timing (AI will override if available)
+            "title": f"Laughter Moment at {timestamp_str}",
+            "hookText": f"Watch what happens at {timestamp_str}",
         }
 
         if debug:

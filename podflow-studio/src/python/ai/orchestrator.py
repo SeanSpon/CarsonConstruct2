@@ -146,8 +146,26 @@ def _build_clipcard(clip: Dict[str, Any], transcript_snippet: str) -> ClipCard:
 
 
 def _apply_meaning_to_clip(clip: Dict[str, Any], meaning: MeaningCard) -> None:
-    clip["title"] = meaning.title_candidates[0] if meaning.title_candidates else ""
-    clip["hookText"] = meaning.hook_text
+    # Only override title if we have a good AI-generated one
+    new_title = meaning.title_candidates[0] if meaning.title_candidates else ""
+    existing_title = clip.get("title", "")
+    
+    # Prefer AI-generated title, but keep existing if AI returned generic/empty
+    if new_title and not new_title.startswith("Other moment"):
+        clip["title"] = new_title
+    elif not existing_title:
+        clip["title"] = new_title
+    # else: keep existing pre-generated title from pattern detection
+    
+    # Same for hook text - prefer AI but keep existing if empty
+    new_hook = meaning.hook_text
+    existing_hook = clip.get("hookText", "")
+    if new_hook and len(new_hook) > 10:
+        clip["hookText"] = new_hook
+    elif not existing_hook:
+        clip["hookText"] = new_hook
+    # else: keep existing pre-generated hook from pattern detection
+    
     clip["category"] = meaning.category
     clip["completeThought"] = meaning.complete_thought
     clip["flags"] = meaning.flags

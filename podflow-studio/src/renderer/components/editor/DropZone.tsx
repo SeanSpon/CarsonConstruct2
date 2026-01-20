@@ -1,8 +1,14 @@
-import { memo, useState, useCallback, useEffect } from 'react';
-import { FileVideo, Plus, FolderOpen, Trash2, Film, ChevronRight, Sparkles } from 'lucide-react';
+import { memo, useState, useCallback } from 'react';
+import { 
+  Trash2, 
+  Film, 
+  ChevronRight,
+  Upload,
+  Sparkles,
+  Zap,
+} from 'lucide-react';
 import { LoadingState } from '../ui';
 import { formatDuration } from '../../types';
-import NewProjectModal from './NewProjectModal';
 
 interface RecentProject {
   filePath: string;
@@ -19,9 +25,6 @@ interface DropZoneProps {
   onOpenRecent: (filePath: string) => void;
   onRemoveRecent: (filePath: string) => void;
   onFileDrop: (filePath: string) => void;
-  onProjectCreated?: (projectPath: string, projectName: string) => void;
-  autoShowNewProjectModal?: boolean;
-  onModalClosed?: () => void;
 }
 
 function DropZone({
@@ -32,37 +35,8 @@ function DropZone({
   onOpenRecent,
   onRemoveRecent,
   onFileDrop,
-  onProjectCreated,
-  autoShowNewProjectModal,
-  onModalClosed,
 }: DropZoneProps) {
   const [isDragOver, setIsDragOver] = useState(false);
-  const [showNewProjectModal, setShowNewProjectModal] = useState(false);
-
-  // Auto-show modal when triggered from parent (e.g., from menu bar "New Project")
-  useEffect(() => {
-    if (autoShowNewProjectModal) {
-      setShowNewProjectModal(true);
-    }
-  }, [autoShowNewProjectModal]);
-
-  const handleCreateProject = async (name: string, location: string) => {
-    const result = await window.api.createProject({ name, location });
-    
-    if (!result.success) {
-      throw new Error(result.error || 'Failed to create project');
-    }
-
-    setShowNewProjectModal(false);
-    
-    // Notify parent that project was created
-    if (onProjectCreated && result.projectPath && result.projectName) {
-      onProjectCreated(result.projectPath, result.projectName);
-    }
-    
-    // After creating project, prompt user to select a file
-    onSelectFile();
-  };
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -84,14 +58,12 @@ function DropZone({
     const files = e.dataTransfer.files;
     if (files.length > 0) {
       const file = files[0];
-      // Check if it's a video file
       if (file.type.startsWith('video/') || /\.(mp4|mov|webm|mkv)$/i.test(file.name)) {
         onFileDrop(file.path);
       }
     }
   }, [onFileDrop]);
 
-  // Format relative date for recent projects
   const formatRelativeDate = (timestamp: number) => {
     const date = new Date(timestamp);
     const now = new Date();
@@ -159,87 +131,71 @@ function DropZone({
         </div>
       </div>
 
-      {/* Right Panel - Main Content */}
-      <div className={`flex-1 flex flex-col items-center justify-center p-12 transition-all duration-200 ${isDragOver ? 'bg-sz-accent/5' : ''}`}>
-        {/* Logo */}
-        <div className="mb-10 text-center">
-          <div className="flex items-center justify-center gap-0 mb-3">
-            <span className="text-2xl font-bold text-sz-text tracking-wide">SEE</span>
-            <span className="mx-2 px-2 py-0.5 bg-sz-accent rounded text-xs font-bold text-white tracking-wide">
-              STUDIO
-            </span>
-            <span className="text-2xl font-bold text-sz-text tracking-wide">ZEE</span>
+      {/* Right Panel - Main Import Area */}
+      <div className={`flex-1 flex flex-col items-center justify-center p-8 transition-all duration-200 ${isDragOver ? 'bg-sz-accent/5' : ''}`}>
+        <div className="max-w-md w-full text-center space-y-6">
+          {/* Header */}
+          <div className="space-y-2">
+            <div className="flex items-center justify-center gap-2">
+              <Sparkles className="w-8 h-8 text-sz-accent" />
+            </div>
+            <h1 className="text-2xl font-bold text-sz-text">Find Viral Clips</h1>
+            <p className="text-sz-text-muted">
+              Drop your podcast video to find the best moments
+            </p>
           </div>
-          <p className="text-sz-text-muted text-sm">AI-powered clip detection for content creators</p>
-        </div>
 
-        {/* Action Buttons */}
-        <div className="w-full max-w-sm space-y-3">
-          {/* New Project Button */}
-          <button
-            onClick={() => setShowNewProjectModal(true)}
-            disabled={isLoading}
-            className={`w-full flex items-center gap-4 p-4 rounded-sz-lg transition-all group ${
-              isDragOver 
-                ? 'bg-sz-accent scale-[1.02] ring-2 ring-sz-accent ring-offset-2 ring-offset-sz-bg' 
-                : 'bg-sz-accent hover:bg-sz-accent-hover'
-            }`}
-          >
-            <div className="w-11 h-11 rounded-sz bg-white/10 flex items-center justify-center">
-              {isLoading ? (
-                <LoadingState size="sm" />
-              ) : (
-                <Sparkles className="w-5 h-5 text-white" />
-              )}
-            </div>
-            <div className="text-left">
-              <p className="font-semibold text-white">
-                {isDragOver ? 'Drop to Import' : 'New Project'}
-              </p>
-              <p className="text-xs text-white/60">Create a project folder and import videos</p>
-            </div>
-          </button>
-
-          {/* Open File Button */}
+          {/* Drop Zone */}
           <button
             onClick={onSelectFile}
             disabled={isLoading}
-            className="w-full flex items-center gap-4 p-4 bg-sz-bg-secondary hover:bg-sz-bg-tertiary border border-sz-border rounded-sz-lg transition-colors group"
+            className={`w-full aspect-[16/9] flex flex-col items-center justify-center gap-4 rounded-xl border-2 border-dashed transition-all ${
+              isDragOver 
+                ? 'border-sz-accent bg-sz-accent/10' 
+                : 'border-sz-border hover:border-sz-accent/50 hover:bg-sz-bg-tertiary'
+            } ${isLoading ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
           >
-            <div className="w-11 h-11 rounded-sz bg-sz-bg-tertiary flex items-center justify-center group-hover:bg-sz-bg-hover">
-              <FolderOpen className="w-5 h-5 text-sz-text-muted group-hover:text-sz-text-secondary" />
-            </div>
-            <div className="text-left">
-              <p className="font-semibold text-sz-text">Open File</p>
-              <p className="text-xs text-sz-text-muted">MP4, MOV, WEBM, MKV</p>
-            </div>
+            {isLoading ? (
+              <LoadingState size="lg" message="Loading video..." />
+            ) : (
+              <>
+                <div className={`w-16 h-16 rounded-full flex items-center justify-center transition-colors ${
+                  isDragOver ? 'bg-sz-accent/20' : 'bg-sz-bg-tertiary'
+                }`}>
+                  <Upload className={`w-8 h-8 ${isDragOver ? 'text-sz-accent' : 'text-sz-text-muted'}`} />
+                </div>
+                <div>
+                  <p className="text-sz-text font-medium">
+                    {isDragOver ? 'Release to import' : 'Drop video here or click to browse'}
+                  </p>
+                  <p className="text-xs text-sz-text-muted mt-1">
+                    MP4, MOV, MKV, WebM supported
+                  </p>
+                </div>
+              </>
+            )}
           </button>
 
-          {/* Error */}
+          {/* Features */}
+          <div className="flex items-center justify-center gap-6 text-xs text-sz-text-muted">
+            <div className="flex items-center gap-1.5">
+              <Zap className="w-3.5 h-3.5 text-sz-accent" />
+              <span>AI-Powered Detection</span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <Sparkles className="w-3.5 h-3.5 text-purple-400" />
+              <span>Score & Rank Clips</span>
+            </div>
+          </div>
+
+          {/* Error Display */}
           {error && (
-            <div className="bg-sz-danger-muted border border-sz-danger/30 rounded-sz p-3">
+            <div className="bg-sz-danger/10 border border-sz-danger/30 rounded-lg p-3">
               <p className="text-sm text-sz-danger">{error}</p>
             </div>
           )}
         </div>
-
-        {/* Tip */}
-        <p className="mt-10 text-xs text-sz-text-muted/60 text-center max-w-xs">
-          {isDragOver 
-            ? 'Release to import your video file' 
-            : 'All processing happens locally on your machine. Nothing is uploaded.'}
-        </p>
       </div>
-
-      {/* New Project Modal */}
-      <NewProjectModal
-        isOpen={showNewProjectModal}
-        onClose={() => {
-          setShowNewProjectModal(false);
-          onModalClosed?.();
-        }}
-        onCreateProject={handleCreateProject}
-      />
     </div>
   );
 }

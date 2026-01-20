@@ -51,6 +51,28 @@ interface DetectionSettings {
   useAiEnhancement: boolean;
   openaiApiKey?: string;
   debug?: boolean;
+  mvpMode?: boolean;
+  mvpDetectionSettings?: {
+    hopS?: number;
+    rmsWindowS?: number;
+    baselineWindowS?: number;
+    silenceThresholdDb?: number;
+    spikeThresholdDb?: number;
+    spikeSustainS?: number;
+    silenceRunS?: number;
+    contrastWindowS?: number;
+    laughterZRms?: number;
+    laughterGapS?: number;
+    laughterMinS?: number;
+    clipLengths?: number[];
+    minClipS?: number;
+    maxClipS?: number;
+    snapWindowS?: number;
+    startPaddingS?: number;
+    endPaddingS?: number;
+    iouThreshold?: number;
+    topN?: number;
+  };
 }
 
 const estimateAiCost = (durationSeconds = 0, targetCount = 10) => {
@@ -128,6 +150,7 @@ const startJob = async (data: {
   const pythonScript = path.join(pythonDir, 'detector.py');
 
   // Prepare settings JSON
+  const mvpSettings = settings.mvpDetectionSettings || {};
   const settingsJson = JSON.stringify({
     target_count: settings.targetCount,
     min_duration: settings.minDuration,
@@ -138,9 +161,31 @@ const startJob = async (data: {
     openai_api_key: settings.openaiApiKey || process.env.OPENAI_API_KEY || '',
     debug: settings.debug || false,
     cache_dir: cacheDir,
+    job_dir: cacheDir, // MVP mode uses job_dir for outputs
     ai_cache_dir: aiCacheDir,
     input_hash: inputHash,
     ffmpeg_path: ffmpegPath,
+    // MVP Mode settings
+    mvp_mode: settings.mvpMode || false,
+    hop_s: mvpSettings.hopS,
+    rms_window_s: mvpSettings.rmsWindowS,
+    baseline_window_s: mvpSettings.baselineWindowS,
+    silence_threshold_db: mvpSettings.silenceThresholdDb,
+    spike_threshold_db: mvpSettings.spikeThresholdDb,
+    spike_sustain_s: mvpSettings.spikeSustainS,
+    silence_run_s: mvpSettings.silenceRunS,
+    contrast_window_s: mvpSettings.contrastWindowS,
+    laughter_z_rms: mvpSettings.laughterZRms,
+    laughter_gap_s: mvpSettings.laughterGapS,
+    laughter_min_s: mvpSettings.laughterMinS,
+    clip_lengths: mvpSettings.clipLengths,
+    min_clip_s: mvpSettings.minClipS,
+    max_clip_s: mvpSettings.maxClipS,
+    snap_window_s: mvpSettings.snapWindowS,
+    start_padding_s: mvpSettings.startPaddingS,
+    end_padding_s: mvpSettings.endPaddingS,
+    iou_threshold: mvpSettings.iouThreshold,
+    top_n: mvpSettings.topN || settings.targetCount,
   });
 
   console.log('[Detection] Spawning Python detector:', pythonScript);

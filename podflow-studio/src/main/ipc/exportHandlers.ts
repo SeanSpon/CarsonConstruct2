@@ -930,3 +930,754 @@ ipcMain.handle('cleanup-preview', async (_event, previewFile: string) => {
     return { success: false, error: String(err) };
   }
 });
+
+// ============================================
+// MVP Vertical Export (9:16) with Captions
+// ============================================
+
+interface MVPExportSettings {
+  format: 'mp4' | 'mov';
+  vertical: boolean;
+  targetWidth: number;
+  targetHeight: number;
+  burnCaptions: boolean;
+  captionStyle?: {
+    fontName: string;
+    fontSize: number;
+    outline: number;
+    shadow: number;
+  };
+}
+
+interface MVPClip {
+  clip_id: string;
+  start: number;
+  end: number;
+  duration: number;
+}
+
+/**
+ * Get FFmpeg filter for resolution-agnostic 9:16 center crop.
+ * 
+ * Method: crop at native height to 9:16, then scale to target.
+ * This handles any input resolution correctly.
+ */
+function getVerticalCropFilter(
+  inputWidth: number,
+  inputHeight: number,
+  targetWidth: number = 1080,
+  targetHeight: number = 1920
+): string {
+  // Calculate crop width at native height
+  // crop_w = in_h * 9/16
+  const cropWidth = Math.round(inputHeight * 9 / 16);
+  const cropX = Math.round((inputWidth - cropWidth) / 2);
+  
+  // Ensure crop doesn't exceed input width
+  const safeCropWidth = Math.min(cropWidth, inputWidth);
+  const safeCropX = Math.max(0, Math.round((inputWidth - safeCropWidth) / 2));
+  
+  // Filter chain:
+  // 1. Crop to 9:16 at native resolution (centered)
+  // 2. Scale to target 1080x1920
+  return `crop=${safeCropWidth}:${inputHeight}:${safeCropX}:0,scale=${targetWidth}:${targetHeight}`;
+}
+
+/**
+ * Generate ASS subtitle file for a clip.
+ */
+async function generateASSFile(
+  transcript: { segments?: Array<{ start: number; end: number; text: string }> },
+  clipStart: number,
+  clipEnd: number,
+  outputPath: string,
+  settings?: { maxChars?: number; maxLines?: number; fontSize?: number }
+): Promise<void> {
+  const maxChars = settings?.maxChars || 32;
+  const maxLines = settings?.maxLines || 2;
+  const fontSize = settings?.fontSize || 72;
+  
+  // ASS header for vertical video (1080x1920)
+  const header = `[Script Info]
+Title: Clip Captions
+ScriptType: v4.00+
+PlayResX: 1080
+PlayResY: 1920
+WrapStyle: 0
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: Default,Arial Black,${fontSize},&H00FFFFFF,&H000000FF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,4,2,2,40,40,120,1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+`;
+  
+  const events: string[] = [];
+  const segments = transcript.segments || [];
+  
+  for (const seg of segments) {
+    const segStart = seg.start;
+    const segEnd = seg.end;
+    
+    // Skip segments outside clip window
+    if (segEnd < clipStart || segStart > clipEnd) {
+      continue;
+    }
+    
+    // Adjust times relative to clip start
+    const relStart = Math.max(0, segStart - clipStart);
+    const relEnd = Math.min(clipEnd - clipStart, segEnd - clipStart);
+    
+    // Skip if too short
+    if (relEnd - relStart < 0.1) {
+      continue;
+    }
+    
+    // Get and wrap text
+    const text = seg.text.trim();
+    if (!text) continue;
+    
+    const wrapped = wrapText(text, maxChars, maxLines);
+    
+    // Format times as H:MM:SS.cc
+    const startStr = formatASSTime(relStart);
+    const endStr = formatASSTime(relEnd);
+    
+    // ASS uses \N for line breaks
+    const assText = wrapped.replace(/\n/g, '\\N');
+    
+    events.push(`Dialogue: 0,${startStr},${endStr},Default,,0,0,0,,${assText}`);
+  }
+  
+  // Write ASS file
+  const content = header + events.join('\n') + (events.length > 0 ? '\n' : '');
+  fs.writeFileSync(outputPath, content, 'utf-8');
+}
+
+function wrapText(text: string, maxChars: number, maxLines: number): string {
+  const words = text.split(/\s+/);
+  const lines: string[] = [];
+  let currentLine: string[] = [];
+  let currentLen = 0;
+  
+  for (const word of words) {
+    const wordLen = word.length;
+    const spaceNeeded = currentLine.length > 0 ? 1 : 0;
+    
+    if (currentLen + wordLen + spaceNeeded > maxChars) {
+      if (currentLine.length > 0) {
+        lines.push(currentLine.join(' '));
+        if (lines.length >= maxLines) break;
+      }
+      currentLine = [word];
+      currentLen = wordLen;
+    } else {
+      currentLine.push(word);
+      currentLen += wordLen + spaceNeeded;
+    }
+  }
+  
+  if (currentLine.length > 0 && lines.length < maxLines) {
+    lines.push(currentLine.join(' '));
+  }
+  
+  return lines.join('\n');
+}
+
+function formatASSTime(seconds: number): string {
+  if (seconds < 0) seconds = 0;
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  const s = Math.floor(seconds % 60);
+  const cs = Math.floor((seconds % 1) * 100);
+  return `${h}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}.${cs.toString().padStart(2, '0')}`;
+}
+
+/**
+ * Export a single clip with vertical crop and optional caption burning.
+ */
+function exportVerticalClip(
+  sourceFile: string,
+  outputFile: string,
+  clipStart: number,
+  clipEnd: number,
+  inputWidth: number,
+  inputHeight: number,
+  assFile: string | null,
+  settings: MVPExportSettings
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const duration = clipEnd - clipStart;
+    const cropFilter = getVerticalCropFilter(
+      inputWidth,
+      inputHeight,
+      settings.targetWidth,
+      settings.targetHeight
+    );
+    
+    // Build filter chain
+    let videoFilter = cropFilter;
+    
+    // Add caption burning if ASS file provided
+    if (assFile && settings.burnCaptions) {
+      // Escape backslashes for FFmpeg on Windows
+      const safeAssPath = assFile.replace(/\\/g, '/').replace(/:/g, '\\:');
+      videoFilter += `,ass='${safeAssPath}'`;
+    }
+    
+    const args = [
+      '-y',
+      '-ss', clipStart.toString(),
+      '-i', sourceFile,
+      '-t', duration.toString(),
+      '-vf', videoFilter,
+      '-c:v', 'libx264',
+      '-preset', 'fast',
+      '-crf', '23',
+      '-c:a', 'aac',
+      '-b:a', '192k',
+      outputFile
+    ];
+    
+    console.log('[MVP Export] Running FFmpeg with filter:', videoFilter);
+    
+    const ffmpeg = spawn(ffmpegPath, args, { windowsHide: true });
+    let errorOutput = '';
+    
+    ffmpeg.stderr.on('data', (data) => {
+      errorOutput += data.toString();
+    });
+    
+    ffmpeg.on('close', (code) => {
+      if (code === 0) {
+        resolve();
+      } else {
+        console.error('[MVP Export] FFmpeg error:', errorOutput);
+        reject(new Error(errorOutput || `FFmpeg exited with code ${code}`));
+      }
+    });
+    
+    ffmpeg.on('error', reject);
+  });
+}
+
+// Export MVP vertical clips with captions
+ipcMain.handle('export-mvp-clips', async (_event, data: {
+  sourceFile: string;
+  clips: MVPClip[];
+  transcript: { segments?: Array<{ start: number; end: number; text: string }> };
+  outputDir: string;
+  inputWidth: number;
+  inputHeight: number;
+  settings: MVPExportSettings;
+}) => {
+  const { sourceFile, clips, transcript, outputDir, inputWidth, inputHeight, settings } = data;
+  const win = getMainWindow();
+  
+  if (!win) {
+    return { success: false, error: 'Window not found' };
+  }
+  
+  // Create output directories
+  const clipsDir = path.join(outputDir, 'clips');
+  fs.mkdirSync(clipsDir, { recursive: true });
+  
+  const errors: string[] = [];
+  const results: Array<{ clipId: string; path: string; captionedPath?: string }> = [];
+  
+  for (let i = 0; i < clips.length; i++) {
+    const clip = clips[i];
+    const clipId = clip.clip_id || `clip_${(i + 1).toString().padStart(3, '0')}`;
+    
+    win.webContents.send('export-progress', {
+      current: i + 1,
+      total: clips.length,
+      clipName: clipId,
+      type: 'mvp-clip',
+    });
+    
+    try {
+      // Export without captions first
+      const outputFile = path.join(clipsDir, `${clipId}.${settings.format}`);
+      
+      await exportVerticalClip(
+        sourceFile,
+        outputFile,
+        clip.start,
+        clip.end,
+        inputWidth,
+        inputHeight,
+        null,
+        { ...settings, burnCaptions: false }
+      );
+      
+      const result: { clipId: string; path: string; captionedPath?: string } = {
+        clipId,
+        path: outputFile,
+      };
+      
+      // Export with captions if enabled
+      if (settings.burnCaptions && transcript.segments && transcript.segments.length > 0) {
+        const assFile = path.join(clipsDir, `${clipId}.ass`);
+        const captionedFile = path.join(clipsDir, `${clipId}_captioned.${settings.format}`);
+        
+        // Generate ASS file
+        await generateASSFile(
+          transcript,
+          clip.start,
+          clip.end,
+          assFile,
+          {
+            maxChars: 32,
+            maxLines: 2,
+            fontSize: settings.captionStyle?.fontSize || 72,
+          }
+        );
+        
+        // Export with captions burned in
+        await exportVerticalClip(
+          sourceFile,
+          captionedFile,
+          clip.start,
+          clip.end,
+          inputWidth,
+          inputHeight,
+          assFile,
+          settings
+        );
+        
+        result.captionedPath = captionedFile;
+      }
+      
+      results.push(result);
+    } catch (err) {
+      errors.push(`Failed to export ${clipId}: ${err}`);
+      console.error(`[MVP Export] Error exporting ${clipId}:`, err);
+    }
+  }
+  
+  // Send completion
+  win.webContents.send('export-complete', {
+    success: errors.length === 0,
+    outputDir: clipsDir,
+    clipCount: results.length,
+    errors,
+  });
+  
+  return {
+    success: errors.length === 0,
+    outputDir: clipsDir,
+    clips: results,
+    errors,
+  };
+});
+
+// ============================================
+// Vertical Reel Export API (matches preload.ts)
+// ============================================
+
+interface VerticalReelExportData {
+  sourceFile: string;
+  outputDir: string;
+  clipId: string;
+  startTime: number;
+  endTime: number;
+  title?: string;
+  transcript?: {
+    words?: Array<{ word: string; start: number; end: number }>;
+    segments?: Array<{ text: string; start: number; end: number }>;
+  };
+  captionSettings: {
+    enabled: boolean;
+    style: 'viral' | 'minimal' | 'bold';
+    fontSize: number;
+    position: 'bottom' | 'center';
+  };
+  inputWidth: number;
+  inputHeight: number;
+}
+
+interface VerticalReelBatchData {
+  sourceFile: string;
+  outputDir: string;
+  clips: Array<{
+    id: string;
+    startTime: number;
+    endTime: number;
+    trimStartOffset: number;
+    trimEndOffset: number;
+    title?: string;
+  }>;
+  transcript?: {
+    words?: Array<{ word: string; start: number; end: number }>;
+    segments?: Array<{ text: string; start: number; end: number }>;
+  };
+  captionSettings: {
+    enabled: boolean;
+    style: 'viral' | 'minimal' | 'bold';
+    fontSize: number;
+    position: 'bottom' | 'center';
+  };
+  inputWidth: number;
+  inputHeight: number;
+}
+
+// Get style colors for ASS captions
+function getStyleColors(style: 'viral' | 'minimal' | 'bold'): {
+  primary: string;
+  outline: number;
+  shadow: number;
+} {
+  switch (style) {
+    case 'viral':
+      return { primary: '&H00FFFFFF', outline: 4, shadow: 2 };
+    case 'minimal':
+      return { primary: '&H00FFFFFF', outline: 2, shadow: 1 };
+    case 'bold':
+      return { primary: '&H00FFFFFF', outline: 5, shadow: 3 };
+    default:
+      return { primary: '&H00FFFFFF', outline: 4, shadow: 2 };
+  }
+}
+
+// Generate ASS file with style settings
+async function generateStyledASSFile(
+  transcript: VerticalReelExportData['transcript'],
+  clipStart: number,
+  clipEnd: number,
+  outputPath: string,
+  captionSettings: VerticalReelExportData['captionSettings']
+): Promise<void> {
+  const maxChars = 32;
+  const maxLines = 2;
+  const fontSize = captionSettings.fontSize || 56;
+  const styleColors = getStyleColors(captionSettings.style);
+  const marginV = captionSettings.position === 'center' ? 0 : 150;
+  const alignment = captionSettings.position === 'center' ? 5 : 2;
+  
+  const header = `[Script Info]
+Title: Vertical Reel Captions
+ScriptType: v4.00+
+PlayResX: 1080
+PlayResY: 1920
+WrapStyle: 0
+ScaledBorderAndShadow: yes
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: Default,Arial Black,${fontSize},${styleColors.primary},&H000000FF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,${styleColors.outline},${styleColors.shadow},${alignment},40,40,${marginV},1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+`;
+
+  const events: string[] = [];
+  const segments = transcript?.segments || [];
+  
+  for (const seg of segments) {
+    const segStart = seg.start;
+    const segEnd = seg.end;
+    
+    // Skip segments outside clip window
+    if (segEnd < clipStart || segStart > clipEnd) {
+      continue;
+    }
+    
+    // Adjust times relative to clip start
+    const relStart = Math.max(0, segStart - clipStart);
+    const relEnd = Math.min(clipEnd - clipStart, segEnd - clipStart);
+    
+    if (relEnd - relStart < 0.1) continue;
+    
+    const text = seg.text.trim();
+    if (!text) continue;
+    
+    const wrapped = wrapText(text, maxChars, maxLines);
+    const startStr = formatASSTime(relStart);
+    const endStr = formatASSTime(relEnd);
+    const assText = wrapped.replace(/\n/g, '\\N');
+    
+    events.push(`Dialogue: 0,${startStr},${endStr},Default,,0,0,0,,${assText}`);
+  }
+  
+  const content = header + events.join('\n') + (events.length > 0 ? '\n' : '');
+  fs.writeFileSync(outputPath, content, 'utf-8');
+}
+
+// Export single vertical reel
+ipcMain.handle('export-vertical-reel', async (_event, data: VerticalReelExportData) => {
+  const {
+    sourceFile,
+    outputDir,
+    clipId,
+    startTime,
+    endTime,
+    title,
+    transcript,
+    captionSettings,
+    inputWidth,
+    inputHeight,
+  } = data;
+  
+  const win = getMainWindow();
+  
+  try {
+    // Create output directory
+    fs.mkdirSync(outputDir, { recursive: true });
+    
+    // Generate filename
+    const safeName = (title || clipId || 'reel')
+      .replace(/[^a-zA-Z0-9_-]/g, '_')
+      .substring(0, 50);
+    const outputFile = path.join(outputDir, `${safeName}_vertical.mp4`);
+    
+    // Generate ASS file if captions enabled
+    let assFile: string | null = null;
+    if (captionSettings.enabled && transcript?.segments && transcript.segments.length > 0) {
+      assFile = path.join(outputDir, `${safeName}.ass`);
+      await generateStyledASSFile(transcript, startTime, endTime, assFile, captionSettings);
+    }
+    
+    // Build filter chain
+    const cropFilter = getVerticalCropFilter(inputWidth, inputHeight, 1080, 1920);
+    let videoFilter = cropFilter;
+    
+    if (assFile) {
+      const safeAssPath = assFile.replace(/\\/g, '/').replace(/:/g, '\\:');
+      videoFilter += `,ass='${safeAssPath}'`;
+    }
+    
+    const duration = endTime - startTime;
+    
+    // Send progress
+    if (win) {
+      win.webContents.send('vertical-reel-progress', {
+        clipId,
+        percent: 10,
+        message: 'Starting export...',
+      });
+    }
+    
+    await new Promise<void>((resolve, reject) => {
+      const args = [
+        '-y',
+        '-ss', startTime.toString(),
+        '-i', sourceFile,
+        '-t', duration.toString(),
+        '-vf', videoFilter,
+        '-c:v', 'libx264',
+        '-preset', 'fast',
+        '-crf', '23',
+        '-c:a', 'aac',
+        '-b:a', '192k',
+        outputFile
+      ];
+      
+      const ffmpeg = spawn(ffmpegPath, args, { windowsHide: true });
+      let errorOutput = '';
+      
+      ffmpeg.stderr.on('data', (chunk) => {
+        const str = chunk.toString();
+        errorOutput += str;
+        
+        // Parse progress
+        const timeMatch = str.match(/time=(\d+):(\d+):(\d+)/);
+        if (timeMatch && win) {
+          const hours = parseInt(timeMatch[1]);
+          const mins = parseInt(timeMatch[2]);
+          const secs = parseInt(timeMatch[3]);
+          const currentTime = hours * 3600 + mins * 60 + secs;
+          const percent = Math.min(95, Math.round((currentTime / duration) * 100));
+          
+          win.webContents.send('vertical-reel-progress', {
+            clipId,
+            percent,
+            message: `Rendering ${percent}%...`,
+          });
+        }
+      });
+      
+      ffmpeg.on('close', (code) => {
+        if (code === 0) {
+          if (win) {
+            win.webContents.send('vertical-reel-progress', {
+              clipId,
+              percent: 100,
+              message: 'Complete',
+            });
+          }
+          resolve();
+        } else {
+          reject(new Error(errorOutput || `FFmpeg exited with code ${code}`));
+        }
+      });
+      
+      ffmpeg.on('error', reject);
+    });
+    
+    return { success: true, outputFile };
+  } catch (err) {
+    console.error('[Vertical Reel Export] Error:', err);
+    return { success: false, error: String(err) };
+  }
+});
+
+// Export batch of vertical reels
+ipcMain.handle('export-vertical-reels-batch', async (_event, data: VerticalReelBatchData) => {
+  const {
+    sourceFile,
+    outputDir,
+    clips,
+    transcript,
+    captionSettings,
+    inputWidth,
+    inputHeight,
+  } = data;
+  
+  const win = getMainWindow();
+  
+  // Create output directory
+  fs.mkdirSync(outputDir, { recursive: true });
+  
+  const results: Array<{
+    clipId: string;
+    success: boolean;
+    outputFile?: string;
+    error?: string;
+  }> = [];
+  
+  let successCount = 0;
+  
+  for (let i = 0; i < clips.length; i++) {
+    const clip = clips[i];
+    const actualStart = clip.startTime + (clip.trimStartOffset || 0);
+    const actualEnd = clip.endTime + (clip.trimEndOffset || 0);
+    
+    // Send overall progress
+    if (win) {
+      win.webContents.send('export-progress', {
+        current: i + 1,
+        total: clips.length,
+        clipName: clip.title || clip.id,
+        type: 'vertical-reel',
+      });
+    }
+    
+    try {
+      const result = await (ipcMain as any)._events['export-vertical-reel'][0](
+        null,
+        {
+          sourceFile,
+          outputDir,
+          clipId: clip.id,
+          startTime: actualStart,
+          endTime: actualEnd,
+          title: clip.title,
+          transcript,
+          captionSettings,
+          inputWidth,
+          inputHeight,
+        }
+      );
+      
+      if (result.success) {
+        successCount++;
+        results.push({
+          clipId: clip.id,
+          success: true,
+          outputFile: result.outputFile,
+        });
+      } else {
+        results.push({
+          clipId: clip.id,
+          success: false,
+          error: result.error,
+        });
+      }
+    } catch (err) {
+      results.push({
+        clipId: clip.id,
+        success: false,
+        error: String(err),
+      });
+    }
+  }
+  
+  // Send completion
+  if (win) {
+    win.webContents.send('export-complete', {
+      success: successCount === clips.length,
+      outputDir,
+      clipCount: successCount,
+      errors: results.filter(r => !r.success).map(r => r.error || 'Unknown error'),
+    });
+  }
+  
+  return {
+    success: successCount === clips.length,
+    total: clips.length,
+    successCount,
+    results,
+    outputDir,
+  };
+});
+
+// Get video dimensions for crop calculation
+ipcMain.handle('get-video-dimensions', async (_event, filePath: string) => {
+  return new Promise((resolve) => {
+    // Use ffprobe to get dimensions
+    let ffprobePath: string;
+    try {
+      ffprobePath = require('ffprobe-static').path as string;
+    } catch {
+      ffprobePath = 'ffprobe';
+    }
+    
+    const args = [
+      '-v', 'error',
+      '-select_streams', 'v:0',
+      '-show_entries', 'stream=width,height',
+      '-of', 'json',
+      filePath
+    ];
+    
+    const ffprobe = spawn(ffprobePath, args, { windowsHide: true });
+    let stdout = '';
+    let stderr = '';
+    
+    ffprobe.stdout.on('data', (data) => {
+      stdout += data.toString();
+    });
+    
+    ffprobe.stderr.on('data', (data) => {
+      stderr += data.toString();
+    });
+    
+    ffprobe.on('close', (code) => {
+      if (code === 0) {
+        try {
+          const result = JSON.parse(stdout);
+          const stream = result.streams?.[0];
+          if (stream) {
+            resolve({
+              success: true,
+              width: stream.width,
+              height: stream.height,
+            });
+          } else {
+            resolve({ success: false, error: 'No video stream found' });
+          }
+        } catch (e) {
+          resolve({ success: false, error: `Failed to parse ffprobe output: ${e}` });
+        }
+      } else {
+        resolve({ success: false, error: stderr || `ffprobe exited with code ${code}` });
+      }
+    });
+    
+    ffprobe.on('error', (err) => {
+      resolve({ success: false, error: String(err) });
+    });
+  });
+});

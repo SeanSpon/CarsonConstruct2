@@ -1,41 +1,56 @@
-import { memo, useMemo, useState, useEffect, useCallback } from 'react';
-import { X, Download, Clock, Film, Check, FileVideo, Zap, CheckCircle2, Cloud, Loader2 } from 'lucide-react';
-import type { Clip, ExportSettings } from '../../types';
-import { formatDuration } from '../../types';
-import { Button } from '../ui';
-import CloudExport from './CloudExport';
+import { memo, useMemo, useState } from 'react';
+import { 
+  X, 
+  Download, 
+  Clock, 
+  Film, 
+  Check, 
+  FileVideo, 
+  Smartphone, 
+  MessageSquare,
+  Sparkles
+} from 'lucide-react';
+import type { Clip, ReelPlatform, ReelCaptionStyle } from '../../types';
+import { formatDuration, REEL_PLATFORM_PRESETS } from '../../types';
+import { Button, Toggle } from '../ui';
 
 interface ExportPreviewModalProps {
   clips: Clip[];
-  exportSettings: ExportSettings;
-  onExport: (selectedClipIds: string[]) => void;
+  onExport: (selectedClipIds: string[], options: ExportOptions) => void;
   onClose: () => void;
+  hasTranscript: boolean;
 }
 
-function ExportPreviewModal({ clips, exportSettings, onExport, onClose }: ExportPreviewModalProps) {
-  // Track which clips are selected for export (default: all accepted)
+interface ExportOptions {
+  vertical: boolean;
+  platform: ReelPlatform;
+  captionsEnabled: boolean;
+  captionStyle: ReelCaptionStyle;
+}
+
+const PLATFORMS: { id: ReelPlatform; name: string; icon: string }[] = [
+  { id: 'tiktok', name: 'TikTok', icon: '📱' },
+  { id: 'instagram', name: 'Reels', icon: '📷' },
+  { id: 'youtube-shorts', name: 'Shorts', icon: '▶️' },
+];
+
+const CAPTION_STYLES: { id: ReelCaptionStyle; name: string; preview: string }[] = [
+  { id: 'viral', name: 'Viral', preview: 'Green highlight' },
+  { id: 'minimal', name: 'Minimal', preview: 'Clean white' },
+  { id: 'bold', name: 'Bold', preview: 'Heavy outline' },
+];
+
+function ExportPreviewModal({ clips, onExport, onClose, hasTranscript }: ExportPreviewModalProps) {
   const acceptedClips = useMemo(() => clips.filter(c => c.status === 'accepted'), [clips]);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(
     () => new Set(acceptedClips.map(c => c.id))
   );
-  
-  // Cloud export state
-  const [isCloudAuthenticated, setIsCloudAuthenticated] = useState(false);
-  const [showCloudExport, setShowCloudExport] = useState(false);
-  const [exportedFiles, setExportedFiles] = useState<Array<{ path: string; name: string }>>([]);
-  
-  // Check cloud auth on mount
-  useEffect(() => {
-    const checkAuth = async () => {
-      try {
-        const result = await window.api.checkCloudAuth();
-        setIsCloudAuthenticated(result.isAuthenticated);
-      } catch (err) {
-        console.error('Failed to check cloud auth:', err);
-      }
-    };
-    checkAuth();
-  }, []);
+
+  // Export options
+  const [exportVertical, setExportVertical] = useState(true);
+  const [platform, setPlatform] = useState<ReelPlatform>('tiktok');
+  const [captionsEnabled, setCaptionsEnabled] = useState(hasTranscript);
+  const [captionStyle, setCaptionStyle] = useState<ReelCaptionStyle>('viral');
 
   const toggleClip = (clipId: string) => {
     setSelectedIds(prev => {
@@ -57,31 +72,44 @@ function ExportPreviewModal({ clips, exportSettings, onExport, onClose }: Export
     setSelectedIds(new Set());
   };
 
-  // Calculate totals for selected clips
-  const { selectedClips, totalDuration, estimatedSize } = useMemo(() => {
+  const { selectedClips, totalDuration, estimatedSize, maxDurationWarning } = useMemo(() => {
     const selected = acceptedClips.filter(c => selectedIds.has(c.id));
     const duration = selected.reduce((sum, c) => {
       const actualDuration = (c.endTime + c.trimEndOffset) - (c.startTime + c.trimStartOffset);
       return sum + actualDuration;
     }, 0);
-    // Rough estimate: ~10MB per minute for 1080p
     const size = (duration / 60) * 10;
+    
+    // Check for clips exceeding platform max duration
+    const platformMax = REEL_PLATFORM_PRESETS[platform].maxDuration;
+    const tooLong = selected.filter(c => {
+      const dur = (c.endTime + c.trimEndOffset) - (c.startTime + c.trimStartOffset);
+      return dur > platformMax;
+    });
+
     return {
       selectedClips: selected,
       totalDuration: duration,
       estimatedSize: size,
+      maxDurationWarning: tooLong.length > 0 ? 
+        `${tooLong.length} clip(s) exceed ${platform} max of ${platformMax}s` : null,
     };
-  }, [acceptedClips, selectedIds]);
+  }, [acceptedClips, selectedIds, platform]);
 
   const handleExport = () => {
     if (selectedClips.length > 0) {
-      onExport(Array.from(selectedIds));
+      onExport(Array.from(selectedIds), {
+        vertical: exportVertical,
+        platform,
+        captionsEnabled: captionsEnabled && hasTranscript,
+        captionStyle,
+      });
     }
   };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm">
-      <div className="relative w-full max-w-2xl mx-4 max-h-[85vh] flex flex-col bg-sz-bg rounded-lg overflow-hidden shadow-2xl border border-sz-border">
+      <div className="relative w-full max-w-2xl mx-4 max-h-[90vh] flex flex-col bg-sz-bg rounded-lg overflow-hidden shadow-2xl border border-sz-border">
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-4 border-b border-sz-border">
           <div className="flex items-center gap-3">
@@ -89,8 +117,8 @@ function ExportPreviewModal({ clips, exportSettings, onExport, onClose }: Export
               <Download className="w-5 h-5 text-sz-accent" />
             </div>
             <div>
-              <h2 className="text-base font-semibold text-sz-text">Export Preview</h2>
-              <p className="text-xs text-sz-text-muted">Review clips before exporting</p>
+              <h2 className="text-base font-semibold text-sz-text">Export Vertical Reels</h2>
+              <p className="text-xs text-sz-text-muted">9:16 format for social platforms</p>
             </div>
           </div>
           <button
@@ -101,8 +129,75 @@ function ExportPreviewModal({ clips, exportSettings, onExport, onClose }: Export
           </button>
         </div>
 
+        {/* Export Options */}
+        <div className="px-5 py-4 bg-sz-bg-secondary border-b border-sz-border space-y-4">
+          {/* Platform Selection */}
+          <div className="space-y-2">
+            <label className="flex items-center gap-2 text-sm font-medium text-sz-text">
+              <Smartphone className="w-4 h-4 text-violet-400" />
+              Platform
+            </label>
+            <div className="flex gap-2">
+              {PLATFORMS.map(p => (
+                <button
+                  key={p.id}
+                  onClick={() => setPlatform(p.id)}
+                  className={`flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-lg border transition-all ${
+                    platform === p.id
+                      ? 'bg-sz-accent/15 border-sz-accent text-sz-text'
+                      : 'bg-sz-bg border-sz-border text-sz-text-muted hover:bg-sz-bg-hover'
+                  }`}
+                >
+                  <span>{p.icon}</span>
+                  <span className="text-sm font-medium">{p.name}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Caption Options */}
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <label className="flex items-center gap-2 text-sm font-medium text-sz-text">
+                <MessageSquare className="w-4 h-4 text-emerald-400" />
+                Auto Captions
+              </label>
+              <Toggle 
+                checked={captionsEnabled && hasTranscript} 
+                onChange={setCaptionsEnabled}
+                disabled={!hasTranscript}
+              />
+            </div>
+            
+            {!hasTranscript && (
+              <p className="text-xs text-yellow-400 bg-yellow-400/10 px-3 py-2 rounded-lg">
+                No transcript available. Run detection with OpenAI API key to enable captions.
+              </p>
+            )}
+
+            {captionsEnabled && hasTranscript && (
+              <div className="flex gap-2">
+                {CAPTION_STYLES.map(s => (
+                  <button
+                    key={s.id}
+                    onClick={() => setCaptionStyle(s.id)}
+                    className={`flex-1 px-3 py-2 rounded-lg border transition-all ${
+                      captionStyle === s.id
+                        ? 'bg-emerald-500/15 border-emerald-500 text-sz-text'
+                        : 'bg-sz-bg border-sz-border text-sz-text-muted hover:bg-sz-bg-hover'
+                    }`}
+                  >
+                    <div className="text-sm font-medium">{s.name}</div>
+                    <div className="text-xs opacity-70">{s.preview}</div>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+
         {/* Summary Stats */}
-        <div className="px-5 py-3 bg-sz-bg-secondary border-b border-sz-border">
+        <div className="px-5 py-3 bg-sz-bg-tertiary border-b border-sz-border">
           <div className="flex items-center gap-6">
             <div className="flex items-center gap-2">
               <Film className="w-4 h-4 text-sz-accent" />
@@ -126,11 +221,13 @@ function ExportPreviewModal({ clips, exportSettings, onExport, onClose }: Export
               </span>
             </div>
           </div>
+          {maxDurationWarning && (
+            <p className="text-xs text-yellow-400 mt-2">{maxDurationWarning}</p>
+          )}
         </div>
 
         {/* Clip Selection */}
         <div className="flex-1 overflow-hidden flex flex-col min-h-0">
-          {/* Select All/None */}
           <div className="px-5 py-2 flex items-center justify-between border-b border-sz-border/50">
             <span className="text-xs font-medium text-sz-text-secondary uppercase tracking-wider">
               Clips to Export
@@ -152,12 +249,13 @@ function ExportPreviewModal({ clips, exportSettings, onExport, onClose }: Export
             </div>
           </div>
 
-          {/* Clip List */}
           <div className="flex-1 overflow-y-auto px-5 py-3">
             <div className="space-y-2">
               {acceptedClips.map((clip, index) => {
                 const isSelected = selectedIds.has(clip.id);
                 const clipDuration = (clip.endTime + clip.trimEndOffset) - (clip.startTime + clip.trimStartOffset);
+                const platformMax = REEL_PLATFORM_PRESETS[platform].maxDuration;
+                const exceedsMax = clipDuration > platformMax;
                 
                 return (
                   <button
@@ -165,31 +263,32 @@ function ExportPreviewModal({ clips, exportSettings, onExport, onClose }: Export
                     onClick={() => toggleClip(clip.id)}
                     className={`w-full flex items-center gap-3 p-3 rounded-lg border transition-all text-left ${
                       isSelected
-                        ? 'bg-sz-accent/10 border-sz-accent/30 hover:bg-sz-accent/15'
+                        ? exceedsMax 
+                          ? 'bg-yellow-500/10 border-yellow-500/30 hover:bg-yellow-500/15'
+                          : 'bg-sz-accent/10 border-sz-accent/30 hover:bg-sz-accent/15'
                         : 'bg-sz-bg-tertiary border-sz-border hover:bg-sz-bg-hover opacity-60'
                     }`}
                   >
-                    {/* Selection Checkbox */}
                     <div className={`w-5 h-5 rounded-md flex items-center justify-center flex-shrink-0 transition-colors ${
-                      isSelected ? 'bg-sz-accent' : 'bg-sz-bg border border-sz-border-light'
+                      isSelected 
+                        ? exceedsMax ? 'bg-yellow-500' : 'bg-sz-accent' 
+                        : 'bg-sz-bg border border-sz-border-light'
                     }`}>
                       {isSelected && <Check className="w-3 h-3 text-sz-bg" />}
                     </div>
 
-                    {/* Clip Number */}
                     <div className="w-7 h-7 bg-sz-bg rounded-md flex items-center justify-center flex-shrink-0">
                       <span className="text-xs font-bold text-sz-text-secondary">{index + 1}</span>
                     </div>
 
-                    {/* Clip Info */}
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2">
                         <span className="text-sm font-medium text-sz-text truncate">
                           {clip.title || `Clip ${index + 1}`}
                         </span>
-                        {clip.category && (
-                          <span className="text-[10px] px-1.5 py-0.5 bg-sz-bg rounded text-sz-text-muted">
-                            {clip.category}
+                        {clip.score_breakdown && (
+                          <span className="text-[10px] px-1.5 py-0.5 bg-sz-accent/20 rounded text-sz-accent">
+                            MVP
                           </span>
                         )}
                       </div>
@@ -197,13 +296,13 @@ function ExportPreviewModal({ clips, exportSettings, onExport, onClose }: Export
                         <span className="text-xs text-sz-text-muted">
                           {formatDuration(clip.startTime + clip.trimStartOffset)} - {formatDuration(clip.endTime + clip.trimEndOffset)}
                         </span>
-                        <span className="text-xs text-sz-text-secondary">
+                        <span className={`text-xs ${exceedsMax ? 'text-yellow-400' : 'text-sz-text-secondary'}`}>
                           {formatDuration(clipDuration)}
+                          {exceedsMax && ` (>${platformMax}s)`}
                         </span>
                       </div>
                     </div>
 
-                    {/* Score */}
                     <div className="flex items-center gap-1 flex-shrink-0">
                       <span className={`text-sm font-bold ${
                         clip.finalScore >= 85 ? 'text-emerald-400' :
@@ -216,41 +315,22 @@ function ExportPreviewModal({ clips, exportSettings, onExport, onClose }: Export
                   </button>
                 );
               })}
-            </div>
-          </div>
-        </div>
 
-        {/* Export Settings Summary */}
-        <div className="px-5 py-3 bg-sz-bg-secondary border-t border-sz-border">
-          <div className="flex items-center gap-4 text-xs text-sz-text-muted">
-            <div className="flex items-center gap-1.5">
-              <FileVideo className="w-3.5 h-3.5" />
-              <span className="uppercase font-medium">{exportSettings.format}</span>
-            </div>
-            <div className="flex items-center gap-1.5">
-              {exportSettings.mode === 'fast' ? (
-                <Zap className="w-3.5 h-3.5 text-yellow-400" />
-              ) : (
-                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+              {acceptedClips.length === 0 && (
+                <div className="text-center py-8 text-sz-text-muted">
+                  <Sparkles className="w-8 h-8 mx-auto mb-2 opacity-50" />
+                  <p>No accepted clips to export</p>
+                  <p className="text-xs mt-1">Accept clips from the timeline first</p>
+                </div>
               )}
-              <span className="capitalize">{exportSettings.mode} mode</span>
             </div>
           </div>
         </div>
 
         {/* Footer Actions */}
         <div className="flex items-center justify-between px-5 py-4 border-t border-sz-border">
-          <div className="flex items-center gap-2">
-            {isCloudAuthenticated && (
-              <button
-                onClick={() => setShowCloudExport(true)}
-                className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-sz-text-secondary hover:text-sz-text hover:bg-sz-bg-tertiary transition-colors"
-                title="Upload to Google Drive after export"
-              >
-                <Cloud className="w-4 h-4" />
-                <span>Cloud Export</span>
-              </button>
-            )}
+          <div className="text-xs text-sz-text-muted">
+            Output: 1080x1920 MP4 {captionsEnabled && hasTranscript ? 'with captions' : ''}
           </div>
           <div className="flex items-center gap-3">
             <Button
@@ -267,23 +347,10 @@ function ExportPreviewModal({ clips, exportSettings, onExport, onClose }: Export
               onClick={handleExport}
               leftIcon={<Download className="w-4 h-4" />}
             >
-              Export {selectedClips.length} Clip{selectedClips.length !== 1 ? 's' : ''}
+              Export {selectedClips.length} Reel{selectedClips.length !== 1 ? 's' : ''}
             </Button>
           </div>
         </div>
-        
-        {/* Cloud Export Panel */}
-        {showCloudExport && exportedFiles.length > 0 && (
-          <div className="absolute inset-0 bg-black/50 flex items-center justify-center">
-            <CloudExport
-              files={exportedFiles}
-              onClose={() => {
-                setShowCloudExport(false);
-                setExportedFiles([]);
-              }}
-            />
-          </div>
-        )}
       </div>
     </div>
   );

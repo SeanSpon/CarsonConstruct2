@@ -1,14 +1,26 @@
-# Editing modules for PodFlow Studio
-from .camera_switcher import (
-    CameraCut,
-    CameraSwitchingResult,
-    generate_camera_cuts,
-    optimize_cuts_for_pacing,
-)
+"""
+Opus AI - Automated Editing Pipeline
+
+Modules for automated video editing:
+- Caption generation with viral karaoke styles
+- B-roll insertion with stock footage
+- Music selection and sync
+- FFmpeg video assembly
+"""
+
+from .caption_generator import CaptionGenerator, CaptionStyle, CaptionWord
+from .video_assembler import VideoAssembler, AssemblyJob
+from .broll_finder import BRollFinder, BRollResult
+from .music_selector import MusicSelector, MusicTrack
 
 __all__ = [
-    'CameraCut',
-    'CameraSwitchingResult',
-    'generate_camera_cuts',
-    'optimize_cuts_for_pacing',
+    'CaptionGenerator',
+    'CaptionStyle',
+    'CaptionWord',
+    'VideoAssembler',
+    'AssemblyJob',
+    'BRollFinder',
+    'BRollResult',
+    'MusicSelector',
+    'MusicTrack',
 ]

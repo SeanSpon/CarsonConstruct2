@@ -12,6 +12,16 @@ import numpy as np
 from utils.baseline import deviation_from_baseline, rolling_mean
 
 
+def _format_timestamp(seconds: float) -> str:
+    """Format seconds as HH:MM:SS or MM:SS"""
+    hours = int(seconds // 3600)
+    minutes = int((seconds % 3600) // 60)
+    secs = int(seconds % 60)
+    if hours > 0:
+        return f"{hours}:{minutes:02d}:{secs:02d}"
+    return f"{minutes}:{secs:02d}"
+
+
 def detect_energy_monologues(
     features: Dict,
     bounds: Dict,
@@ -115,15 +125,22 @@ def detect_energy_monologues(
             clip_end = clip_start + max_clip_duration
             clip_duration = max_clip_duration
 
+        # Create unique ID with timestamp
+        timestamp_str = _format_timestamp(clip_start)
+        clip_id = f"monologue_{int(clip_start)}_{len(monologue_clips) + 1}"
+        
         clip = {
-            "id": f"monologue_{len(monologue_clips) + 1}",
+            "id": clip_id,
             "startTime": round(clip_start, 2),
             "endTime": round(clip_end, 2),
             "duration": round(clip_duration, 2),
             "pattern": "monologue",
-            "patternLabel": "Energy Monologue",
+            "patternLabel": f"Rant @ {timestamp_str}",
             "description": f"{region_duration:.0f}s sustained energy, dense speech",
             "algorithmScore": round(min(100, algorithm_score), 1),
+            # Pre-generate a unique title based on timing (AI will override if available)
+            "title": f"Hot Take at {timestamp_str}",
+            "hookText": f"Listen to this rant starting at {timestamp_str}",
         }
 
         if debug:

@@ -1,8 +1,8 @@
 {
-  "name": "podflow-studio",
-  "productName": "PodFlow Studio",
+  "name": "opus-ai",
+  "productName": "Opus AI",
   "version": "1.0.0",
-  "description": "AI-powered podcast clip detection - find viral moments, remove dead space, export clean clips",
+  "description": "AI-powered video editor - clip detection, platform virality scoring, auto-editing, social scheduling",
   "main": ".vite/build/index.js",
   "private": true,
   "scripts": {

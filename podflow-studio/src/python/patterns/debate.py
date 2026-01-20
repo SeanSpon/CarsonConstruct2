@@ -11,6 +11,16 @@ import numpy as np
 from utils.baseline import deviation_from_baseline
 
 
+def _format_timestamp(seconds: float) -> str:
+    """Format seconds as HH:MM:SS or MM:SS"""
+    hours = int(seconds // 3600)
+    minutes = int((seconds % 3600) // 60)
+    secs = int(seconds % 60)
+    if hours > 0:
+        return f"{hours}:{minutes:02d}:{secs:02d}"
+    return f"{minutes}:{secs:02d}"
+
+
 def detect_debate_moments(
     features: Dict,
     bounds: Dict,
@@ -115,15 +125,22 @@ def detect_debate_moments(
         variance_score = min(20.0, min(1.0, onset_var / (onset_mean + 1e-6)) * 20.0)
         algorithm_score = turn_score + gap_score + energy_score + variance_score
 
+        # Create unique ID with timestamp
+        timestamp_str = _format_timestamp(region_start)
+        clip_id = f"debate_{int(region_start)}_{len(debate_clips) + 1}"
+        
         clip = {
-            "id": f"debate_{len(debate_clips) + 1}",
+            "id": clip_id,
             "startTime": round(region_start, 2),
             "endTime": round(region_end, 2),
             "duration": round(region_duration, 2),
             "pattern": "debate",
-            "patternLabel": "Debate / Turn-Taking",
+            "patternLabel": f"Debate @ {timestamp_str}",
             "description": f"{turn_count} rapid turn-takes over {region_duration:.0f}s",
             "algorithmScore": round(min(100, algorithm_score), 1),
+            # Pre-generate a unique title based on timing (AI will override if available)
+            "title": f"Heated Exchange at {timestamp_str}",
+            "hookText": f"Things get intense at {timestamp_str}",
         }
 
         if debug:

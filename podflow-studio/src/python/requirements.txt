@@ -1,0 +1,37 @@
+# Core audio processing
+librosa>=0.10.1
+numpy>=1.24.3
+scipy>=1.11.3
+soundfile>=0.12.1
+webrtcvad
+pydub>=0.25.0
+
+# Speaker diarization (for multi-camera switching)
+# Note: pyannote.audio requires torch and HuggingFace token
+# pip install pyannote.audio torch
+pyannote.audio>=3.0.0
+torch>=2.0.0
+
+# Environment
+python-dotenv>=1.0.0
+
+# AI Providers (install the ones you need)
+# ---------------------------------------
+# OpenAI - GPT-4o, GPT-4o-mini, Whisper
+openai>=1.12.0
+
+# Google Gemini - 1.5 Pro, 1.5 Flash (free tier available)
+# pip install google-generativeai
+google-generativeai>=0.4.0
+
+# Anthropic Claude - 3.5 Sonnet, Opus, Haiku
+# pip install anthropic
+anthropic>=0.18.0
+
+# Local AI (Ollama)
+# pip install ollama
+ollama>=0.1.6
+
+# Local Transcription (optional - for offline Whisper)
+# pip install faster-whisper
+# faster-whisper>=0.10.0

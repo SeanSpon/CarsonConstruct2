@@ -1,103 +1,80 @@
-# Carson Construct 2 - Podcast Clip Detection Studio
+# PodFlow Studio — Podcast Clip Pipeline (MVP)
 
-AI-powered podcast and video clip detection for content creators. Find viral-worthy moments in hours of content in minutes.
+> A **deterministic pipeline** that converts long-form podcast video into short vertical clips with captions and clean cuts.
 
-## Products
+## What This Does
 
-This monorepo contains two Electron applications:
-
-### PodFlow Studio (Active Development)
-
-Production-grade clip finder with AI semantic understanding.
-
-- **AI-Enhanced Detection**: Whisper transcription + GPT-4 clip analysis
-- **Multiple Pattern Detectors**: Payoff moments, monologues, laughter, debates
-- **Smart Boundaries**: VAD-snapped clips that never cut mid-word
-- **NLE Export**: Premiere Pro, DaVinci Resolve, Final Cut Pro support
-- **Processing Time**: ~2-5 minutes for 1-hour podcast
-- **Cost**: ~$0.50 per video (Whisper + GPT API)
-
-```bash
-cd podflow-studio
-npm install
-npm start
+```
+Input Video(s)
+     ↓
+Transcription (word-level timestamps)
+     ↓
+Deterministic Clip Detection
+     ↓
+Caption Rendering (karaoke-style)
+     ↓
+Rule-based Editing (cuts / angles / b-roll)
+     ↓
+FFmpeg Export (9:16)
 ```
 
-### Clipper Studio
+**MVP is complete when:**
+- One command produces postable clips
+- Captions are readable and synced
+- Review/export loop works end-to-end
+- A creator can ship without touching an editor
 
-Lightweight, AI-free alternative for speed-focused workflows.
-
-- **Pure Algorithmic**: No AI costs, fully offline
-- **Two Pattern Detectors**: Payoff + Monologue
-- **Processing Time**: ~30-60 seconds for 1-hour podcast
-- **Cost**: $0 per video
-
-```bash
-cd clipper-studio
-npm install
-npm start
-```
-
-## Features
-
-- **Automatic Clip Detection**: Find engaging moments using audio analysis
-- **Score Breakdown**: Understand why each clip was selected
-- **Clipworthiness Scoring**: Hard gates (speech ratio, flatness) + soft scores
-- **VAD Boundary Snapping**: Clips start/end at natural speech boundaries
-- **Multiple Export Modes**: Fast (stream copy) or Accurate (re-encode)
-- **Project Files**: Save/load `.podflow` project state
-- **Auto-Save**: Never lose work with 30-second auto-save
-
-## Documentation
-
-| Document | Description |
-|----------|-------------|
-| [ARCHITECTURE.md](./ARCHITECTURE.md) | Complete system architecture and algorithms |
-| [docs/MVP_PLAN.md](./docs/MVP_PLAN.md) | Sellable MVP plan and workstreams |
-| [docs/AI_PROVIDERS.md](./docs/AI_PROVIDERS.md) | Multi-provider AI abstraction guide |
-| [docs/PREMIERE_PRO_FEATURES.md](./docs/PREMIERE_PRO_FEATURES.md) | NLE integration features |
-| [docs/RELEASE_CHECKLIST.md](./docs/RELEASE_CHECKLIST.md) | Pre-release quality checklist |
+---
 
 ## Quick Start
 
 ### Prerequisites
 
-- Node.js 18+
-- Python 3.8+
-- FFmpeg (in PATH or bundled)
+- **Node.js** 18+
+- **Python** 3.8+
+- **FFmpeg** (in PATH or bundled)
 
-### Running PodFlow Studio
+### Installation
 
 ```bash
 # Clone the repository
-git clone https://github.com/SeanSpon/donebytmr.git
-cd donebytmr
+git clone https://github.com/your-repo/podflow-studio.git
+cd podflow-studio
 
-# Install dependencies
+# Install Node dependencies
 cd podflow-studio
 npm install
 
 # Install Python dependencies
 cd src/python
 pip install -r requirements.txt
-cd ../..
+```
 
-# Start the app
+### Run the App
+
+```bash
+cd podflow-studio
 npm start
 ```
 
-### Running Evaluation
+### Run Detection Directly (CLI)
 
 ```bash
-python tools/eval/run_eval.py --dataset data/sample.json --k 10
+cd podflow-studio/src/python
+python detector.py /path/to/podcast.mp4 '{"mvp_mode": true, "job_dir": "/tmp/clips"}'
 ```
 
-## System Architecture
+---
+
+## System Overview
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │                    Electron (React + TypeScript)                │
 │                         EditorView UI                           │
+│     ┌──────────┐    ┌──────────┐    ┌──────────┐              │
+│     │   Run    │ →  │  Review  │ →  │  Export  │              │
+│     └──────────┘    └──────────┘    └──────────┘              │
 └─────────────────────────┬───────────────────────────────────────┘
                           │ IPC
 ┌─────────────────────────┴───────────────────────────────────────┐
@@ -107,49 +84,230 @@ python tools/eval/run_eval.py --dataset data/sample.json --k 10
                           │ spawn
 ┌─────────────────────────┴───────────────────────────────────────┐
 │                    Python Detection Pipeline                    │
-│  Features → Patterns → Scoring → (Optional) AI Enhancement      │
+│     Transcription → Detection → Scoring → Caption → Export      │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-## Detection Pipeline
+---
 
-1. **Audio Extraction**: FFmpeg extracts 22.05kHz mono audio
-2. **Feature Computation**: RMS, spectral centroid, flatness, ZCR, onset strength
-3. **VAD Segmentation**: WebRTC VAD identifies speech regions
-4. **Pattern Detection**: Run payoff, monologue, laughter, debate detectors
-5. **Clipworthiness Scoring**: Hard gates + soft-score ensemble
-6. **Boundary Snapping**: Snap to VAD segments (±2s window)
-7. **AI Enhancement** (optional): Whisper transcription + GPT-4 titles
+## Folder Structure
 
-## Keyboard Shortcuts
+```
+podflow-studio/
+├── src/
+│   ├── main/                    # Electron main process
+│   │   ├── index.ts             # Entry point
+│   │   └── ipc/                 # IPC handlers
+│   │       ├── fileHandlers.ts
+│   │       ├── detectionHandlers.ts
+│   │       └── exportHandlers.ts
+│   │
+│   ├── renderer/                # React UI
+│   │   ├── App.tsx
+│   │   ├── components/
+│   │   │   └── editor/          # Main UI components
+│   │   └── stores/              # Zustand state
+│   │
+│   └── python/                  # Detection pipeline
+│       ├── detector.py          # Main entry point
+│       ├── features.py          # Audio feature extraction
+│       ├── vad_utils.py         # Voice activity detection
+│       ├── patterns/            # Pattern detectors
+│       │   ├── payoff.py        # Silence → spike
+│       │   ├── monologue.py     # Sustained energy
+│       │   ├── laughter.py      # Burst clusters
+│       │   └── silence.py       # Dead space
+│       └── utils/               # Scoring utilities
+│           ├── mvp_candidates.py
+│           ├── mvp_scoring.py
+│           └── clipworthiness.py
+│
+├── tools/
+│   └── eval/                    # Evaluation harness
+│       └── run_eval.py
+│
+└── docs/                        # Documentation
+    ├── MVP_PLAN.md
+    ├── MVP_ARCHITECTURE.md
+    └── REVIEWER_GUIDE.md
+```
 
-| Key | Action |
-|-----|--------|
-| `Space` | Play/Pause |
-| `A` | Accept clip |
-| `R` | Reject clip |
-| `Tab` | Next clip |
-| `←` / `→` | Seek 1 second |
-| `Ctrl+E` | Export all accepted |
+---
 
-## AI Providers
+## Detection Logic (Deterministic)
 
-PodFlow Studio supports multiple AI providers through a unified abstraction:
+### Signals Used
 
-- **OpenAI**: GPT-4o, GPT-4o-mini, Whisper
-- **Anthropic**: Claude 3.5 Sonnet, Opus, Haiku
-- **Google Gemini**: 1.5 Pro, 1.5 Flash (free tier available)
-- **Ollama**: Local models (Llama 3, Mistral) - free & offline
+| Signal | Description | Weight |
+|--------|-------------|--------|
+| **Silence → Spike** | Energy drop followed by sudden increase | High |
+| **Speech Density** | Words per second from transcript | Medium |
+| **Sentence Boundaries** | Clean start/end at sentence breaks | Medium |
+| **Duration Window** | 15–60 seconds for clip length | Gate |
+
+### Output Format
+
+```json
+{
+  "id": "clip_001",
+  "startTime": 312.4,
+  "endTime": 344.8,
+  "duration": 32.4,
+  "pattern": "payoff",
+  "score": 82,
+  "score_breakdown": {
+    "silence_score": 35,
+    "spike_score": 30,
+    "speech_density": 12,
+    "boundary_bonus": 5
+  },
+  "reason": "silence→spike + high speech density"
+}
+```
+
+**No ML tuning. No feedback loops. Fully inspectable.**
+
+---
+
+## UI Contract
+
+### Screen 1 — Run
+
+- Select podcast video
+- Optional: angle videos, b-roll folder
+- Click "Generate Clips"
+
+### Screen 2 — Review (one clip at a time)
+
+- Video preview
+- Captions toggle
+- Start/end trim
+- Accept / Reject / Export
+
+### Screen 3 — Export
+
+- Progress bar
+- Exported clip list
+- Open folder button
+
+**Rule:** If a screen doesn't support showing output clearly OR making 1–2 decisions per clip, it doesn't exist.
+
+---
+
+## Test Checks
+
+### A) Pipeline Smoke Test
+
+```bash
+cd podflow-studio/src/python
+python detector.py input.mp4 '{"mvp_mode": true, "job_dir": "/tmp/test"}'
+```
+
+**Expected:** No crashes, ≥5 clips, captions rendered
+
+### B) Determinism Test
+
+Run twice with same input → Same timestamps, same scores
+
+### C) Python Unit Tests
+
+```bash
+cd podflow-studio/src/python
+python -m unittest discover -s tests
+```
+
+### D) Eval Harness
+
+```bash
+python tools/eval/run_eval.py --dataset data/sample.json --k 10
+```
+
+---
+
+## Configuration
+
+### Environment Variables
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `OPENAI_API_KEY` | For Whisper transcription | Optional |
+| `HF_TOKEN` | HuggingFace token for diarization | Optional |
+
+### Detection Settings
+
+```json
+{
+  "mvp_mode": true,
+  "target_count": 10,
+  "min_duration": 15,
+  "max_duration": 60,
+  "skip_intro": 30,
+  "skip_outro": 30
+}
+```
+
+---
+
+## What This Intentionally Does NOT Do
+
+- ❌ No analytics, onboarding, theming, or settings
+- ❌ No user accounts or persistence
+- ❌ No learning systems or cloud infra
+- ❌ No "AI explanations" or black-box behavior
+- ❌ No viral predictions
+
+**Why?** Optimize for trust, speed, and ship-ability.
+
+---
+
+## Out of Scope (Intentionally)
+
+| Feature | Status | Reason |
+|---------|--------|--------|
+| Learning from user behavior | Not planned | Adds complexity, reduces transparency |
+| Social integrations | Not planned | Different product |
+| Multi-project management | Not planned | Scope creep |
+| Styling and theming | Not planned | Ship first |
+| "Viral" predictions | Not planned | Unprovable |
+
+---
+
+## Failure Handling
+
+| Failure | Behavior |
+|---------|----------|
+| Missing FFmpeg | Clear error with install instructions |
+| No clips detected | Explicit message shown |
+| Export failure | Clip skipped, pipeline continues |
+| API key missing | Graceful fallback to algorithm-only mode |
+
+No background jobs. No queues. No retries beyond local scope.
+
+---
+
+## Documentation
+
+| Document | Description |
+|----------|-------------|
+| [MVP_PLAN.md](./docs/MVP_PLAN.md) | Implementation plan and workstreams |
+| [MVP_ARCHITECTURE.md](./docs/MVP_ARCHITECTURE.md) | Detailed pipeline architecture |
+| [REVIEWER_GUIDE.md](./docs/REVIEWER_GUIDE.md) | What reviewers should check |
+| [ARCHITECTURE.md](./ARCHITECTURE.md) | Complete system documentation |
+
+---
 
 ## Contributing
 
 1. Check [docs/MVP_PLAN.md](./docs/MVP_PLAN.md) for current priorities
 2. Follow the PR template in `.github/pull_request_template.md`
 3. Run tests before submitting:
-   ```bash
-   cd podflow-studio/src/python
-   python -m unittest discover -s tests
-   ```
+
+```bash
+cd podflow-studio/src/python
+python -m unittest discover -s tests
+```
+
+---
 
 ## License
 
@@ -157,5 +315,5 @@ Proprietary - All rights reserved.
 
 ---
 
-**Version**: 1.0.0  
-**Last Updated**: January 19, 2026
+**Version:** 2.0.0 (MVP)  
+**Last Updated:** January 2026

@@ -1,185 +1,78 @@
-# PodFlow Studio - Agent Instructions
+# PodClip - Agent Instructions
 
 ## Project Overview
-This is PodFlow Studio, an Electron + React + Python application for AI-powered podcast clip detection. The app saves/loads `.podflow` project files that contain the full project state.
+PodClip is a simple, deterministic command-line tool for generating short vertical clips from long podcast videos.
 
-## CRITICAL: Project File Schema Versioning
+## Philosophy
+- **No hype AI abstractions** - Just Whisper for transcription, everything else is deterministic
+- **No dead code** - Every file has a clear purpose
+- **One clear pipeline** - Input → Transcription → Detection → Captions → Export
+- **Readable in one sitting** - Simple, well-commented code
 
-### When to Update the Schema Version
-**Every time you modify any of these files, you MUST update the project file schema:**
-
-1. `podflow-studio/src/renderer/types/index.ts` - Type definitions
-2. `podflow-studio/src/renderer/stores/projectFile.ts` - Project file structure
-3. `podflow-studio/src/renderer/stores/store.ts` - Zustand store structure
-
-### How to Update the Schema Version
-
-1. **Increment the version** in `projectFile.ts`:
-```typescript
-// BEFORE: const PROJECT_FILE_VERSION = '1.0.0';
-// AFTER:  const PROJECT_FILE_VERSION = '1.1.0';
-```
-
-2. **Add migration logic** in `parseProjectFile()`:
-```typescript
-export function parseProjectFile(json: string): ProjectFile {
-  const data = JSON.parse(json);
-  
-  // Migration from older versions
-  if (data.version === '1.0.0') {
-    // Add default values for new fields
-    data.newField = data.newField ?? defaultValue;
-    data.version = '1.1.0';
-  }
-  
-  return data as ProjectFile;
-}
-```
-
-3. **Add null-safety** in `loadProjectFile()`:
-```typescript
-// Always use ?? or || for optional fields
-setCameras(projectFile.cameras || []);
-setNewFeature(projectFile.newFeature ?? defaultValue);
-```
-
-### Version History
-Track all schema changes here:
-
-| Version | Date | Changes |
-|---------|------|---------|
-| 1.0.0 | Initial | Base schema |
-| (add new versions here) | | |
-
-## Project File Structure
-
-The `.podflow` project file contains:
-- `version` - Schema version for migration
-- `meta` - Project metadata (name, dates)
-- `source` - Source video info (Project type)
-- `clips` - Detected clips array
-- `deadSpaces` - Dead space regions
-- `transcript` - Whisper transcript
-- `editingPreferences` - User editing prefs
-- `cameras` - Multi-camera inputs
-- `cameraCuts` - Camera switching decisions
-- `speakerSegments` - Speaker diarization
-- `audioTracks` - Audio mixing tracks
-- `qaChecks` - QA check results
-- `detectionSettings` - Detection parameters
-- `exportSettings` - Export parameters
-- `uiState` - UI state (zoom, selection, etc.)
-- `cache` - Cached AI results, waveforms, thumbnails
-
-## Adding New Features Checklist
-
-When adding a new feature that affects saved state:
-
-1. [ ] Add type definition in `types/index.ts`
-2. [ ] Add field to `ProjectFile` interface in `projectFile.ts`
-3. [ ] Add field to Zustand store in `store.ts`
-4. [ ] Add to `createProjectFile()` function
-5. [ ] Add to `loadProjectFile()` function with null-safety
-6. [ ] Increment `PROJECT_FILE_VERSION`
-7. [ ] Add migration logic in `parseProjectFile()`
-8. [ ] Update this changelog
-
-## Code Organization
+## Pipeline Architecture
 
 ```
-podflow-studio/
-├── src/
-│   ├── main/           # Electron main process (Node.js)
-│   │   ├── index.ts    # Main entry, window creation
-│   │   ├── ipc/        # IPC handlers
-│   │   │   ├── fileHandlers.ts       # File selection, FFprobe
-│   │   │   ├── detectionHandlers.ts  # Python detection spawning
-│   │   │   ├── exportHandlers.ts     # FFmpeg export
-│   │   │   ├── reviewHandlers.ts     # Clip project persistence
-│   │   │   ├── projectFileHandlers.ts # .podflow save/load
-│   │   │   ├── aiEffectsHandlers.ts  # AI effects processing
-│   │   │   └── premiereExport.ts     # NLE export formats
-│   │   └── jobs/       # Job queue system
-│   │
-│   ├── preload/        # Electron preload (contextBridge)
-│   │   └── preload.ts  # Exposes window.api
-│   │
-│   ├── renderer/       # React frontend
-│   │   ├── App.tsx     # Root component
-│   │   ├── components/ # UI components
-│   │   │   ├── ui/     # Primitives (Button, Card, etc.)
-│   │   │   ├── layout/ # Page layouts
-│   │   │   └── editor/ # Editor components (main UI)
-│   │   ├── pages/      # Legacy pages (not actively used)
-│   │   ├── stores/     # Zustand state
-│   │   │   ├── store.ts        # Main app store
-│   │   │   ├── projectFile.ts  # Project file manager
-│   │   │   └── index.ts        # Exports
-│   │   └── types/      # TypeScript types
-│   │
-│   └── python/         # Python detection pipeline
-│       ├── detector.py # Main entry point
-│       ├── features.py # Feature extraction
-│       ├── vad_utils.py # Voice activity detection
-│       ├── patterns/   # Pattern detectors
-│       ├── utils/      # Scoring, baselines
-│       └── ai/         # AI enhancement (optional)
+podclip/
+├── input/         → Load video, extract audio, validate
+├── transcription/ → Whisper word-level timestamps (SINGLE SOURCE OF TRUTH)
+├── detection/     → Deterministic clip detection
+├── captions/      → Karaoke-style ASS captions
+├── editing/       → Rule-based angle switching, b-roll
+└── export/        → FFmpeg vertical 9:16 export
 ```
 
-## IPC Communication
+## Key Files
 
-### Renderer → Main (invoke)
-- `select-file` - File picker dialog
-- `validate-file` - FFprobe validation
-- `start-detection` - Start Python detection
-- `cancel-detection` - Cancel detection
-- `export-clips` - Export to files
-- `project-save` / `project-save-as` - Save .podflow
-- `project-open` / `project-load` - Load .podflow
-- `project-autosave` - Auto-save
-- `project-get-recent` - Recent projects list
+| File | Purpose |
+|------|---------|
+| `cli.py` | Main entry point, orchestrates pipeline |
+| `input/loader.py` | Video loading, audio extraction, FFmpeg helpers |
+| `transcription/whisper.py` | OpenAI Whisper API, transcript dataclasses |
+| `detection/candidates.py` | Detect clip candidates (speech density, silence breaks) |
+| `detection/scoring.py` | Score and rank clips (deterministic formula) |
+| `captions/karaoke.py` | Generate ASS subtitles with word timing |
+| `editing/angle_switch.py` | Rule-based camera switching |
+| `editing/broll.py` | Rule-based b-roll overlay |
+| `export/vertical.py` | FFmpeg 9:16 export with caption burning |
 
-### Main → Renderer (send)
-- `detection-progress` - Progress updates
-- `detection-complete` - Results
-- `detection-error` - Errors
-- `export-progress` - Export progress
+## Usage
 
-## Python Detection Pipeline
+```bash
+# Basic usage
+python -m podclip input.mp4 --out clips/
 
-The detector outputs via stdout:
-- `PROGRESS:<percent>:<message>` - Progress updates
-- `RESULT:<json>` - Final results
-- `ERROR:<message>` - Error messages
+# With options
+python -m podclip input.mp4 --out clips/ -n 15 --min-duration 20 --max-duration 45
+```
 
-Always handle JSON parsing errors gracefully.
+## Dependencies
+- Python 3.8+
+- FFmpeg (system install)
+- openai (for Whisper)
 
-## Design System
-
-Use SeeZee design tokens:
-- `sz-bg`, `sz-bg-secondary`, `sz-bg-tertiary`
-- `sz-text`, `sz-text-secondary`, `sz-text-muted`
-- `sz-accent`, `sz-accent-hover`
-- `sz-border`, `sz-border-light`
-- `sz-success`, `sz-danger`, `sz-warning`
+## Design Rules
+1. **Transcript is truth** - All timing from Whisper words/segments
+2. **Deterministic scoring** - No ML, explicit formula
+3. **Minimal deps** - Only `openai` + FFmpeg
+4. **No state** - Each run is independent
 
 ## Testing
+```bash
+cd podclip
+python -m pytest tests/  # When tests exist
+```
 
-- Python: `cd podflow-studio/src/python && python -m unittest discover -s tests`
-- Eval: `python tools/eval/run_eval.py --dataset data/sample.json --k 10`
+## Common Tasks
 
-## Common Issues
+### Adding a new detection method
+1. Add function in `detection/candidates.py`
+2. Return `Candidate` objects
+3. It's auto-included in ranking
 
-### Project file won't open
-- Check schema version mismatch
-- Add migration logic for new fields
-- Ensure null-safety in loadProjectFile()
+### Adding a caption style
+1. Add to `CaptionStyle` enum in `captions/karaoke.py`
+2. Define colors in `get_style_colors()`
+3. Expose via CLI
 
-### Detection fails
-- Check Python path
-- Verify FFmpeg is accessible
-- Check for stderr output in terminal
-
-### Export fails
-- Fast mode may fail on some codecs - fallback to accurate mode
-- Check FFprobe path detection
+### Modifying scoring
+Edit `detection/scoring.py` - all weights are explicit

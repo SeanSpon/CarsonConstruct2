@@ -1,34 +1,72 @@
-# Dependencies
-node_modules/
+# Python
 __pycache__/
-
-# Build outputs
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
 dist/
-out/
-.vite/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
 
-# Environment variables
-.env
-.env.local
+# Virtual environments
+venv/
+ENV/
+env/
+.venv/
 
-# OS files
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
 .DS_Store
 Thumbs.db
 
-# IDE
-.vscode/
-.idea/
-
-# Python
-*.pyc
-*.pyo
-*.pyd
-.Python
-*.so
-*.egg
-*.egg-info/
-
 # Logs
-logs/
 *.log
-npm-debug.log*
+
+# Temporary files
+*.tmp
+*.temp
+/tmp/
+
+# Cache directories
+.cache/
+podclip_cache/
+
+# Output directories (don't commit generated clips)
+clips/
+output/
+
+# Audio/video files (don't commit media)
+*.mp4
+*.mov
+*.mkv
+*.avi
+*.wav
+*.mp3
+*.aac
+
+# Subtitle files (generated)
+*.ass
+*.srt
+
+# API keys (never commit)
+.env
+.env.local
+*.env

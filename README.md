@@ -1,161 +1,115 @@
-# Carson Construct 2 - Podcast Clip Detection Studio
+# PodClip
 
-AI-powered podcast and video clip detection for content creators. Find viral-worthy moments in hours of content in minutes.
+**Simple, Deterministic Podcast Clip Generator**
 
-## Products
-
-This monorepo contains two Electron applications:
-
-### PodFlow Studio (Active Development)
-
-Production-grade clip finder with AI semantic understanding.
-
-- **AI-Enhanced Detection**: Whisper transcription + GPT-4 clip analysis
-- **Multiple Pattern Detectors**: Payoff moments, monologues, laughter, debates
-- **Smart Boundaries**: VAD-snapped clips that never cut mid-word
-- **NLE Export**: Premiere Pro, DaVinci Resolve, Final Cut Pro support
-- **Processing Time**: ~2-5 minutes for 1-hour podcast
-- **Cost**: ~$0.50 per video (Whisper + GPT API)
-
-```bash
-cd podflow-studio
-npm install
-npm start
-```
-
-### Clipper Studio
-
-Lightweight, AI-free alternative for speed-focused workflows.
-
-- **Pure Algorithmic**: No AI costs, fully offline
-- **Two Pattern Detectors**: Payoff + Monologue
-- **Processing Time**: ~30-60 seconds for 1-hour podcast
-- **Cost**: $0 per video
-
-```bash
-cd clipper-studio
-npm install
-npm start
-```
-
-## Features
-
-- **Automatic Clip Detection**: Find engaging moments using audio analysis
-- **Score Breakdown**: Understand why each clip was selected
-- **Clipworthiness Scoring**: Hard gates (speech ratio, flatness) + soft scores
-- **VAD Boundary Snapping**: Clips start/end at natural speech boundaries
-- **Multiple Export Modes**: Fast (stream copy) or Accurate (re-encode)
-- **Project Files**: Save/load `.podflow` project state
-- **Auto-Save**: Never lose work with 30-second auto-save
-
-## Documentation
-
-| Document | Description |
-|----------|-------------|
-| [ARCHITECTURE.md](./ARCHITECTURE.md) | Complete system architecture and algorithms |
-| [docs/MVP_PLAN.md](./docs/MVP_PLAN.md) | Sellable MVP plan and workstreams |
-| [docs/AI_PROVIDERS.md](./docs/AI_PROVIDERS.md) | Multi-provider AI abstraction guide |
-| [docs/PREMIERE_PRO_FEATURES.md](./docs/PREMIERE_PRO_FEATURES.md) | NLE integration features |
-| [docs/RELEASE_CHECKLIST.md](./docs/RELEASE_CHECKLIST.md) | Pre-release quality checklist |
+A command-line tool that takes a long podcast video and outputs multiple short vertical clips with:
+- Clean hard cuts
+- Karaoke-style captions (word-level highlight)
+- Optional angle switching (rule-based)
+- Optional b-roll overlay (rule-based)
+- FFmpeg-based export
 
 ## Quick Start
 
-### Prerequisites
-
-- Node.js 18+
-- Python 3.8+
-- FFmpeg (in PATH or bundled)
-
-### Running PodFlow Studio
-
 ```bash
-# Clone the repository
-git clone https://github.com/SeanSpon/donebytmr.git
-cd donebytmr
+# 1. Install FFmpeg
+brew install ffmpeg  # Mac
+# or: apt install ffmpeg (Linux)
+# or: winget install FFmpeg (Windows)
 
-# Install dependencies
-cd podflow-studio
-npm install
-
-# Install Python dependencies
-cd src/python
+# 2. Install Python dependencies
+cd podclip
 pip install -r requirements.txt
-cd ../..
 
-# Start the app
-npm start
+# 3. Set your OpenAI API key (for Whisper transcription)
+export OPENAI_API_KEY="sk-..."
+
+# 4. Run it!
+python -m podclip input.mp4 --out clips/
 ```
 
-### Running Evaluation
+## What You Get
+
+```
+clips/
+├── clip_001.mp4          # Vertical 9:16 video with burned-in captions
+├── clip_002.mp4
+├── clip_003.mp4
+├── ...
+├── captions/
+│   ├── clip_001.ass      # ASS subtitle files (if needed separately)
+│   └── ...
+└── clips.json            # Metadata (timestamps, scores, reasons)
+```
+
+## Philosophy
+
+- **No hype AI abstractions** — Just Whisper for transcription, everything else is deterministic
+- **No dead code** — Every file has a clear purpose
+- **One clear pipeline** — Input → Transcription → Detection → Captions → Export
+- **Readable in one sitting** — Simple, well-commented code
+
+## Pipeline
+
+```
+podclip/
+├── input/         → Load video, extract audio, validate
+├── transcription/ → Whisper word-level timestamps (SINGLE SOURCE OF TRUTH)
+├── detection/     → Deterministic clip detection (speech density, silence breaks)
+├── captions/      → Karaoke-style ASS captions
+├── editing/       → Rule-based angle switching, b-roll overlay
+└── export/        → FFmpeg vertical 9:16 export with captions
+```
+
+## Usage
 
 ```bash
-python tools/eval/run_eval.py --dataset data/sample.json --k 10
+python -m podclip INPUT [OPTIONS]
+
+Options:
+  --out, -o DIR         Output directory (default: clips/)
+  --count, -n NUM       Number of clips to generate (default: 10)
+  --min-duration SECS   Minimum clip duration (default: 15)
+  --max-duration SECS   Maximum clip duration (default: 60)
+  --skip-intro SECS     Skip first N seconds (default: 30)
+  --skip-outro SECS     Skip last N seconds (default: 30)
+  --no-captions         Disable caption burning
+  --caption-style       viral|minimal|bold (default: viral)
+  --angles FILE...      Additional camera angles for switching
+  --api-key KEY         OpenAI API key
+  --verbose, -v         Verbose output
 ```
 
-## System Architecture
+## Examples
 
+```bash
+# Basic: 10 clips with default settings
+python -m podclip podcast.mp4 --out clips/
+
+# Custom count and duration
+python -m podclip podcast.mp4 --out clips/ -n 15 --min-duration 20 --max-duration 45
+
+# Skip long intro/outro
+python -m podclip podcast.mp4 --out clips/ --skip-intro 90 --skip-outro 60
+
+# With multiple camera angles
+python -m podclip main.mp4 --angles cam1.mp4 cam2.mp4 --out clips/
+
+# Minimal captions
+python -m podclip podcast.mp4 --out clips/ --caption-style minimal
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                    Electron (React + TypeScript)                │
-│                         EditorView UI                           │
-└─────────────────────────┬───────────────────────────────────────┘
-                          │ IPC
-┌─────────────────────────┴───────────────────────────────────────┐
-│                    Main Process (Node.js)                       │
-│           File Handlers │ Detection │ Export │ Jobs             │
-└─────────────────────────┬───────────────────────────────────────┘
-                          │ spawn
-┌─────────────────────────┴───────────────────────────────────────┐
-│                    Python Detection Pipeline                    │
-│  Features → Patterns → Scoring → (Optional) AI Enhancement      │
-└─────────────────────────────────────────────────────────────────┘
-```
 
-## Detection Pipeline
+## Cost
 
-1. **Audio Extraction**: FFmpeg extracts 22.05kHz mono audio
-2. **Feature Computation**: RMS, spectral centroid, flatness, ZCR, onset strength
-3. **VAD Segmentation**: WebRTC VAD identifies speech regions
-4. **Pattern Detection**: Run payoff, monologue, laughter, debate detectors
-5. **Clipworthiness Scoring**: Hard gates + soft-score ensemble
-6. **Boundary Snapping**: Snap to VAD segments (±2s window)
-7. **AI Enhancement** (optional): Whisper transcription + GPT-4 titles
+- **Whisper**: ~$0.006/minute ≈ $0.36/hour
+- **Everything else**: Free (local FFmpeg)
 
-## Keyboard Shortcuts
+## Requirements
 
-| Key | Action |
-|-----|--------|
-| `Space` | Play/Pause |
-| `A` | Accept clip |
-| `R` | Reject clip |
-| `Tab` | Next clip |
-| `←` / `→` | Seek 1 second |
-| `Ctrl+E` | Export all accepted |
-
-## AI Providers
-
-PodFlow Studio supports multiple AI providers through a unified abstraction:
-
-- **OpenAI**: GPT-4o, GPT-4o-mini, Whisper
-- **Anthropic**: Claude 3.5 Sonnet, Opus, Haiku
-- **Google Gemini**: 1.5 Pro, 1.5 Flash (free tier available)
-- **Ollama**: Local models (Llama 3, Mistral) - free & offline
-
-## Contributing
-
-1. Check [docs/MVP_PLAN.md](./docs/MVP_PLAN.md) for current priorities
-2. Follow the PR template in `.github/pull_request_template.md`
-3. Run tests before submitting:
-   ```bash
-   cd podflow-studio/src/python
-   python -m unittest discover -s tests
-   ```
+- Python 3.8+
+- FFmpeg (must be in PATH)
+- OpenAI API key
 
 ## License
 
-Proprietary - All rights reserved.
-
----
-
-**Version**: 1.0.0  
-**Last Updated**: January 19, 2026
+MIT

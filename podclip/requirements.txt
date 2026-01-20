@@ -1,0 +1,11 @@
+# PodClip - Simple Deterministic Podcast Clip Generator
+# Minimal dependencies - only what's actually needed
+
+# OpenAI for Whisper transcription
+openai>=1.0.0
+
+# That's it. FFmpeg is the only other dependency and must be installed separately.
+# All other processing uses Python stdlib.
+
+# Optional: For local development/testing
+# pytest  # For running tests

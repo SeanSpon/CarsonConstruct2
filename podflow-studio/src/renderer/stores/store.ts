@@ -158,6 +158,9 @@ export const useStore = create<AppState>()(
       partialize: (state) => ({
         settings: state.settings,
         lastExportDir: state.lastExportDir,
+        clips: state.clips,
+        transcript: state.transcript,
+        captionStyle: state.captionStyle,
       }),
     }
   )

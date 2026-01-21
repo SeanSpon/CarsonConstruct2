@@ -347,7 +347,7 @@ def score_and_select_clips(
     
     top_n = settings.get("top_n", 10)
     iou_threshold = settings.get("iou_threshold", 0.6)
-    clip_lengths = settings.get("clip_lengths", [12, 18, 24, 35])
+    clip_lengths = settings.get("clip_lengths", [30, 45, 60, 90, 120])
     duration = features.get("duration", 0)
     
     all_scored_clips = []
@@ -360,7 +360,7 @@ def score_and_select_clips(
             duration,
             clip_lengths=clip_lengths,
             min_clip=settings.get("min_clip_s", 8),
-            max_clip=settings.get("max_clip_s", 45),
+            max_clip=settings.get("max_clip_s", 300),
         )
         
         for window_start, window_end, snapped, snap_reason in windows:

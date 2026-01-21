@@ -5,7 +5,7 @@ import { ClipTypeSelector, type ClipMood } from './components/ui/ClipTypeSelecto
 import { CaptionStyleSelector } from './components/ui/CaptionStyleSelector';
 import { CaptionOverlay } from './components/ui/CaptionOverlay';
 import { HistoryScreen } from './components/ui/HistoryScreen';
-import { SettingsModal } from './components/ui/SettingsModal';
+import { VideoAndTranscriptModal } from './components/ui/VideoAndTranscriptModal';
 import type { Clip, Transcript } from './types';
 
 // 4 screens: Home, Review, Export, History
@@ -20,7 +20,6 @@ function App() {
     setDetectionError, 
     setDetecting,
     isDetecting,
-    detectionProgress,
     detectionError,
     setResults,
     updateClipStatus,
@@ -49,14 +48,24 @@ function App() {
   const [selectedMood, setSelectedMood] = useState<ClipMood>('all');
   const [currentProjectId, setCurrentProjectId] = useState<string | null>(null);
   const [currentTime, setCurrentTime] = useState(0);
-  const [showSettings, setShowSettings] = useState(false);
   const [loadedFromHistory, setLoadedFromHistory] = useState(false);
+  const [showVideoTranscriptModal, setShowVideoTranscriptModal] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
   const currentJobIdRef = useRef<string | null>(currentJobId);
 
   useEffect(() => {
     currentJobIdRef.current = currentJobId;
   }, [currentJobId]);
+
+  // Log store hydration on mount
+  useEffect(() => {
+    console.log('[App Mount] Store hydration check:', {
+      clips: clips.length,
+      transcriptSegments: transcript?.segments?.length || 0,
+      captionStyle: captionStyle,
+      screen: screen,
+    });
+  }, []);
 
   // IPC listeners
   useEffect(() => {
@@ -73,6 +82,7 @@ function App() {
       const jobId = currentJobIdRef.current;
       if (jobId && data.projectId !== jobId) return;
       
+      console.log('[App] Detection complete, clips:', data.clips?.length, 'transcript segments:', (data.transcript as any)?.segments?.length);
       const rawClips = Array.isArray(data.clips) ? data.clips : [];
       const clips = (rawClips as Clip[]).map((clip, index) => ({
         ...clip,
@@ -83,12 +93,15 @@ function App() {
         mood: clip.mood || 'impactful', // Add mood support
       }));
 
+      console.log('[App] Processed clips:', clips.length);
+      console.log('[App] Transcript received:', data.transcript ? `${(data.transcript as any)?.segments?.length || 0} segments` : 'null');
       setResults(clips, [], data.transcript as Transcript | null);
       setCurrentJobId(null);
       setLastJobId(data.projectId);
       
       // Add to history
       if (project && currentProjectId) {
+        console.log('[App] Saving transcript to history project:', currentProjectId);
         updateProject(currentProjectId, {
           clipCount: clips.length,
           acceptedCount: 0,
@@ -97,8 +110,11 @@ function App() {
       }
       
       if (clips.length > 0) {
+        console.log('[App] Setting screen to review');
         setScreen('review');
         setCurrentClipIndex(0);
+      } else {
+        console.log('[App] No clips returned, staying on home screen');
       }
     });
 
@@ -137,35 +153,19 @@ function App() {
 
   // Handle file selection
   const handleSelectFile = useCallback(async () => {
-    try {
-      const file = await window.api.selectFile();
-      if (!file) return;
+    setShowVideoTranscriptModal(true);
+  }, []);
 
-      const validation = await window.api.validateFile(file.path);
-      if (!validation.valid) return;
-
-      setProject({
-        filePath: file.path,
-        fileName: file.name,
-        size: file.size,
-        duration: validation.duration || 0,
-        resolution: validation.resolution,
-        width: validation.width,
-        height: validation.height,
-        fps: validation.fps,
-        thumbnailPath: validation.thumbnailPath,
-        bitrate: validation.bitrate,
-      });
-    } catch (err) {
-      console.error('File selection error:', err);
-    }
-  }, [setProject]);
-
-  // Start detection
+  // Start detection (used for other screens, not modal)
   const handleGenerate = useCallback(async () => {
-    if (!project) return;
+    console.log('[App] handleGenerate called, project:', project?.fileName);
+    if (!project) {
+      console.log('[App] handleGenerate: No project');
+      return;
+    }
 
     const jobId = `job_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    console.log('[App] Starting detection with jobId:', jobId);
     setCurrentJobId(jobId);
     setDetecting(true);
     setDetectionError(null);
@@ -188,6 +188,7 @@ function App() {
     setCurrentProjectId(projectId);
 
     try {
+      console.log('[App] Calling startDetection API');
       const result = await window.api.startDetection(
         jobId,
         project.filePath,
@@ -195,11 +196,13 @@ function App() {
         project.duration
       );
 
+      console.log('[App] startDetection result:', result);
       if (!result.success) {
         setDetectionError(result.error || 'Failed to start detection');
         setDetecting(false);
       }
     } catch (err) {
+      console.error('[App] startDetection error:', err);
       setDetectionError(String(err));
       setDetecting(false);
     }
@@ -500,7 +503,9 @@ function App() {
           });
           
           // Set the loaded clips and go to review screen
-          setResults(loadedClips, [], historyProject.transcript || null);
+          const loadedTranscript = historyProject.transcript || null;
+          console.log('[History Load] Loading transcript:', loadedTranscript ? `${(loadedTranscript as any)?.segments?.length || 0} segments` : 'null');
+          setResults(loadedClips, [], loadedTranscript);
           if (loadedClips[0]?.captionStyle) {
             setCaptionStyle(loadedClips[0].captionStyle);
           }
@@ -524,82 +529,179 @@ function App() {
           {/* Header with History Button */}
           <div className="flex items-center justify-between mb-4">
             <h1 className="text-3xl font-bold flex-1">PodFlow</h1>
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => setShowSettings(true)}
-                className="p-2 hover:bg-sz-bg-secondary rounded-lg transition-colors"
-                title="Settings"
-              >
-                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                </svg>
-              </button>
-              <button
-                onClick={() => setScreen('history')}
-                className="p-2 hover:bg-sz-bg-secondary rounded-lg transition-colors"
-                title="View History"
-              >
-                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-              </button>
-            </div>
+            <button
+              onClick={() => setScreen('history')}
+              className="p-2 hover:bg-sz-bg-secondary rounded-lg transition-colors"
+              title="View History"
+            >
+              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+            </button>
           </div>
           
           <p className="text-sz-text-muted">Find the best clips in your podcast</p>
 
-          {/* File Picker */}
+          {/* Workflow Steps */}
+          <div className="space-y-3 text-left bg-sz-bg-secondary rounded-lg p-4 border border-sz-border">
+            <div className="flex gap-3">
+              <div className="flex-shrink-0 w-6 h-6 rounded-full bg-sz-accent text-white flex items-center justify-center text-xs font-bold">1</div>
+              <div>
+                <p className="font-medium text-sm">Upload Video</p>
+                <p className="text-xs text-sz-text-muted">Select your podcast video file</p>
+              </div>
+            </div>
+            <div className="flex gap-3">
+              <div className="flex-shrink-0 w-6 h-6 rounded-full bg-sz-accent text-white flex items-center justify-center text-xs font-bold">2</div>
+              <div>
+                <p className="font-medium text-sm">Add Transcript</p>
+                <p className="text-xs text-sz-text-muted">Upload SRT/VTT for captions</p>
+              </div>
+            </div>
+            <div className="flex gap-3">
+              <div className="flex-shrink-0 w-6 h-6 rounded-full bg-sz-accent text-white flex items-center justify-center text-xs font-bold">3</div>
+              <div>
+                <p className="font-medium text-sm">Review Clips</p>
+                <p className="text-xs text-sz-text-muted">Accept/reject with captions visible</p>
+              </div>
+            </div>
+            <div className="flex gap-3">
+              <div className="flex-shrink-0 w-6 h-6 rounded-full bg-sz-accent text-white flex items-center justify-center text-xs font-bold">4</div>
+              <div>
+                <p className="font-medium text-sm">Export</p>
+                <p className="text-xs text-sz-text-muted">Save clips with captions burned in</p>
+              </div>
+            </div>
+          </div>
+
+          {/* New Project Button */}
           <button
             onClick={handleSelectFile}
-            className="w-full p-8 border-2 border-dashed border-sz-border rounded-xl hover:border-sz-accent hover:bg-sz-bg-secondary transition-colors"
+            className="w-full p-8 border-2 border-sz-accent rounded-xl hover:border-sz-accent hover:bg-sz-bg-secondary transition-colors bg-sz-bg-secondary/50"
           >
-            {project ? (
-              <div className="space-y-2">
-                <p className="font-medium">{project.fileName}</p>
-                <p className="text-sm text-sz-text-muted">
-                  {Math.floor(project.duration / 60)}:{String(Math.floor(project.duration % 60)).padStart(2, '0')}
-                </p>
-              </div>
-            ) : (
-              <p className="text-sz-text-muted">Click to select video</p>
-            )}
+            <p className="text-3xl mb-2">🎬</p>
+            <p className="font-bold text-lg">Start New Project</p>
+            <p className="text-sm text-sz-text-muted mt-2">Upload video + transcript</p>
           </button>
-
-          {/* Generate Button */}
-          <button
-            onClick={handleGenerate}
-            disabled={!project || isDetecting}
-            className="w-full py-4 px-6 bg-sz-accent text-white font-semibold rounded-lg hover:bg-sz-accent-hover disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-          >
-            {isDetecting ? (
-              <span>
-                {detectionProgress?.message || 'Processing...'}
-                {detectionProgress?.percent !== undefined && ` ${Math.round(detectionProgress.percent)}%`}
-              </span>
-            ) : (
-              'Generate Clips'
-            )}
-          </button>
-
-          {detectionError && (
-            <p className="text-sm text-red-500">{detectionError}</p>
-          )}
 
           {/* Review Clips Button (if clips exist) */}
           {clips.length > 0 && !isDetecting && (
             <div className="pt-4 border-t border-sz-border">
               <button
                 onClick={() => setScreen('review')}
-                className="w-full py-4 px-6 bg-sz-bg-secondary text-sz-accent font-semibold rounded-lg hover:bg-sz-bg-tertiary border-2 border-sz-accent transition-colors"
+                className="w-full py-4 px-6 bg-sz-accent text-white font-bold rounded-lg hover:bg-sz-accent-hover border-2 border-sz-accent transition-colors text-lg"
               >
-                Review {clips.length} Generated Clips
+                📺 Review {clips.length} Detected Clips
               </button>
             </div>
           )}
+
+          {isDetecting && (
+            <div className="pt-4 border-t border-sz-border">
+              <div className="space-y-3">
+                <p className="font-medium">Detecting clips... {Math.round(detectionProgress?.percent || 0)}%</p>
+                <div className="w-full h-2 bg-sz-bg-tertiary rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-sz-accent transition-all"
+                    style={{ width: `${detectionProgress?.percent || 0}%` }}
+                  />
+                </div>
+                <p className="text-xs text-sz-text-muted">{detectionProgress?.message || 'Processing...'}</p>
+              </div>
+            </div>
+          )}
+
+          {detectionError && (
+            <p className="text-sm text-red-500 p-4 bg-red-500/10 rounded-lg">{detectionError}</p>
+          )}
         </div>
       </div>
-      {showSettings && <SettingsModal onClose={() => setShowSettings(false)} />}
+
+      {showVideoTranscriptModal && (
+        <VideoAndTranscriptModal
+          onConfirm={async (data) => {
+            console.log('[App] Modal confirmed with:', data);
+            alert('[DEBUG] Modal confirmed with: ' + JSON.stringify({videoPath: data.videoPath, videoName: data.videoName}));
+            try {
+              const validation = await window.api.validateFile(data.videoPath);
+              if (!validation.valid) {
+                alert('Invalid video file');
+                return;
+              }
+
+              // Create project object from validation data
+              const projectData = {
+                filePath: data.videoPath,
+                fileName: data.videoName,
+                size: data.videoSize,
+                duration: validation.duration || 0,
+                resolution: validation.resolution,
+                width: validation.width,
+                height: validation.height,
+                fps: validation.fps,
+                thumbnailPath: validation.thumbnailPath,
+                bitrate: validation.bitrate,
+                videoHash: data.videoHash,
+              };
+
+              // Set project AND start detection immediately with the project data
+              setProject(projectData);
+              setShowVideoTranscriptModal(false);
+              
+              // Start detection immediately using the local projectData instead of relying on state
+              const jobId = `job_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+              console.log('[App] Starting detection with jobId:', jobId);
+              alert('[DEBUG] Starting detection');
+              
+              setCurrentJobId(jobId);
+              setDetecting(true);
+              setDetectionError(null);
+
+              // Add to history
+              const projectId = addProject({
+                fileName: projectData.fileName,
+                filePath: projectData.filePath,
+                duration: projectData.duration,
+                clipCount: 0,
+                acceptedCount: 0,
+                thumbnailPath: projectData.thumbnailPath,
+                size: projectData.size,
+                resolution: projectData.resolution,
+                width: projectData.width,
+                height: projectData.height,
+                fps: projectData.fps,
+                bitrate: projectData.bitrate,
+              });
+              setCurrentProjectId(projectId);
+
+              try {
+                console.log('[App] Calling startDetection API');
+                const result = await window.api.startDetection(
+                  jobId,
+                  projectData.filePath,
+                  settings,
+                  projectData.duration
+                );
+
+                console.log('[App] startDetection result:', result);
+                if (!result.success) {
+                  setDetectionError(result.error || 'Failed to start detection');
+                  setDetecting(false);
+                }
+              } catch (err) {
+                console.error('[App] startDetection error:', err);
+                setDetectionError(String(err));
+                setDetecting(false);
+              }
+            } catch (err: unknown) {
+              const errorMessage = err instanceof Error ? err.message : String(err);
+              console.error('[App] Modal error:', errorMessage);
+              alert('Error: ' + errorMessage);
+            }
+          }}
+          onCancel={() => setShowVideoTranscriptModal(false)}
+        />
+      )}
       </>
     );
   }
@@ -672,9 +774,11 @@ function App() {
             <button
               onClick={() => {
                 if (loadedFromHistory) {
+                  console.log('[Review] Going back to history');
                   setLoadedFromHistory(false);
                   setScreen('history');
                 } else {
+                  console.log('[Review] Going back to home, current transcript segments:', transcript?.segments?.length || 0);
                   setScreen('home');
                 }
               }}
@@ -745,11 +849,11 @@ function App() {
             {/* Clip Counter & Mood Badge */}
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3">
-                <p className="text-sm text-sz-text-muted">
+                <p className="text-sm font-semibold text-sz-accent">
                   Clip {currentClipIndex + 1} of {filteredClips.length}
                 </p>
                 {currentClip.mood && (
-                  <span className="px-2 py-1 text-xs bg-sz-bg-tertiary rounded">
+                  <span className="px-3 py-1 text-xs font-medium bg-sz-accent/20 text-sz-accent rounded-full">
                     {currentClip.mood}
                   </span>
                 )}
@@ -761,19 +865,70 @@ function App() {
 
             {/* Title */}
             {currentClip.title && (
-              <p className="font-medium">{currentClip.title}</p>
+              <p className="font-semibold text-lg">{currentClip.title}</p>
             )}
 
-            {/* Captions Toggle */}
-            <label className="flex items-center gap-2 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={showCaptions}
-                onChange={(e) => setShowCaptions(e.target.checked)}
-                className="w-4 h-4"
-              />
-              <span className="text-sm">Show Captions</span>
-            </label>
+            {/* Caption Controls - More Prominent */}
+            <div className="bg-sz-bg border border-sz-accent/30 rounded-lg p-4 space-y-3">
+              <div className="flex items-center justify-between">
+                <label className="flex items-center gap-2 cursor-pointer flex-1">
+                  <input
+                    type="checkbox"
+                    checked={showCaptions}
+                    onChange={(e) => {
+                      console.log('[Captions] Toggle to:', e.target.checked);
+                      setShowCaptions(e.target.checked);
+                    }}
+                    className="w-4 h-4 accent-sz-accent"
+                  />
+                  <span className="text-sm font-medium">
+                    {showCaptions ? '📝 Captions ON' : '📝 Captions OFF'}
+                  </span>
+                </label>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs bg-sz-accent/20 px-2 py-1 rounded text-sz-accent font-medium">
+                    {captionStyle}
+                  </span>
+                  <button
+                    onClick={() => {
+                      // Simple cycle through caption styles
+                      const styles: Array<'viral' | 'minimal' | 'bold'> = ['viral', 'minimal', 'bold'];
+                      const currentIdx = styles.indexOf(captionStyle);
+                      const nextIdx = (currentIdx + 1) % styles.length;
+                      console.log('[Captions] Switching style from', captionStyle, 'to', styles[nextIdx]);
+                      setCaptionStyle(styles[nextIdx]);
+                    }}
+                    className="text-xs px-2 py-1 bg-sz-bg-tertiary hover:bg-sz-accent/20 rounded transition-colors"
+                  >
+                    Change Style
+                  </button>
+                </div>
+              </div>
+              {(() => {
+                const hasTranscript = transcript && transcript.segments && transcript.segments.length > 0;
+                console.log('[Captions] Render check - hasTranscript:', hasTranscript, 'segments:', transcript?.segments?.length || 0, 'showCaptions:', showCaptions);
+                
+                if (showCaptions && hasTranscript) {
+                  return (
+                    <p className="text-xs text-green-400">
+                      ✓ {transcript.segments.length} transcript segments loaded • Captions will appear on video
+                    </p>
+                  );
+                } else if (!showCaptions) {
+                  return (
+                    <p className="text-xs text-sz-text-muted">
+                      Enable captions to see transcript on the video preview
+                    </p>
+                  );
+                } else {
+                  return (
+                    <p className="text-xs text-yellow-400">
+                      ⚠ No transcript loaded - upload transcript file or re-run detection
+                    </p>
+                  );
+                }
+              })()}
+            </div>
 
             {/* Trim Controls */}
             <div className="flex items-center gap-4">
@@ -807,33 +962,31 @@ function App() {
 
             {/* Action Buttons */}
             {!loadedFromHistory && (
-              <div className="flex items-center gap-3">
-                <button
-                  onClick={handleAccept}
-                  className={`flex-1 py-3 px-4 rounded-lg font-medium transition-colors ${
-                    currentClip.status === 'accepted'
-                      ? 'bg-green-600 text-white'
-                      : 'bg-sz-bg-tertiary hover:bg-green-600 hover:text-white'
-                  }`}
-                >
-                  {currentClip.status === 'accepted' ? 'Accepted ✓' : 'Accept (A)'}
-                </button>
-                <button
-                  onClick={handleReject}
-                  className={`flex-1 py-3 px-4 rounded-lg font-medium transition-colors ${
-                    currentClip.status === 'rejected'
-                      ? 'bg-red-600 text-white'
-                      : 'bg-sz-bg-tertiary hover:bg-red-600 hover:text-white'
-                  }`}
-                >
-                  {currentClip.status === 'rejected' ? 'Rejected' : 'Reject (R)'}
-                </button>
-                <button
-                  onClick={handleExportClip}
-                  className="py-3 px-6 bg-sz-accent text-white rounded-lg font-medium hover:bg-sz-accent-hover transition-colors"
-                >
-                  Export
-                </button>
+              <div className="space-y-3">
+                <p className="text-xs uppercase tracking-wider text-sz-text-muted font-semibold">Step 1: Accept or Reject</p>
+                <div className="flex items-center gap-3">
+                  <button
+                    onClick={handleAccept}
+                    className={`flex-1 py-3 px-4 rounded-lg font-semibold transition-all transform hover:scale-105 ${
+                      currentClip.status === 'accepted'
+                        ? 'bg-green-600 text-white shadow-lg shadow-green-600/50'
+                        : 'bg-sz-bg-tertiary text-sz-text hover:bg-green-600 hover:text-white'
+                    }`}
+                  >
+                    {currentClip.status === 'accepted' ? '✓ Accepted' : '✓ Accept (A)'}
+                  </button>
+                  <button
+                    onClick={handleReject}
+                    className={`flex-1 py-3 px-4 rounded-lg font-semibold transition-all transform hover:scale-105 ${
+                      currentClip.status === 'rejected'
+                        ? 'bg-red-600 text-white shadow-lg shadow-red-600/50'
+                        : 'bg-sz-bg-tertiary text-sz-text hover:bg-red-600 hover:text-white'
+                    }`}
+                  >
+                    {currentClip.status === 'rejected' ? '✗ Rejected' : '✗ Reject (R)'}
+                  </button>
+                </div>
+                <p className="text-xs text-sz-text-muted text-center">Use arrow keys to navigate clips →</p>
               </div>
             )}
 
@@ -842,7 +995,37 @@ function App() {
                 <svg className="w-5 h-5 mr-2" fill="currentColor" viewBox="0 0 20 20">
                   <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
                 </svg>
-                Already Exported
+                Already Exported ✓
+              </div>
+            )}
+
+            {/* Export Section */}
+            {!loadedFromHistory && (
+              <div className="bg-sz-bg border-2 border-sz-accent/30 rounded-lg p-4 space-y-3">
+                <p className="text-xs uppercase tracking-wider text-sz-accent font-semibold">Step 2: Export Clips</p>
+                <div className="flex flex-col gap-2">
+                  <button
+                    onClick={handleExportClip}
+                    className="w-full py-3 px-4 bg-sz-accent text-white rounded-lg font-semibold hover:bg-sz-accent-hover transition-all transform hover:scale-105"
+                  >
+                    Export This Clip →
+                  </button>
+                  {acceptedClips.length > 1 && (
+                    <button
+                      onClick={handleExportAll}
+                      className="w-full py-3 px-4 bg-green-600 text-white rounded-lg font-semibold hover:bg-green-500 transition-all transform hover:scale-105"
+                    >
+                      Export All {acceptedClips.length} Accepted →
+                    </button>
+                  )}
+                </div>
+                <p className="text-xs text-sz-text-muted text-center">
+                  {acceptedClips.length === 0
+                    ? 'Accept clips above to enable export'
+                    : acceptedClips.length === 1
+                    ? `${acceptedClips.length} clip ready to export`
+                    : `${acceptedClips.length} clips ready to export`}
+                </p>
               </div>
             )}
 
@@ -852,25 +1035,28 @@ function App() {
                 <button
                   onClick={goToPrevClip}
                   disabled={currentClipIndex === 0}
-                  className="px-4 py-2 bg-sz-bg-tertiary rounded-lg disabled:opacity-50"
+                  className="px-4 py-2 bg-sz-bg-tertiary rounded-lg hover:bg-sz-bg-hover disabled:opacity-50 disabled:cursor-not-allowed font-medium transition-colors"
                 >
                   ← Prev
                 </button>
+                <span className="text-xs text-sz-text-muted px-2">
+                  {currentClipIndex + 1} / {filteredClips.length}
+                </span>
                 <button
                   onClick={goToNextClip}
                   disabled={currentClipIndex === clips.length - 1}
-                  className="px-4 py-2 bg-sz-bg-tertiary rounded-lg disabled:opacity-50"
+                  className="px-4 py-2 bg-sz-bg-tertiary rounded-lg hover:bg-sz-bg-hover disabled:opacity-50 disabled:cursor-not-allowed font-medium transition-colors"
                 >
                   Next →
                 </button>
               </div>
               
-              {!loadedFromHistory && acceptedClips.length > 0 && (
+              {loadedFromHistory && (
                 <button
-                  onClick={handleExportAll}
-                  className="px-6 py-2 bg-green-600 text-white rounded-lg font-medium hover:bg-green-500 transition-colors"
+                  onClick={() => setScreen('home')}
+                  className="px-6 py-2 bg-sz-accent text-white rounded-lg font-medium hover:bg-sz-accent-hover transition-colors"
                 >
-                  Export All ({acceptedClips.length})
+                  Done
                 </button>
               )}
             </div>
@@ -887,56 +1073,84 @@ function App() {
     return (
       <div className="h-screen w-screen flex flex-col items-center justify-center bg-sz-bg text-sz-text p-8">
         <div className="max-w-md w-full space-y-6 text-center">
-          <h1 className="text-2xl font-bold">
-            {isExporting ? 'Exporting...' : 'Export Complete'}
-          </h1>
-
-          {/* Progress */}
-          {isExporting && exportProgress && (
-            <div className="space-y-2">
-              <div className="w-full h-2 bg-sz-bg-tertiary rounded-full overflow-hidden">
-                <div
-                  className="h-full bg-sz-accent transition-all"
-                  style={{ width: `${(exportProgress.current / exportProgress.total) * 100}%` }}
-                />
+          {isExporting ? (
+            <>
+              <div className="space-y-2 mb-4">
+                <div className="text-5xl animate-pulse">🚀</div>
+                <h1 className="text-2xl font-bold">Exporting Clips...</h1>
               </div>
-              <p className="text-sm text-sz-text-muted">
-                {exportProgress.current} of {exportProgress.total} clips
-              </p>
-              {exportProgress.clipName && (
-                <p className="text-sm">{exportProgress.clipName}</p>
+
+              {/* Progress */}
+              {exportProgress && (
+                <div className="space-y-4 bg-sz-bg-secondary rounded-lg p-6">
+                  <div className="w-full h-3 bg-sz-bg-tertiary rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-gradient-to-r from-sz-accent to-green-500 transition-all duration-300"
+                      style={{ width: `${(exportProgress.current / exportProgress.total) * 100}%` }}
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <p className="text-sm font-semibold">
+                      {exportProgress.current} of {exportProgress.total} clips
+                    </p>
+                    {exportProgress.clipName && (
+                      <p className="text-xs text-sz-text-muted">{exportProgress.clipName}</p>
+                    )}
+                  </div>
+                </div>
               )}
-            </div>
-          )}
+            </>
+          ) : (
+            <>
+              <div className="space-y-2 mb-4">
+                <div className="text-5xl">✅</div>
+                <h1 className="text-2xl font-bold">Export Complete!</h1>
+              </div>
 
-          {/* Exported Clips List */}
-          {!isExporting && exportedClips.length > 0 && (
-            <div className="text-left bg-sz-bg-secondary rounded-lg p-4">
-              <p className="text-sm font-medium mb-2">Exported:</p>
-              {exportedClips.map((item, i) => (
-                <p key={i} className="text-sm text-sz-text-muted">• {item}</p>
-              ))}
-            </div>
-          )}
+              {/* Exported Clips List */}
+              {exportedClips.length > 0 && (
+                <div className="text-left bg-green-600/20 border border-green-600/30 rounded-lg p-4 space-y-2">
+                  <p className="text-sm font-semibold text-green-400 mb-2">✓ Exported {exportedClips.length} clips with captions</p>
+                  {exportedClips.map((item, i) => (
+                    <p key={i} className="text-xs text-green-300">
+                      • {item}
+                    </p>
+                  ))}
+                </div>
+              )}
 
-          {/* Open Folder */}
-          {!isExporting && lastExportDir && (
-            <button
-              onClick={handleOpenFolder}
-              className="w-full py-3 px-6 bg-sz-accent text-white rounded-lg font-medium hover:bg-sz-accent-hover transition-colors"
-            >
-              Open Folder
-            </button>
-          )}
+              {/* Open Folder */}
+              {lastExportDir && (
+                <button
+                  onClick={handleOpenFolder}
+                  className="w-full py-3 px-6 bg-sz-accent text-white rounded-lg font-semibold hover:bg-sz-accent-hover transition-all transform hover:scale-105"
+                >
+                  📁 Open Export Folder
+                </button>
+              )}
 
-          {/* Back to Review */}
-          {!isExporting && (
-            <button
-              onClick={() => setScreen('review')}
-              className="w-full py-3 px-6 bg-sz-bg-tertiary rounded-lg hover:bg-sz-bg-hover transition-colors"
-            >
-              Back to Review
-            </button>
+              {/* Navigation Options */}
+              <div className="flex flex-col gap-2 pt-4">
+                <button
+                  onClick={() => {
+                    setExportedClips([]);
+                    setScreen('review');
+                  }}
+                  className="w-full py-2 px-6 bg-sz-bg-secondary rounded-lg hover:bg-sz-bg-tertiary transition-colors font-medium"
+                >
+                  Back to Review
+                </button>
+                <button
+                  onClick={() => {
+                    setExportedClips([]);
+                    setScreen('home');
+                  }}
+                  className="w-full py-2 px-6 bg-sz-bg-secondary rounded-lg hover:bg-sz-bg-tertiary transition-colors font-medium"
+                >
+                  New Project
+                </button>
+              </div>
+            </>
           )}
         </div>
       </div>
@@ -949,7 +1163,41 @@ function App() {
       <div className="h-screen w-screen flex items-center justify-center bg-sz-bg text-sz-text">
         <p>Loading...</p>
       </div>
-      {showSettings && <SettingsModal onClose={() => setShowSettings(false)} />}
+      {showVideoTranscriptModal && (
+        <VideoAndTranscriptModal
+          onConfirm={async (data) => {
+            try {
+              const validation = await window.api.validateFile(data.videoPath);
+              if (!validation.valid) {
+                alert('Invalid video file');
+                return;
+              }
+
+              setProject({
+                filePath: data.videoPath,
+                fileName: data.videoName,
+                size: data.videoSize,
+                duration: validation.duration || 0,
+                resolution: validation.resolution,
+                width: validation.width,
+                height: validation.height,
+                fps: validation.fps,
+                thumbnailPath: validation.thumbnailPath,
+                bitrate: validation.bitrate,
+                videoHash: data.videoHash,
+              });
+
+              setShowVideoTranscriptModal(false);
+              handleGenerate();
+            } catch (err: unknown) {
+              const errorMessage = err instanceof Error ? err.message : String(err);
+              console.error('[App] Fallback modal error:', errorMessage);
+              alert('Error: ' + errorMessage);
+            }
+          }}
+          onCancel={() => setShowVideoTranscriptModal(false)}
+        />
+      )}
     </>
   );
 }

@@ -47,16 +47,35 @@ const startJob = async (data: {
   projectId: string;
   filePath: string;
   settings: DetectionSettings;
+  durationSeconds?: number;
 }) => {
   const { projectId, filePath, settings } = data;
+  console.log('[Detection] startJob called for projectId:', projectId);
   const win = getMainWindow();
   if (!win) {
+    console.log('[Detection] startJob: Window not found');
     return { success: false, error: 'Window not found' };
   }
 
   const inputHash = await hashFile(filePath);
   const cacheDir = path.join(app.getPath('userData'), 'cache', inputHash);
   const aiCacheDir = path.join(cacheDir, 'ai');
+  
+  // Also check for transcript saved with filename (from modal upload)
+  const filename = path.basename(filePath);
+  const filenameCacheDir = path.join(app.getPath('userData'), 'cache', filename);
+  const transcriptPath = path.join(cacheDir, 'transcript.json');
+  const filenameTranscriptPath = path.join(filenameCacheDir, 'transcript.json');
+  
+  // Check which transcript to use (prefer inputHash, fallback to filename)
+  let selectedTranscriptPath = transcriptPath;
+  if (!fs.existsSync(transcriptPath) && fs.existsSync(filenameTranscriptPath)) {
+    console.log('[Detection] Found transcript with filename cache, copying to input hash cache');
+    fs.mkdirSync(cacheDir, { recursive: true });
+    const content = fs.readFileSync(filenameTranscriptPath, 'utf-8');
+    fs.writeFileSync(transcriptPath, content);
+    selectedTranscriptPath = transcriptPath;
+  }
 
   // Cancel any existing detection for this project
   if (activeProcesses.has(projectId)) {
@@ -74,22 +93,41 @@ const startJob = async (data: {
   const pythonScript = path.join(pythonDir, 'detector.py');
 
   // Prepare settings JSON
+  // Relax defaults to ensure clips are produced and force recompute every run
+  const relaxedSettings = {
+    targetCount: settings.targetCount ?? 20,
+    minDuration: settings.minDuration ?? 8,
+    maxDuration: settings.maxDuration ?? 300,
+    skipIntro: settings.skipIntro ?? 0,
+    skipOutro: settings.skipOutro ?? 0,
+    useAiEnhancement: settings.useAiEnhancement ?? false,
+    openaiApiKey: settings.openaiApiKey,
+    debug: settings.debug ?? false,
+  };
+
   const settingsJson = JSON.stringify({
-    mvp_mode: true,  // Enable MVP pipeline for better clip detection
-    target_count: settings.targetCount,
-    min_duration: settings.minDuration,
-    max_duration: settings.maxDuration,
-    skip_intro: settings.skipIntro,
-    skip_outro: settings.skipOutro,
-    use_ai_enhancement: settings.useAiEnhancement,
-    openai_api_key: settings.openaiApiKey || process.env.OPENAI_API_KEY || '',
-    debug: settings.debug || false,
+    mvp_mode: true,
+    target_count: relaxedSettings.targetCount,
+    min_duration: relaxedSettings.minDuration,
+    max_duration: relaxedSettings.maxDuration,
+    skip_intro: relaxedSettings.skipIntro,
+    skip_outro: relaxedSettings.skipOutro,
+    use_ai_enhancement: relaxedSettings.useAiEnhancement,
+    openai_api_key: relaxedSettings.openaiApiKey || process.env.OPENAI_API_KEY || '',
+    debug: relaxedSettings.debug,
+    force_rerun: true, // ensure all stages rerun and ignore stale caches
     cache_dir: cacheDir,
     job_dir: cacheDir,
     ai_cache_dir: aiCacheDir,
     input_hash: inputHash,
     ffmpeg_path: ffmpegPath,
-    top_n: settings.targetCount,
+    top_n: relaxedSettings.targetCount,
+  });
+  
+  console.log('[Detection] Settings:', {
+    hasApiKey: !!settings.openaiApiKey,
+    apiKeyLength: settings.openaiApiKey?.length || 0,
+    targetCount: settings.targetCount,
   });
 
   console.log('[Detection] Starting:', pythonScript);
@@ -133,6 +171,9 @@ const startJob = async (data: {
         const parts = line.substring(9).split(':');
         const progress = parseInt(parts[0], 10);
         const message = parts.slice(1).join(':').trim();
+        
+        // DEBUG: Log all progress messages
+        console.log(`[Detection] Progress ${progress}%: ${message}`);
 
         const now = Date.now();
         const state = progressState.get(projectId) || { lastSentAt: 0, lastProgress: 0, lastMessage: '' };
@@ -231,11 +272,15 @@ ipcMain.handle('start-detection', async (_event, data: {
   projectId: string;
   filePath: string;
   settings: DetectionSettings;
+  durationSeconds?: number;
 }) => {
+  console.log('[Detection] Handler called with:', { projectId: data.projectId, filePath: data.filePath, durationSeconds: data.durationSeconds });
   const win = getMainWindow();
   if (!win) {
+    console.log('[Detection] Window not found');
     return { success: false, error: 'Window not found' };
   }
+  console.log('[Detection] Calling startJob');
   return startJob(data);
 });
 

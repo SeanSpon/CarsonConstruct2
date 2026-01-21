@@ -6,6 +6,7 @@ import { setMainWindow, getMainWindow } from './window';
 import './ipc/fileHandlers';
 import './ipc/detectionHandlers';
 import './ipc/exportHandlers';
+import { registerTranscriptHandlers } from './ipc/transcriptHandlers';
 
 // Window control handlers
 ipcMain.on('window-minimize', () => {
@@ -72,6 +73,7 @@ const createWindow = () => {
 
 app.whenReady().then(() => {
   createWindow();
+  registerTranscriptHandlers();
 
   // Check if Python is available
   const { spawn } = require('child_process');

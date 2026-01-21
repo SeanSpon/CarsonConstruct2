@@ -89,7 +89,7 @@ def propose_clip_windows(
     duration: float,
     clip_lengths: List[int] = None,
     min_clip: float = 8,
-    max_clip: float = 45,
+    max_clip: float = 300,
     snap_window_s: float = 2.0,
     start_padding_s: float = 0.6,
     end_padding_s: float = 0.8
@@ -101,9 +101,9 @@ def propose_clip_windows(
         candidate: Candidate dict with 't_peak', 'type', 'start', 'end'
         transcript: Whisper transcript dict
         duration: Total video duration
-        clip_lengths: List of lengths to try (seconds), default [12, 18, 24, 35]
-        min_clip: Minimum clip duration
-        max_clip: Maximum clip duration
+        clip_lengths: List of lengths to try (seconds), default [30, 45, 60, 90, 120]
+        min_clip: Minimum clip duration (default 8s)
+        max_clip: Maximum clip duration (default 300s)
         snap_window_s: Max adjustment for sentence snapping
         start_padding_s: Padding before clip start
         end_padding_s: Padding after clip end
@@ -112,7 +112,7 @@ def propose_clip_windows(
         List of (start, end, snapped, snap_reason) tuples
     """
     if clip_lengths is None:
-        clip_lengths = [12, 18, 24, 35]
+        clip_lengths = [30, 45, 60, 90, 120]
     
     t_peak = candidate.get("t_peak", candidate.get("start", 0))
     
@@ -123,9 +123,9 @@ def propose_clip_windows(
     seen_ranges = set()  # Avoid duplicate windows
     
     for L in clip_lengths:
-        # Position clip so peak is slightly before center (45% before, 55% after)
-        raw_start = center - L * 0.45
-        raw_end = center + L * 0.55
+        # Position clip so peak is roughly 40% through (more content before+after, not centered on peak)
+        raw_start = center - L * 0.40
+        raw_end = center + L * 0.60
         
         # Snap to transcript boundaries
         snapped_start, start_snapped, start_reason = snap_to_segment_boundary(

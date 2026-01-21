@@ -262,6 +262,7 @@ export interface Project {
   fps?: number;
   thumbnailPath?: string;
   bitrate?: number;
+  videoHash?: string;
 }
 
 // Detection settings

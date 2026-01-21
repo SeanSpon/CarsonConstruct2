@@ -20,9 +20,14 @@ export function CaptionOverlay({
 
   useEffect(() => {
     if (!show || !transcript || !transcript.segments) {
+      if (show && !transcript) {
+        console.log('[CaptionOverlay] Show is true but transcript is missing');
+      }
       setDisplayText('');
       return;
     }
+
+    console.log('[CaptionOverlay] Searching for segment at time', currentTime, 'from', transcript.segments.length, 'segments');
 
     // Find the segment that contains the current time
     const segment = transcript.segments.find(
@@ -33,6 +38,8 @@ export function CaptionOverlay({
       setDisplayText('');
       return;
     }
+
+    console.log('[CaptionOverlay] Found segment:', segment.text?.substring(0, 50));
 
     // For viral style with word-level timing, highlight current word
     if (captionStyle === 'viral' && transcript.words) {

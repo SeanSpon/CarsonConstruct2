@@ -275,51 +275,49 @@ def run_mvp_pipeline(video_path: str, settings: dict):
     
     # Stage B: Transcribe
     transcript = None
+    # Stage B: Transcribe (or load uploaded transcript)
+    transcript = None
     if not should_skip_stage(transcript_path, force):
-        send_progress(20, "Stage B: Transcribing audio...")
-        try:
-            if openai_key:
-                # Try OpenAI Whisper API first
-                send_progress(20, "Using OpenAI Whisper API...")
-                from ai.transcription import transcribe_with_whisper
-                transcript = transcribe_with_whisper(audio_path, openai_key)
-            else:
-                # Fall back to local faster-whisper
-                send_progress(20, "Using local Whisper model (no API key)...")
-                try:
-                    from faster_whisper import WhisperModel
-                    # Use base model for good quality/speed balance
-                    model = WhisperModel("base", device="auto", compute_type="auto")
-                    segments_list, _ = model.transcribe(audio_path, language="en", vad_filter=True)
-                    
-                    # Convert to standard format
-                    segments = []
-                    for seg in segments_list:
-                        segments.append({
-                            "start": seg.start,
-                            "end": seg.end,
-                            "text": seg.text
-                        })
-                    
-                    transcript = {
-                        "segments": segments,
-                        "words": [],
-                        "text": " ".join([s["text"] for s in segments])
-                    }
-                except ImportError:
-                    send_progress(20, "faster-whisper not installed. Install: pip install faster-whisper")
-                    transcript = {"segments": [], "words": [], "text": ""}
-                except Exception as e:
-                    send_progress(20, f"Local Whisper error: {e}, continuing without captions...")
-                    transcript = {"segments": [], "words": [], "text": ""}
+        send_progress(20, "Stage B: Checking for uploaded transcript...")
+        # First check if transcript already exists (uploaded by user)
+        existing_transcript = _safe_read_json(transcript_path)
+        if existing_transcript and existing_transcript.get("segments"):
+            send_progress(20, "Using uploaded transcript...")
+            transcript = existing_transcript
+            _write_json(transcript_path, transcript, indent=2)
+        else:
+            # Only try to transcribe if no transcript was uploaded
+            send_progress(20, "No transcript found, using local Whisper model...")
+            try:
+                from faster_whisper import WhisperModel
+                # Use base model for good quality/speed balance
+                model = WhisperModel("base", device="auto", compute_type="auto")
+                segments_list, _ = model.transcribe(audio_path, language="en", vad_filter=True)
+                
+                # Convert to standard format
+                segments = []
+                for seg in segments_list:
+                    segments.append({
+                        "start": seg.start,
+                        "end": seg.end,
+                        "text": seg.text
+                    })
+                
+                transcript = {
+                    "segments": segments,
+                    "words": [],
+                    "text": " ".join([s["text"] for s in segments])
+                }
+            except ImportError:
+                send_progress(20, "faster-whisper not installed")
+                transcript = {"segments": [], "words": [], "text": ""}
+            except Exception as e:
+                send_progress(20, f"Transcription error: {e}, continuing without...")
+                transcript = {"segments": [], "words": [], "text": ""}
             
             _write_json(transcript_path, transcript, indent=2)
-        except Exception as e:
-            send_progress(20, f"Transcription failed: {e}, continuing without...")
-            transcript = {"segments": [], "words": [], "text": ""}
-            _write_json(transcript_path, transcript, indent=2)
     else:
-        send_progress(20, "Stage B: Transcript exists, loading...")
+        send_progress(20, "Stage B: Loading transcript...")
         transcript = _safe_read_json(transcript_path) or {"segments": [], "words": [], "text": ""}
     
     # Stage C: Compute features
@@ -412,7 +410,7 @@ def run_mvp_pipeline(video_path: str, settings: dict):
         send_progress(70, "Stage E: Scoring and selecting clips...")
         try:
             scoring_settings = {
-                "clip_lengths": settings.get("clip_lengths", [12, 18, 24, 35]),
+                "clip_lengths": settings.get("clip_lengths", [30, 45, 60, 90, 120]),
                 "min_clip_s": min_duration,
                 "max_clip_s": max_duration,
                 "snap_window_s": settings.get("snap_window_s", 2.0),
@@ -422,8 +420,34 @@ def run_mvp_pipeline(video_path: str, settings: dict):
                 "top_n": top_n,
             }
             features["duration"] = duration
+            send_progress(72, f"DEBUG: candidates count = {len(candidates) if candidates else 0}")
             clips = score_and_select_clips(candidates, features, transcript, scoring_settings)
-            
+            send_progress(75, f"DEBUG: after scoring, clips count = {len(clips)}")
+
+            # Fallback: if no clips were selected, take top candidates directly
+            if len(clips) == 0 and candidates:
+                send_progress(80, f"No scored clips; falling back to top {top_n or 10} candidates")
+                fallback = candidates[: top_n or 10]
+                send_progress(80, f"DEBUG: fallback length = {len(fallback)}")
+                clips = []
+                for i, cand in enumerate(fallback):
+                    start = cand.get("start") or cand.get("start_time") or 0
+                    end = cand.get("end") or cand.get("end_time") or start + 15  # default 15s duration
+                    clips.append({
+                        "id": f"fallback_{i+1:03d}",
+                        "startTime": float(start),
+                        "endTime": float(end),
+                        "duration": max(0, end - start),
+                        "pattern": cand.get("pattern", "fallback"),
+                        "patternLabel": cand.get("patternLabel", f"Moment {i+1}"),
+                        "description": cand.get("description", ""),
+                        "score": cand.get("score", 0),
+                        "score_breakdown": cand.get("score_breakdown", {}),
+                    })
+                send_progress(82, f"DEBUG: created {len(clips)} fallback clips")
+            elif len(clips) == 0:
+                send_progress(80, f"DEBUG: candidates is empty or falsy: {candidates is None}")
+
             send_progress(85, f"Selected {len(clips)} final clips")
             
             # Save clips.json with params

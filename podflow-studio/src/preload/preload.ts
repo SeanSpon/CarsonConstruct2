@@ -92,6 +92,10 @@ contextBridge.exposeInMainWorld('api', {
   selectOutputDir: (): Promise<string | null> => 
     ipcRenderer.invoke('select-output-dir'),
 
+  // Upload transcript
+  uploadTranscript: (data: { projectId: string; videoHash: string }): Promise<{ success: boolean; segmentCount?: number; error?: string }> =>
+    ipcRenderer.invoke('upload-transcript', data),
+
   // Extract waveform data from video/audio file
   extractWaveform: (filePath: string, numPoints?: number): Promise<{
     success: boolean;
@@ -508,6 +512,7 @@ declare global {
       selectFile: () => Promise<FileInfo | null>;
       validateFile: (filePath: string) => Promise<FileValidation>;
       selectOutputDir: () => Promise<string | null>;
+      uploadTranscript: (data: { projectId: string; videoHash: string }) => Promise<{ success: boolean; segmentCount?: number; error?: string }>;
       extractWaveform: (filePath: string, numPoints?: number) => Promise<{
         success: boolean;
         waveform?: number[];

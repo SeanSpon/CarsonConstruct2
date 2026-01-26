@@ -1,0 +1,104 @@
+{
+  "$schema": "./mvp-rules-schema.json",
+  "version": "1.0.0",
+  "name": "ClipBot MVP",
+  "description": "Story-first, quality-gated clip production engine",
+  
+  "pipeline": {
+    "target_clips": 10,
+    "max_clips_hard": 15,
+    "min_clips_warn": 3,
+    "strict_mode": true
+  },
+  
+  "segmentation": {
+    "min_duration": 20.0,
+    "max_duration": 90.0,
+    "target_duration": 45.0
+  },
+  
+  "gates": {
+    "narrative": {
+      "min_story_elements": 2,
+      "elements": ["setup", "core", "resolution"],
+      "rule": "Must have at least 2 of 3 story elements"
+    },
+    "visual": {
+      "min_duration": 15.0,
+      "max_duration": 90.0,
+      "min_speech_ratio": 0.7,
+      "rule": "Clean cuts, proper duration, sufficient speech"
+    },
+    "caption": {
+      "min_words": 15,
+      "require_complete_sentences": true,
+      "rule": "Understandable when muted"
+    },
+    "confidence": {
+      "min_threshold": 0.6,
+      "max_context_dependency": 0.7,
+      "rule": "System must be confident clip is shippable"
+    }
+  },
+  
+  "ai": {
+    "enabled": true,
+    "provider": "openai",
+    "model": "gpt-4o-mini",
+    "timeout_seconds": 30,
+    "fallback_to_heuristics": true
+  },
+  
+  "human_actions": {
+    "allowed": [
+      "star",
+      "approve",
+      "reject",
+      "more_like_this"
+    ],
+    "forbidden": [
+      "timeline_edit",
+      "caption_rewrite",
+      "manual_rescue",
+      "force_export",
+      "override_gates"
+    ],
+    "expected_time_minutes": {
+      "min": 2,
+      "max": 5
+    }
+  },
+  
+  "confidence_labels": {
+    "top_pick": {
+      "threshold": 0.85,
+      "emoji": "🔥",
+      "label": "Top Pick"
+    },
+    "solid": {
+      "threshold": 0.7,
+      "emoji": "👍",
+      "label": "Solid"
+    },
+    "optional": {
+      "threshold": 0.6,
+      "emoji": "🧪",
+      "label": "Optional"
+    }
+  },
+  
+  "output": {
+    "format": "mp4",
+    "aspect_ratio": "9:16",
+    "platforms": ["tiktok", "instagram_reels"],
+    "include_captions": true
+  },
+  
+  "philosophy": {
+    "core_principle": "If a clip does not tell a complete story, it does not ship",
+    "rejection_is_success": true,
+    "empty_output_valid": true,
+    "backend_is_truth": true,
+    "ui_cannot_override": true
+  }
+}

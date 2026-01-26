@@ -1,8 +1,90 @@
-# PodFlow Studio — Podcast Clip Pipeline (MVP)
+# ClipBot — Story-First Short-Form Production Engine
 
-> A **deterministic pipeline** that converts long-form podcast video into short vertical clips with captions and clean cuts.
+> **Not a clip factory. A taste firewall.** Turn one podcast episode into 5–10 premium, story-complete clips that feel human-edited.
 
-## What This Does
+## ⚡ The Core Rule
+
+**If a clip doesn't tell a complete story, it doesn't ship.**
+
+Most AI clippers embarrass brands with contextless slop. ClipBot refuses to ship incomplete stories.
+
+---
+
+## 🎯 MVP Architecture
+
+```
+INPUT → SEGMENT → ANALYZE → GATE → RANK → SHIP
+```
+
+### The 4 Quality Gates
+
+Every clip must pass ALL gates. Fail any one = DROP.
+
+| Gate | Rule | Threshold |
+|------|------|-----------|
+| 🎭 **Narrative** | Must have 2 of 3: setup, core, resolution | ≥2 elements |
+| 🎬 **Visual** | Clean cuts, proper duration | 15-90 seconds |
+| 📝 **Caption** | Understandable when muted | ≥15 words |
+| 🎯 **Confidence** | System must be confident | ≥60% |
+
+---
+
+## 📁 New Folder Structure
+
+```
+clipbot/
+├── core/                      # 🧠 The editorial brain (NEW)
+│   ├── narrative/             # Story structure detection
+│   │   ├── unit.py            # NarrativeUnit schema
+│   │   ├── detector.py        # Story element detection
+│   │   └── gate.py            # Quality gates
+│   └── pipeline/              # Story-first processing
+│
+├── podflow-studio/            # Electron desktop app (existing)
+├── config/mvp-rules.json      # MVP configuration
+├── docs/                      # Documentation
+│   ├── MVP_RULES.md           # What ClipBot refuses to do
+│   ├── PIPELINE_FLOW.md       # Processing stages
+│   └── UI_PHILOSOPHY.md       # Design principles
+└── scripts/test_core.py       # Core logic tests
+```
+
+---
+
+## 🚀 Quick Start
+
+```bash
+# Test the new core logic
+python scripts/test_core.py
+
+# Run PodFlow Studio
+cd podflow-studio
+npm install && npm start
+```
+
+---
+
+## 🔒 MVP Rules
+
+**Allowed human actions:**
+- ⭐ Star/Favorite
+- 👍 Approve  
+- 👎 Reject
+- "More like this"
+
+**Expected review time: 2-5 minutes**
+
+**See:** [docs/MVP_RULES.md](docs/MVP_RULES.md)
+
+---
+
+## Original System (Below)
+
+The legacy documentation follows. The new `core/` module provides the story-first logic.
+
+---
+
+## What This Does (Legacy)
 
 ```
 Input Video(s)

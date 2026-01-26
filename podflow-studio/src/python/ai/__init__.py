@@ -1,22 +1,23 @@
 """
-AI Enhancement Module
+AI Enhancement Module (MVP Story-First Edition)
 
-This module provides AI-powered clip analysis and enhancement.
+This module provides AI-powered clip analysis with NARRATIVE-FIRST selection.
 
-Architecture:
+NEW ARCHITECTURE (MVP):
     ┌─────────────────────────────────────────────────────────────────┐
-    │                         ORCHESTRATOR                             │
-    │  Coordinates the full AI pipeline: transcription → translation   │
-    │  → thinking → final selection                                    │
+    │                      STORY PIPELINE                              │
+    │  SEGMENT → ANALYZE → GATE → RANK → SHIP                         │
+    │  (Backend is source of truth. UI cannot override.)              │
     └───────────────────────────────┬─────────────────────────────────┘
                                     │
             ┌───────────────────────┼───────────────────────────────┐
             │                       │                               │
             ▼                       ▼                               ▼
     ┌───────────────┐      ┌───────────────┐              ┌───────────────┐
-    │  TRANSLATOR   │      │   THINKER     │              │  TRANSCRIBER  │
-    │ ClipCard →    │      │ Select best   │              │ Audio → Text  │
-    │ MeaningCard   │      │ clip set      │              │ + timestamps  │
+    │   NARRATIVE   │      │   QUALITY     │              │  TRANSCRIBER  │
+    │   DETECTOR    │      │   GATES       │              │ Audio → Text  │
+    │ Setup/Core/   │      │ 4 gates:      │              │ + timestamps  │
+    │ Resolution    │      │ DROP if fail  │              │               │
     └───────────────┘      └───────────────┘              └───────────────┘
             │                       │                               │
             └───────────────────────┼───────────────────────────────┘

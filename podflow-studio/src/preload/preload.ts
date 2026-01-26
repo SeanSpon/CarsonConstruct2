@@ -125,6 +125,18 @@ contextBridge.exposeInMainWorld('api', {
   }): Promise<{ success: boolean; outputDir?: string; error?: string }> =>
     ipcRenderer.invoke('export-clips', data),
   
+  // Auto-Edit Export: remove dead spaces + burn captions
+  exportAutoEdit: (data: {
+    sourceFile: string;
+    outputDir: string;
+    deadSpaces: Array<{ id: string; startTime: number; endTime: number; remove: boolean }>;
+    transcript: { segments: Array<{ start: number; end: number; text: string }>; words?: unknown[]; text?: string } | null;
+    videoDuration: number;
+    burnCaptions: boolean;
+    captionStyle?: 'viral' | 'minimal' | 'bold';
+  }): Promise<{ success: boolean; outputDir?: string; outputFile?: string; error?: string }> =>
+    ipcRenderer.invoke('export-auto-edit', data),
+  
   openFolder: (path: string): Promise<{ success: boolean; error?: string }> =>
     ipcRenderer.invoke('open-folder', path),
 
@@ -532,6 +544,15 @@ declare global {
         outputDir: string;
         settings: ExportSettings;
       }) => Promise<{ success: boolean; outputDir?: string; error?: string }>;
+      exportAutoEdit: (data: {
+        sourceFile: string;
+        outputDir: string;
+        deadSpaces: Array<{ id: string; startTime: number; endTime: number; remove: boolean }>;
+        transcript: { segments: Array<{ start: number; end: number; text: string }>; words?: unknown[]; text?: string } | null;
+        videoDuration: number;
+        burnCaptions: boolean;
+        captionStyle?: 'viral' | 'minimal' | 'bold';
+      }) => Promise<{ success: boolean; outputDir?: string; outputFile?: string; error?: string }>;
       openFolder: (path: string) => Promise<{ success: boolean; error?: string }>;
       loadCachedTranscript: (filePath: string) => Promise<{
         success: boolean;

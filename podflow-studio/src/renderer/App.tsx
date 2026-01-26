@@ -248,61 +248,52 @@ function App() {
     console.log('Export clip:', clip.id);
   }, [project]);
 
+  // Auto-Edit Export: Remove dead spaces + burn captions
   const handleExportAll = useCallback(async () => {
     if (!project) return;
     
-    const acceptedClips = clips.filter(c => c.status === 'accepted');
-    if (acceptedClips.length === 0) return;
-
     try {
       const outputDir = await window.api.selectOutputDir();
       if (!outputDir) return;
 
       setExporting(true);
+      console.log('[App] Starting auto-edit export...');
+      console.log('[App] Dead spaces to remove:', deadSpaces.length);
+      console.log('[App] Has transcript:', !!transcript?.segments?.length);
 
-      const captionSettings = {
-        viral: { fontSize: 72, outline: 4, shadow: 2 },
-        minimal: { fontSize: 56, outline: 2, shadow: 1 },
-        bold: { fontSize: 84, outline: 6, shadow: 3 },
-      }[captionStyle] || { fontSize: 72, outline: 4, shadow: 2 };
-
-      await window.api.exportMvpClips({
+      const result = await window.api.exportAutoEdit({
         sourceFile: project.filePath,
-        clips: acceptedClips.map(clip => ({
-          clip_id: clip.id,
-          start: clip.startTime + clip.trimStartOffset,
-          end: clip.endTime + clip.trimEndOffset,
-          duration: (clip.endTime + clip.trimEndOffset) - (clip.startTime + clip.trimStartOffset),
-          captionStyle: clip.captionStyle || captionStyle,
-        })),
-        transcript: transcript || { segments: [] },
         outputDir,
-        inputWidth: project.width || 1920,
-        inputHeight: project.height || 1080,
-        settings: {
-          format: 'mp4',
-          vertical: true,
-          targetWidth: 1080,
-          targetHeight: 1920,
-          burnCaptions: true,
-          captionStyle: {
-            fontName: 'Arial Black',
-            ...captionSettings,
-          },
-        },
+        deadSpaces: deadSpaces.map(ds => ({
+          id: ds.id,
+          startTime: ds.startTime,
+          endTime: ds.endTime,
+          remove: ds.remove !== false, // Default to true if not specified
+        })),
+        transcript: transcript ? {
+          segments: transcript.segments || [],
+          words: transcript.words || [],
+          text: transcript.text || '',
+        } : null,
+        videoDuration: project.duration || 0,
+        burnCaptions: !!transcript?.segments?.length, // Only burn if we have captions
+        captionStyle: captionStyle,
       });
 
-      if (currentProjectIdRef.current) {
+      console.log('[App] Export result:', result);
+
+      if (result.success && currentProjectIdRef.current) {
         updateProject(currentProjectIdRef.current, {
           lastExportDir: outputDir,
-          exportedCount: acceptedClips.length,
+          exportedCount: 1,
         });
       }
     } catch (err) {
       console.error('Export failed:', err);
+    } finally {
       setExporting(false);
     }
-  }, [project, clips, transcript, captionStyle, setExporting, updateProject]);
+  }, [project, deadSpaces, transcript, captionStyle, setExporting, updateProject]);
 
   const handleBackToUpload = useCallback(() => {
     setProject(null);

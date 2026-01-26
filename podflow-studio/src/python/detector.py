@@ -97,6 +97,146 @@ def _transcript_cache_key(input_hash: str) -> str:
     }
     return json.dumps(payload, sort_keys=True, ensure_ascii=True)
 
+
+def transcribe_with_openai_chunked(audio_path: str, openai_key: str, ffmpeg_path: str = None, chunk_duration_s: int = 600) -> dict:
+    """
+    Transcribe audio using OpenAI Whisper API, chunking large files.
+    
+    OpenAI has a 25MB file size limit. For larger files, we split into chunks
+    and merge the transcripts.
+    
+    Args:
+        audio_path: Path to the audio file
+        openai_key: OpenAI API key
+        ffmpeg_path: Path to ffmpeg binary
+        chunk_duration_s: Duration of each chunk in seconds (default 10 min)
+    
+    Returns:
+        Transcript dict with segments, words, and text
+    """
+    import subprocess
+    import shutil
+    
+    # Check file size
+    file_size = os.path.getsize(audio_path)
+    max_size = 24 * 1024 * 1024  # 24MB to be safe (limit is 25MB)
+    
+    if file_size <= max_size:
+        # File is small enough, transcribe directly
+        return _transcribe_single_file(audio_path, openai_key)
+    
+    send_progress(22, f"Large file ({file_size / 1024 / 1024:.1f}MB) - splitting into chunks...")
+    
+    # Get audio duration
+    import librosa
+    y, sr = librosa.load(audio_path, sr=None, mono=True)
+    total_duration = len(y) / sr
+    
+    # Calculate number of chunks
+    num_chunks = int(total_duration / chunk_duration_s) + 1
+    send_progress(22, f"Transcribing in {num_chunks} chunks...")
+    
+    # Find ffmpeg
+    ffmpeg_cmd = ffmpeg_path or shutil.which('ffmpeg') or 'ffmpeg'
+    
+    # Create temp directory for chunks
+    chunk_dir = os.path.join(os.path.dirname(audio_path), "audio_chunks")
+    os.makedirs(chunk_dir, exist_ok=True)
+    
+    all_segments = []
+    full_text_parts = []
+    
+    try:
+        for i in range(num_chunks):
+            start_time = i * chunk_duration_s
+            chunk_path = os.path.join(chunk_dir, f"chunk_{i:03d}.wav")
+            
+            # Extract chunk using ffmpeg
+            cmd = [
+                ffmpeg_cmd, '-y',
+                '-ss', str(start_time),
+                '-i', audio_path,
+                '-t', str(chunk_duration_s),
+                '-acodec', 'pcm_s16le',
+                '-ar', '16000',  # OpenAI prefers 16kHz
+                '-ac', '1',
+                chunk_path
+            ]
+            
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+            if result.returncode != 0:
+                send_progress(22, f"Warning: Failed to extract chunk {i+1}")
+                continue
+            
+            # Check chunk size
+            chunk_size = os.path.getsize(chunk_path)
+            if chunk_size < 1000:  # Skip tiny chunks (end of file)
+                continue
+            
+            send_progress(22, f"Transcribing chunk {i+1}/{num_chunks}...")
+            
+            try:
+                chunk_transcript = _transcribe_single_file(chunk_path, openai_key)
+                
+                # Adjust segment times by adding the chunk offset
+                for seg in chunk_transcript.get("segments", []):
+                    seg["start"] = seg["start"] + start_time
+                    seg["end"] = seg["end"] + start_time
+                    all_segments.append(seg)
+                
+                if chunk_transcript.get("text"):
+                    full_text_parts.append(chunk_transcript["text"])
+                    
+            except Exception as e:
+                send_progress(22, f"Warning: Chunk {i+1} transcription failed: {e}")
+                continue
+        
+        # Clean up chunks
+        shutil.rmtree(chunk_dir, ignore_errors=True)
+        
+        # Sort segments by start time
+        all_segments.sort(key=lambda s: s["start"])
+        
+        return {
+            "segments": all_segments,
+            "words": [],
+            "text": " ".join(full_text_parts)
+        }
+        
+    except Exception as e:
+        shutil.rmtree(chunk_dir, ignore_errors=True)
+        raise e
+
+
+def _transcribe_single_file(audio_path: str, openai_key: str) -> dict:
+    """Transcribe a single audio file using OpenAI Whisper API."""
+    import openai
+    
+    client = openai.OpenAI(api_key=openai_key)
+    
+    with open(audio_path, "rb") as audio_file:
+        response = client.audio.transcriptions.create(
+            model="whisper-1",
+            file=audio_file,
+            response_format="verbose_json",
+            timestamp_granularities=["segment"]
+        )
+    
+    segments = []
+    for seg in getattr(response, 'segments', []):
+        segments.append({
+            "start": seg.get('start', 0) if isinstance(seg, dict) else getattr(seg, 'start', 0),
+            "end": seg.get('end', 0) if isinstance(seg, dict) else getattr(seg, 'end', 0),
+            "text": seg.get('text', '') if isinstance(seg, dict) else getattr(seg, 'text', '')
+        })
+    
+    return {
+        "segments": segments,
+        "words": [],
+        "text": getattr(response, 'text', '')
+    }
+
+
 def extract_audio_ffmpeg(video_path: str, audio_path: str, ffmpeg_path: str = None):
     """Extract audio from video using FFmpeg"""
     import subprocess
@@ -386,31 +526,8 @@ def run_mvp_pipeline(video_path: str, settings: dict):
                 # faster-whisper not available, try OpenAI API if key is available
                 if openai_key:
                     try:
-                        import openai
                         send_progress(22, "Transcribing via OpenAI...")
-                        client = openai.OpenAI(api_key=openai_key)
-                        
-                        with open(audio_path, "rb") as audio_file:
-                            response = client.audio.transcriptions.create(
-                                model="whisper-1",
-                                file=audio_file,
-                                response_format="verbose_json",
-                                timestamp_granularities=["segment"]
-                            )
-                        
-                        segments = []
-                        for seg in getattr(response, 'segments', []):
-                            segments.append({
-                                "start": seg.get('start', 0) if isinstance(seg, dict) else getattr(seg, 'start', 0),
-                                "end": seg.get('end', 0) if isinstance(seg, dict) else getattr(seg, 'end', 0),
-                                "text": seg.get('text', '') if isinstance(seg, dict) else getattr(seg, 'text', '')
-                            })
-                        
-                        transcript = {
-                            "segments": segments,
-                            "words": [],
-                            "text": getattr(response, 'text', '')
-                        }
+                        transcript = transcribe_with_openai_chunked(audio_path, openai_key, ffmpeg_path)
                     except Exception as e:
                         send_progress(23, f"OpenAI transcription failed: {e}")
                         transcript = {"segments": [], "words": [], "text": ""}

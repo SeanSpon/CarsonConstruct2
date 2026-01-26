@@ -318,6 +318,7 @@ function App() {
     return (
       <ProcessingScreen
         currentStage={currentStage}
+        detectionProgress={detectionProgress}
         error={detectionError}
         onCancel={handleCancelProcessing}
       />

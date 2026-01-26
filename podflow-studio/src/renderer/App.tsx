@@ -581,7 +581,7 @@ function App() {
           >
             <p className="text-3xl mb-2">🎬</p>
             <p className="font-bold text-lg">Start New Project</p>
-            <p className="text-sm text-sz-text-muted mt-2">Upload video + transcript</p>
+            <p className="text-sm text-sz-text-muted mt-2">Upload video • Auto-transcribe & analyze</p>
           </button>
 
           {/* Review Clips Button (if clips exist) */}
@@ -923,7 +923,7 @@ function App() {
                 } else {
                   return (
                     <p className="text-xs text-yellow-400">
-                      ⚠ No transcript loaded - upload transcript file or re-run detection
+                      ⚠ No transcript loaded - will be auto-generated on next detection
                     </p>
                   );
                 }

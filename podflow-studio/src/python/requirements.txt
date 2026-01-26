@@ -32,6 +32,5 @@ anthropic>=0.18.0
 # pip install ollama
 ollama>=0.1.6
 
-# Local Transcription (optional - for offline Whisper)
-# pip install faster-whisper
-# faster-whisper>=0.10.0
+# Local Transcription (for offline auto-transcription - ENABLED BY DEFAULT)
+faster-whisper>=0.10.0

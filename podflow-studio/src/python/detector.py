@@ -478,12 +478,12 @@ def run_mvp_pipeline(video_path: str, settings: dict):
     
     # The clips from score_and_select_clips are already in the right format
     # Just add any missing fields for UI compatibility
-    final_clips = []
+    formatted_clips = []
     for i, clip in enumerate(clips):
         # Extract mood from score_breakdown
         mood = clip.get("score_breakdown", {}).get("mood", "impactful")
         
-        final_clip = {
+        formatted_clip = {
             "id": clip.get("id", f"clip_{i+1:03d}"),
             "startTime": clip.get("startTime", clip.get("start", 0)),
             "endTime": clip.get("endTime", clip.get("end", 0)),
@@ -506,16 +506,50 @@ def run_mvp_pipeline(video_path: str, settings: dict):
             "snapped": clip.get("snapped", False),
             "snap_reason": clip.get("snap_reason", ""),
         }
-        final_clips.append(final_clip)
+        formatted_clips.append(formatted_clip)
     
-    send_progress(95, f"Complete! Found {len(final_clips)} clips")
+    # ============================================================
+    # Stage F: Story Quality Gates (NEW - narrative-first filtering)
+    # ============================================================
+    send_progress(87, "Stage F: Applying story quality gates...")
+    
+    try:
+        from story_gate import apply_story_gates
+        
+        survivors, dropped, gate_stats = apply_story_gates(formatted_clips, transcript)
+        
+        send_progress(90, f"Story gates: {gate_stats['survived']}/{gate_stats['total']} clips passed")
+        
+        # Use survivors as final clips
+        final_clips = survivors
+        
+        # If all clips were dropped, include some dropped ones with warnings
+        if len(final_clips) == 0 and len(dropped) > 0:
+            send_progress(91, "All clips dropped by story gates - including top dropped with warnings")
+            # Sort by whatever confidence we have and take top 3
+            dropped_sorted = sorted(dropped, key=lambda c: c.get("story_gate", {}).get("confidence", 0), reverse=True)
+            for clip in dropped_sorted[:3]:
+                clip["status"] = "needs_review"
+                clip["storyWarning"] = "Clip may not tell a complete story"
+                final_clips.append(clip)
+        
+    except ImportError as e:
+        send_progress(88, f"Story gates not available: {e} - using all clips")
+        final_clips = formatted_clips
+    except Exception as e:
+        send_progress(88, f"Story gate error: {e} - using all clips")
+        final_clips = formatted_clips
+    
+    send_progress(95, f"Complete! {len(final_clips)} clips ready for review")
     
     # Send results
     debug_payload = {
         "mvp_mode": True,
         "job_dir": job_dir,
         "candidates_count": len(candidates),
+        "clips_before_gates": len(formatted_clips),
         "clips_count": len(final_clips),
+        "story_gates_applied": True,
     }
     send_result(final_clips, [], transcript, [], debug=debug_payload)
 

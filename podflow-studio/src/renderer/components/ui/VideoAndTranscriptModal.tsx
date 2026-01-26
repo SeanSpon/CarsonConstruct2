@@ -59,7 +59,7 @@ export function VideoAndTranscriptModal({ onConfirm, onCancel }: VideoAndTranscr
     }
   };
 
-  const canProceed = videoFile && transcriptSegments !== null && transcriptSegments > 0;
+  const canProceed = videoFile !== null;
 
   return (
     <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-6">
@@ -67,7 +67,7 @@ export function VideoAndTranscriptModal({ onConfirm, onCancel }: VideoAndTranscr
         {/* Header */}
         <div className="px-6 py-4 border-b border-sz-border bg-sz-bg-secondary">
           <h2 className="text-2xl font-bold">Create New Project</h2>
-          <p className="text-sm text-sz-text-muted mt-1">Upload video and transcript to begin</p>
+          <p className="text-sm text-sz-text-muted mt-1">Upload video to begin • Transcript auto-generated</p>
         </div>
 
         {/* Content */}
@@ -110,16 +110,17 @@ export function VideoAndTranscriptModal({ onConfirm, onCancel }: VideoAndTranscr
             )}
           </div>
 
-          {/* Step 2: Transcript Upload */}
+          {/* Step 2: Transcript Upload (Optional) */}
           <div className="space-y-3">
             <h3 className="font-semibold flex items-center gap-2">
-              <span className={`w-6 h-6 rounded-full flex items-center justify-center text-sm font-bold ${transcriptSegments ? 'bg-green-600 text-white' : 'bg-sz-bg-secondary text-sz-text-muted'}`}>
-                {transcriptSegments ? '✓' : '2'}
+              <span className={`w-6 h-6 rounded-full flex items-center justify-center text-sm font-bold ${transcriptSegments ? 'bg-green-600 text-white' : 'bg-sz-bg-tertiary text-sz-text-muted'}`}>
+                {transcriptSegments ? '✓' : '⚡'}
               </span>
-              Transcript File (Required)
+              Transcript File
+              <span className="text-xs font-normal text-sz-text-muted">(Optional)</span>
             </h3>
             <p className="text-xs text-sz-text-muted">
-              Supported formats: SRT, VTT, or JSON
+              Auto-generated unless you provide one • Formats: SRT, VTT, JSON
             </p>
             {transcriptSegments ? (
               <div className="p-3 bg-sz-bg-secondary rounded-lg border border-green-600/30">
@@ -128,27 +129,27 @@ export function VideoAndTranscriptModal({ onConfirm, onCancel }: VideoAndTranscr
                   onClick={() => setTranscriptSegments(null)}
                   className="mt-2 text-xs text-red-400 hover:text-red-300 transition-colors"
                 >
-                  Change transcript
+                  Remove override
                 </button>
               </div>
             ) : (
               <button
                 onClick={handleUploadTranscript}
                 disabled={!videoFile || loading}
-                className="w-full px-4 py-3 bg-sz-bg-secondary hover:bg-sz-bg-tertiary border border-sz-border rounded-lg font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                className="w-full px-4 py-3 bg-sz-bg-tertiary hover:bg-sz-bg-secondary border border-sz-border/50 rounded-lg font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed text-sm"
               >
-                {loading ? 'Uploading...' : '📄 Upload Transcript'}
+                {loading ? 'Uploading...' : '📄 Override with Custom Transcript'}
               </button>
             )}
           </div>
 
           {/* Info Box */}
-          <div className="bg-blue-500/10 border border-blue-500/30 rounded-lg p-4 text-sm space-y-2">
-            <p className="font-semibold">ℹ️ Why Transcript First?</p>
+          <div className="bg-green-500/10 border border-green-500/30 rounded-lg p-4 text-sm space-y-2">
+            <p className="font-semibold">✓ Transcript Handling</p>
             <ul className="text-xs text-sz-text-muted space-y-1 list-disc list-inside">
-              <li>Captions will appear in preview</li>
-              <li>See final result before export</li>
-              <li>No need for API keys</li>
+              <li>Auto-transcribed during detection</li>
+              <li>Upload one only if you want to override</li>
+              <li>No API keys required to preview results</li>
             </ul>
           </div>
 

@@ -1,6 +1,6 @@
 {
-  "name": "opus-ai",
-  "productName": "Opus AI",
+  "name": "podflow-studio",
+  "productName": "PodFlow Studio",
   "version": "1.0.0",
   "description": "AI-powered video editor - clip detection, platform virality scoring, auto-editing, social scheduling",
   "main": ".vite/build/index.js",

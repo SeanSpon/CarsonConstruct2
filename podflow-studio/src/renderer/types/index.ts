@@ -1,3 +1,116 @@
+// =============================================================================
+// 🔒 LOCKED UI CONTRACTS - THE UI IS THE SOURCE OF TRUTH
+// =============================================================================
+
+/**
+ * THE 3 SCREENS (Rule #2: App has exactly 3 screens)
+ * - upload: User provides input → "I'm starting something"
+ * - processing: System works → "This thing knows what it's doing"  
+ * - review: User decides → "These are good"
+ */
+export type AppScreen = 'upload' | 'processing' | 'review';
+
+/**
+ * THE 6 STAGES (Rule #5: Everything is a stage)
+ * Backend MUST emit these exact stage names in order.
+ * No tech words. Human language only.
+ */
+export type ProcessingStage = 
+  | 'preparing'      // "Preparing your video"
+  | 'listening'      // "Listening to the conversation"  
+  | 'understanding'  // "Understanding the story"
+  | 'finding'        // "Finding strong moments"
+  | 'building'       // "Building story clips"
+  | 'finalizing';    // "Finalizing results"
+
+/**
+ * Human-readable stage labels for UI display (Rule #3: Progress is a story)
+ */
+export const STAGE_LABELS: Record<ProcessingStage, string> = {
+  preparing: 'Preparing your video',
+  listening: 'Listening to the conversation',
+  understanding: 'Understanding the story',
+  finding: 'Finding strong moments',
+  building: 'Building story clips',
+  finalizing: 'Finalizing results',
+};
+
+/**
+ * Stage order for progress display
+ */
+export const STAGE_ORDER: ProcessingStage[] = [
+  'preparing',
+  'listening', 
+  'understanding',
+  'finding',
+  'building',
+  'finalizing',
+];
+
+/**
+ * Contract: Start Job Request (Screen 1 → Backend)
+ * User provides input, backend starts processing
+ */
+export interface StartJobRequest {
+  projectId: string;
+  videoFile: string;
+  transcriptFile?: string; // Optional - system auto-transcribes if missing
+}
+
+/**
+ * Contract: Progress Update (Backend → Screen 2)
+ * Backend tells UI what stage it's on in human words
+ */
+export interface ProgressUpdate {
+  stage: ProcessingStage;
+  message: string;
+  percent?: number; // Optional - only if meaningful
+}
+
+/**
+ * Contract: Clip Result (Backend → Screen 3)
+ * Confidence labels are human-readable, not scores
+ */
+export type ClipConfidence = 'top' | 'solid' | 'optional';
+
+export interface ClipResult {
+  clipId: string;
+  startTime: number;
+  endTime: number;
+  duration: number;
+  confidence: ClipConfidence;
+  previewReady: boolean;
+  status: 'pending' | 'approved' | 'rejected';
+}
+
+/**
+ * Map final scores to confidence labels (Rule #6: System can say "no")
+ */
+export function getConfidenceLabel(score: number): ClipConfidence {
+  if (score >= 80) return 'top';
+  if (score >= 60) return 'solid';
+  return 'optional';
+}
+
+/**
+ * Confidence display colors
+ */
+export const CONFIDENCE_COLORS: Record<ClipConfidence, string> = {
+  top: 'text-emerald-400',
+  solid: 'text-violet-400', 
+  optional: 'text-zinc-400',
+};
+
+export const CONFIDENCE_LABELS: Record<ClipConfidence, string> = {
+  top: 'Top Pick',
+  solid: 'Solid',
+  optional: 'Optional',
+};
+
+// =============================================================================
+// LEGACY TYPES (kept for compatibility, will be cleaned up)
+// =============================================================================
+
 // Project type for editing workflow
 export type ProjectType = 'short-form' | 'long-form' | 'long-form-clips';
 

@@ -262,32 +262,32 @@ def run_mvp_pipeline(video_path: str, settings: dict):
             except:
                 pass
     
-    # Stage A: Extract audio
+    # Stage A: Extract audio (UI: "Preparing your video")
     if not should_skip_stage(audio_path, force):
-        send_progress(5, "Stage A: Extracting audio...")
+        send_progress(5, "Preparing your video...")
         try:
             extract_audio_ffmpeg(video_path, audio_path, ffmpeg_path)
         except Exception as e:
             send_error(f"Failed to extract audio: {e}")
             sys.exit(1)
     else:
-        send_progress(5, "Stage A: Audio exists, skipping...")
+        send_progress(5, "Preparing your video...")
     
     # Stage B: Transcribe
     transcript = None
     # Stage B: Transcribe (or load uploaded transcript)
     transcript = None
     if not should_skip_stage(transcript_path, force):
-        send_progress(20, "Stage B: Checking for uploaded transcript...")
+        send_progress(20, "Listening to the conversation...")
         # First check if transcript already exists (uploaded by user)
         existing_transcript = _safe_read_json(transcript_path)
         if existing_transcript and existing_transcript.get("segments"):
-            send_progress(20, "Using uploaded transcript...")
+            send_progress(20, "Listening to the conversation...")
             transcript = existing_transcript
             _write_json(transcript_path, transcript, indent=2)
         else:
             # Only try to transcribe if no transcript was uploaded
-            send_progress(20, "No transcript found, using local Whisper model...")
+            send_progress(20, "Listening to the conversation...")
             try:
                 from faster_whisper import WhisperModel
                 # Use base model for good quality/speed balance
@@ -317,14 +317,14 @@ def run_mvp_pipeline(video_path: str, settings: dict):
             
             _write_json(transcript_path, transcript, indent=2)
     else:
-        send_progress(20, "Stage B: Loading transcript...")
+        send_progress(20, "Listening to the conversation...")
         transcript = _safe_read_json(transcript_path) or {"segments": [], "words": [], "text": ""}
     
     # Stage C: Compute features
     features = None
     duration = 0
     if not should_skip_stage(features_path, force):
-        send_progress(35, "Stage C: Computing audio features...")
+        send_progress(35, "Understanding the story...")
         try:
             y, sr = librosa.load(audio_path, sr=22050)
             y = normalize_audio(y, sr)
@@ -349,7 +349,7 @@ def run_mvp_pipeline(video_path: str, settings: dict):
             send_error(f"Failed to compute features: {e}")
             sys.exit(1)
     else:
-        send_progress(35, "Stage C: Features exist, loading...")
+        send_progress(35, "Understanding the story...")
         features_json = _safe_read_json(features_path)
         if features_json:
             features = features_from_json(features_json)
@@ -372,7 +372,7 @@ def run_mvp_pipeline(video_path: str, settings: dict):
     # Stage D: Detect candidates
     candidates = []
     if not should_skip_stage(candidates_path, force):
-        send_progress(50, "Stage D: Detecting candidate moments...")
+        send_progress(50, "Finding strong moments...")
         try:
             detection_settings = {
                 "hop_s": settings.get("hop_s", 0.10),
@@ -387,7 +387,7 @@ def run_mvp_pipeline(video_path: str, settings: dict):
             }
             candidates = detect_all_candidates(features, bounds, detection_settings)
             
-            send_progress(60, f"Found {len(candidates)} candidate moments")
+            send_progress(60, "Finding strong moments...")
             
             candidates_json = candidates_to_json(candidates)
             _write_json(candidates_path, candidates_json, indent=2)
@@ -396,7 +396,7 @@ def run_mvp_pipeline(video_path: str, settings: dict):
             send_error(f"Failed to detect candidates: {e}")
             sys.exit(1)
     else:
-        send_progress(50, "Stage D: Candidates exist, loading...")
+        send_progress(50, "Finding strong moments...")
         candidates_json = _safe_read_json(candidates_path)
         if candidates_json:
             candidates = candidates_from_json(candidates_json)
@@ -407,7 +407,7 @@ def run_mvp_pipeline(video_path: str, settings: dict):
     # Stage E: Score and select clips
     clips = []
     if not should_skip_stage(clips_path, force):
-        send_progress(70, "Stage E: Scoring and selecting clips...")
+        send_progress(70, "Building story clips...")
         try:
             scoring_settings = {
                 "clip_lengths": settings.get("clip_lengths", [30, 45, 60, 90, 120]),
@@ -420,15 +420,12 @@ def run_mvp_pipeline(video_path: str, settings: dict):
                 "top_n": top_n,
             }
             features["duration"] = duration
-            send_progress(72, f"DEBUG: candidates count = {len(candidates) if candidates else 0}")
             clips = score_and_select_clips(candidates, features, transcript, scoring_settings)
-            send_progress(75, f"DEBUG: after scoring, clips count = {len(clips)}")
 
             # Fallback: if no clips were selected, take top candidates directly
             if len(clips) == 0 and candidates:
-                send_progress(80, f"No scored clips; falling back to top {top_n or 10} candidates")
+                send_progress(80, "Building story clips...")
                 fallback = candidates[: top_n or 10]
-                send_progress(80, f"DEBUG: fallback length = {len(fallback)}")
                 clips = []
                 for i, cand in enumerate(fallback):
                     start = cand.get("start") or cand.get("start_time") or 0
@@ -444,11 +441,8 @@ def run_mvp_pipeline(video_path: str, settings: dict):
                         "score": cand.get("score", 0),
                         "score_breakdown": cand.get("score_breakdown", {}),
                     })
-                send_progress(82, f"DEBUG: created {len(clips)} fallback clips")
-            elif len(clips) == 0:
-                send_progress(80, f"DEBUG: candidates is empty or falsy: {candidates is None}")
 
-            send_progress(85, f"Selected {len(clips)} final clips")
+            send_progress(85, "Finalizing results...")
             
             # Save clips.json with params
             clips_output = {
@@ -467,11 +461,11 @@ def run_mvp_pipeline(video_path: str, settings: dict):
             send_error(f"Failed to score clips: {e}")
             sys.exit(1)
     else:
-        send_progress(70, "Stage E: Clips exist, loading...")
+        send_progress(70, "Building story clips...")
         clips_output = _safe_read_json(clips_path)
         if clips_output and "clips" in clips_output:
             clips = clips_output["clips"]
-            send_progress(85, f"Loaded {len(clips)} clips from cache")
+            send_progress(85, "Finalizing results...")
         else:
             send_error("Failed to load cached clips")
             sys.exit(1)

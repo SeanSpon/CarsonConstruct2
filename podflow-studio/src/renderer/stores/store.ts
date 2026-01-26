@@ -7,9 +7,19 @@ import type {
   Transcript, 
   DetectionSettings, 
   DetectionProgress,
+  AppScreen,
+  ProcessingStage,
 } from '../types';
 
 interface AppState {
+  // 🔒 LOCKED: 3 Screens Only (Rule #2)
+  screen: AppScreen;
+  setScreen: (screen: AppScreen) => void;
+  
+  // 🔒 LOCKED: 6 Processing Stages (Rule #5)
+  currentStage: ProcessingStage;
+  setCurrentStage: (stage: ProcessingStage) => void;
+  
   // Project
   project: Project | null;
   currentJobId: string | null;
@@ -68,6 +78,12 @@ const defaultSettings: DetectionSettings = {
 export const useStore = create<AppState>()(
   persist(
     (set) => ({
+      // 🔒 LOCKED: 3 Screens + 6 Stages
+      screen: 'upload' as AppScreen,
+      currentStage: 'preparing' as ProcessingStage,
+      setScreen: (screen) => set({ screen }),
+      setCurrentStage: (currentStage) => set({ currentStage }),
+      
       // Initial state
       project: null,
       currentJobId: null,
@@ -140,6 +156,8 @@ export const useStore = create<AppState>()(
       setCaptionStyle: (captionStyle) => set({ captionStyle }),
 
       reset: () => set({
+        screen: 'upload' as AppScreen,
+        currentStage: 'preparing' as ProcessingStage,
         project: null,
         currentJobId: null,
         lastJobId: null,

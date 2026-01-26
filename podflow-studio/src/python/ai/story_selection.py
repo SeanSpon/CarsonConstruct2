@@ -29,8 +29,8 @@ from dataclasses import asdict
 # Import new core modules
 from narrative.unit import NarrativeUnit, NarrativeVerdict, create_narrative_unit
 from narrative.detector import detect_narrative_structure
-from narrative.gate import apply_gates_batch, summarize_gate_results, GateReport
-from pipeline.config import PipelineConfig, GATE_THRESHOLDS
+from narrative.gate import apply_gates_batch, summarize_gate_results, GateReport, GATE_THRESHOLDS
+from pipeline.config import PipelineConfig
 
 # Import existing schemas for compatibility
 try:

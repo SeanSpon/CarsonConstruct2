@@ -49,8 +49,8 @@ const startJob = async (data: {
   settings: DetectionSettings;
   durationSeconds?: number;
 }) => {
-  const { projectId, filePath, settings } = data;
-  console.log('[Detection] startJob called for projectId:', projectId);
+  const { projectId, filePath, settings, durationSeconds } = data;
+  console.log('[Detection] startJob called for projectId:', projectId, 'duration:', durationSeconds);
   const win = getMainWindow();
   if (!win) {
     console.log('[Detection] startJob: Window not found');
@@ -122,12 +122,14 @@ const startJob = async (data: {
     input_hash: inputHash,
     ffmpeg_path: ffmpegPath,
     top_n: relaxedSettings.targetCount,
+    video_duration: durationSeconds || 0, // CRITICAL: pass duration to Python
   });
   
   console.log('[Detection] Settings:', {
     hasApiKey: !!settings.openaiApiKey,
     apiKeyLength: settings.openaiApiKey?.length || 0,
     targetCount: settings.targetCount,
+    durationSeconds: durationSeconds,
   });
 
   console.log('[Detection] Starting:', pythonScript);

@@ -11,7 +11,7 @@
 import { useEffect, useCallback, useRef } from 'react';
 import { useStore } from './stores/store';
 import { useHistoryStore } from './stores/historyStore';
-import { UploadScreen, ProcessingScreen, ReviewScreen } from './pages';
+import { UploadScreen, ProcessingScreen, AutoEditReview } from './pages';
 import type { Clip, Transcript, ProcessingStage } from './types';
 
 // Map backend progress messages to UI stages
@@ -66,6 +66,7 @@ function App() {
     
     // Results
     clips,
+    deadSpaces,
     transcript,
     setResults,
     updateClipStatus,
@@ -108,7 +109,12 @@ function App() {
 
     const unsubComplete = window.api.onDetectionComplete((data) => {
       const jobId = currentJobIdRef.current;
-      if (jobId && data.projectId !== jobId) return;
+      if (jobId && data.projectId !== jobId) {
+        console.log('[App] Ignoring detection-complete for different job:', data.projectId, 'current:', jobId);
+        return;
+      }
+      
+      console.log('[App] Received detection-complete:', data.clips?.length || 0, 'clips,', data.deadSpaces?.length || 0, 'dead spaces');
       
       const rawClips = Array.isArray(data.clips) ? data.clips : [];
       const processedClips = (rawClips as Clip[]).map((clip, index) => ({
@@ -120,10 +126,15 @@ function App() {
         mood: clip.mood || 'impactful',
       }));
 
-      setResults(processedClips, [], data.transcript as Transcript | null);
+      // Extract dead spaces - these are the sections to remove
+      const rawDeadSpaces = Array.isArray(data.deadSpaces) ? data.deadSpaces : [];
+      console.log('[App] Dead spaces received:', rawDeadSpaces);
+
+      setResults(processedClips, rawDeadSpaces, data.transcript as Transcript | null);
       setCurrentJobId(null);
       setLastJobId(data.projectId);
       setCurrentStage('finalizing');
+      setDetecting(false); // CRITICAL: Mark detection as complete
       
       // Update history
       if (currentProjectIdRef.current) {
@@ -134,7 +145,8 @@ function App() {
         });
       }
       
-      // Go to review screen
+      // Go to review screen - ALWAYS, even with 0 clips
+      console.log('[App] Switching to review screen with', processedClips.length, 'clips');
       setScreen('review');
     });
 
@@ -321,18 +333,17 @@ function App() {
     );
   }
 
-  // Screen 3: Review
+  // Screen 3: Review - Auto-Edit Preview
   if (screen === 'review') {
     return (
-      <ReviewScreen
+      <AutoEditReview
         clips={clips}
+        deadSpaces={deadSpaces}
         transcript={transcript}
         videoPath={project?.filePath || ''}
-        onClipStatusChange={handleClipStatusChange}
-        onExportClip={handleExportClip}
-        onExportAll={handleExportAll}
+        videoDuration={project?.duration || 0}
         onBack={handleBackToUpload}
-        captionStyle={captionStyle}
+        onExport={handleExportAll}
         isExporting={isExporting}
       />
     );

@@ -9,6 +9,7 @@ import './ipc/exportHandlers';
 import { registerTranscriptHandlers } from './ipc/transcriptHandlers';
 import { registerProjectHandlers } from './ipc/projectHandlers';
 import { registerStyleHandlers } from './ipc/styleHandlers';
+import { registerSecureStorageHandlers } from './ipc/secureStorageHandlers';
 
 // Window control handlers
 ipcMain.on('window-minimize', () => {
@@ -78,24 +79,30 @@ app.whenReady().then(() => {
   registerTranscriptHandlers();
   registerProjectHandlers();
   registerStyleHandlers();
+  registerSecureStorageHandlers();
 
-  // Check if Python is available
-  const { spawn } = require('child_process');
-  const pythonCmd = process.platform === 'win32' ? 'python' : 'python3';
-  const pythonTest = spawn(pythonCmd, ['--version']);
-  
-  pythonTest.on('error', (err: Error) => {
-    console.error('Python NOT available:', err.message);
-    const { dialog } = require('electron');
-    dialog.showErrorBox(
-      'Python Required',
-      `Python 3.8+ must be installed for clip detection to work.\n\nPlease download and install Python from python.org, then restart the app.\n\nCommand attempted: ${pythonCmd}`
-    );
-  });
-  
-  pythonTest.stdout?.on('data', (data: Buffer) => {
-    console.log('Python available:', data.toString().trim());
-  });
+  // In development mode only, check if Python is available
+  // In production, the bundled worker executable is used (no Python required)
+  if (!app.isPackaged) {
+    const { spawn } = require('child_process');
+    const pythonCmd = process.platform === 'win32' ? 'python' : 'python3';
+    const pythonTest = spawn(pythonCmd, ['--version']);
+    
+    pythonTest.on('error', (err: Error) => {
+      console.error('Python NOT available:', err.message);
+      const { dialog } = require('electron');
+      dialog.showErrorBox(
+        'Python Required (Development Mode)',
+        `Python 3.8+ is required for development.\n\nPlease install Python from python.org and restart the app.\n\nCommand attempted: ${pythonCmd}`
+      );
+    });
+    
+    pythonTest.stdout?.on('data', (data: Buffer) => {
+      console.log('Python available:', data.toString().trim());
+    });
+  } else {
+    console.log('Production mode: using bundled worker (no Python required)');
+  }
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {

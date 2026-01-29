@@ -586,6 +586,28 @@ contextBridge.exposeInMainWorld('api', {
     fps: number;
     max_duration: number | null;
   }>> => ipcRenderer.invoke('get-export-formats'),
+
+  // ========================================
+  // Secure Storage (API Keys)
+  // ========================================
+  
+  secureStorageAvailable: (): Promise<boolean> =>
+    ipcRenderer.invoke('secure-storage-available'),
+  
+  secureStorageSet: (key: string, value: string): Promise<{ success: boolean; error?: string }> =>
+    ipcRenderer.invoke('secure-storage-set', key, value),
+  
+  secureStorageGet: (key: string): Promise<{ success: boolean; value: string | null; error?: string }> =>
+    ipcRenderer.invoke('secure-storage-get', key),
+  
+  secureStorageHas: (key: string): Promise<boolean> =>
+    ipcRenderer.invoke('secure-storage-has', key),
+  
+  secureStorageDelete: (key: string): Promise<{ success: boolean; error?: string }> =>
+    ipcRenderer.invoke('secure-storage-delete', key),
+  
+  secureStorageList: (): Promise<string[]> =>
+    ipcRenderer.invoke('secure-storage-list'),
 });
 
 // Type declaration for the window object
@@ -771,6 +793,13 @@ declare global {
       getStyleDetails: (styleId: string) => Promise<{ name: string; description: string; emoji: string; cuts_per_minute: number; caption_style: string; caption_fontsize: number; caption_color: string; min_duration: number; max_duration: number; [key: string]: unknown } | null>;
       saveCustomStyle: (style: Record<string, unknown>) => Promise<{ success: boolean; filepath?: string; error?: string }>;
       getExportFormats: () => Promise<Array<{ id: string; name: string; description: string; resolution: string; fps: number; max_duration: number | null }>>;
+      // Secure Storage (API Keys)
+      secureStorageAvailable: () => Promise<boolean>;
+      secureStorageSet: (key: string, value: string) => Promise<{ success: boolean; error?: string }>;
+      secureStorageGet: (key: string) => Promise<{ success: boolean; value: string | null; error?: string }>;
+      secureStorageHas: (key: string) => Promise<boolean>;
+      secureStorageDelete: (key: string) => Promise<{ success: boolean; error?: string }>;
+      secureStorageList: () => Promise<string[]>;
     };
   }
 }

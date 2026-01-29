@@ -7,6 +7,7 @@ import './ipc/fileHandlers';
 import './ipc/detectionHandlers';
 import './ipc/exportHandlers';
 import { registerTranscriptHandlers } from './ipc/transcriptHandlers';
+import { registerClipbotHandlers } from './ipc/clipbotHandlers';
 
 // Window control handlers
 ipcMain.on('window-minimize', () => {
@@ -74,6 +75,7 @@ const createWindow = () => {
 app.whenReady().then(() => {
   createWindow();
   registerTranscriptHandlers();
+  registerClipbotHandlers();
 
   // Check if Python is available
   const { spawn } = require('child_process');

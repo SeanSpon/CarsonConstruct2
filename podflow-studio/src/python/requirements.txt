@@ -6,6 +6,12 @@ soundfile>=0.12.1
 webrtcvad
 pydub>=0.25.0
 
+# Video processing and editing
+moviepy>=1.0.3
+ffmpeg-python>=0.2.0
+imageio>=2.31.0
+imageio-ffmpeg>=0.4.9
+
 # Speaker diarization (for multi-camera switching)
 # Note: pyannote.audio requires torch and HuggingFace token
 # pip install pyannote.audio torch
@@ -34,3 +40,4 @@ ollama>=0.1.6
 
 # Local Transcription (for offline auto-transcription - ENABLED BY DEFAULT)
 faster-whisper>=0.10.0
+openai-whisper>=20231117

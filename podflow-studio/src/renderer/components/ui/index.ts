@@ -12,3 +12,7 @@ export { ClipTypeSelector, type ClipMood } from './ClipTypeSelector';
 export { CaptionStyleSelector, type CaptionStyle } from './CaptionStyleSelector';
 export { HistoryScreen } from './HistoryScreen';
 export { HistoryProjectDetail } from './HistoryProjectDetail';
+export { ProjectHistory } from './ProjectHistory';
+export { StyleSelector } from './StyleSelector';
+export { StyleCustomizer } from './StyleCustomizer';
+export { ClipPreview } from './ClipPreview';

@@ -515,6 +515,77 @@ contextBridge.exposeInMainWorld('api', {
     }>;
     error?: string;
   }> => ipcRenderer.invoke('select-camera-files'),
+
+  // ========================================
+  // Project Storage & History
+  // ========================================
+  
+  listProjects: (options?: { status?: string }): Promise<Array<{
+    id: string;
+    created_at: string;
+    source_video_name: string;
+    status: 'processing' | 'complete' | 'error';
+    clips: unknown[];
+    total_clips: number;
+  }>> => ipcRenderer.invoke('list-projects', options),
+
+  getProject: (projectId: string): Promise<{
+    id: string;
+    created_at: string;
+    source_video: string;
+    source_video_name: string;
+    status: string;
+    clips: unknown[];
+    config: unknown;
+  } | null> => ipcRenderer.invoke('get-project', projectId),
+
+  deleteProject: (projectId: string): Promise<{ success: boolean; error?: string }> =>
+    ipcRenderer.invoke('delete-project', projectId),
+
+  getStorageStats: (): Promise<{
+    total_projects: number;
+    total_clips: number;
+    total_size_mb: number;
+    total_size_gb: number;
+  }> => ipcRenderer.invoke('get-storage-stats'),
+
+  getProjectsDir: (): Promise<string> => ipcRenderer.invoke('get-projects-dir'),
+
+  // ========================================
+  // Style Presets
+  // ========================================
+
+  getStylePresets: (): Promise<Array<{
+    id: string;
+    name: string;
+    description: string;
+    emoji: string;
+  }>> => ipcRenderer.invoke('get-style-presets'),
+
+  getStyleDetails: (styleId: string): Promise<{
+    name: string;
+    description: string;
+    emoji: string;
+    cuts_per_minute: number;
+    caption_style: string;
+    caption_fontsize: number;
+    caption_color: string;
+    min_duration: number;
+    max_duration: number;
+    [key: string]: unknown;
+  } | null> => ipcRenderer.invoke('get-style-details', styleId),
+
+  saveCustomStyle: (style: Record<string, unknown>): Promise<{ success: boolean; filepath?: string; error?: string }> =>
+    ipcRenderer.invoke('save-custom-style', style),
+
+  getExportFormats: (): Promise<Array<{
+    id: string;
+    name: string;
+    description: string;
+    resolution: string;
+    fps: number;
+    max_duration: number | null;
+  }>> => ipcRenderer.invoke('get-export-formats'),
 });
 
 // Type declaration for the window object
@@ -689,6 +760,17 @@ declare global {
       styleAnalyze: (data: { filePath: string; url?: string }) => Promise<{ success: boolean; features?: unknown; filePath?: string; error?: string }>;
       styleAnalyzeCombine: (data: { files: Array<{ filePath: string; url?: string; weight?: number }>; name?: string }) => Promise<{ success: boolean; combinedStyle?: unknown; individualStyles?: unknown[]; filePath?: string; error?: string }>;
       selectCameraFiles: () => Promise<{ success: boolean; files: Array<{ id: string; name: string; filePath: string; fileName: string; size: number; isMain: boolean }>; error?: string }>;
+      // Project Storage & History
+      listProjects: (options?: { status?: string }) => Promise<Array<{ id: string; created_at: string; source_video_name: string; status: 'processing' | 'complete' | 'error'; clips: unknown[]; total_clips: number }>>;
+      getProject: (projectId: string) => Promise<{ id: string; created_at: string; source_video: string; source_video_name: string; status: string; clips: unknown[]; config: unknown } | null>;
+      deleteProject: (projectId: string) => Promise<{ success: boolean; error?: string }>;
+      getStorageStats: () => Promise<{ total_projects: number; total_clips: number; total_size_mb: number; total_size_gb: number }>;
+      getProjectsDir: () => Promise<string>;
+      // Style Presets
+      getStylePresets: () => Promise<Array<{ id: string; name: string; description: string; emoji: string }>>;
+      getStyleDetails: (styleId: string) => Promise<{ name: string; description: string; emoji: string; cuts_per_minute: number; caption_style: string; caption_fontsize: number; caption_color: string; min_duration: number; max_duration: number; [key: string]: unknown } | null>;
+      saveCustomStyle: (style: Record<string, unknown>) => Promise<{ success: boolean; filepath?: string; error?: string }>;
+      getExportFormats: () => Promise<Array<{ id: string; name: string; description: string; resolution: string; fps: number; max_duration: number | null }>>;
     };
   }
 }

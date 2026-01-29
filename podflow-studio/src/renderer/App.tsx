@@ -56,6 +56,7 @@ function App() {
     // Detection
     isDetecting,
     setDetecting,
+    detectionProgress,
     detectionError,
     setDetectionError,
     setDetectionProgress,

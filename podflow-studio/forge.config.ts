@@ -16,9 +16,9 @@ const config: ForgeConfig = {
         '**/node_modules/@ffprobe-installer/**/*',
       ],
     },
-    name: 'PodFlow Studio',
+    name: 'SeeZee ClipBot Studio',
     extraResource: [
-      'src/python',
+      'src/worker',
     ],
   },
   rebuildConfig: {},

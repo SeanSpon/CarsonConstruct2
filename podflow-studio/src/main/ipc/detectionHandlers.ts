@@ -87,8 +87,8 @@ const startJob = async (data: {
   const appPath = app.getAppPath();
   const isDev = !app.isPackaged;
   const pythonDir = isDev
-    ? path.join(appPath, 'src/python')
-    : path.join(process.resourcesPath, 'python');
+    ? path.join(appPath, 'src/worker')
+    : path.join(process.resourcesPath, 'worker');
 
   const pythonScript = path.join(pythonDir, 'detector.py');
 

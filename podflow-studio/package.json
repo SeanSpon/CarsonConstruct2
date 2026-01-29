@@ -1,8 +1,8 @@
 {
-  "name": "podflow-studio",
-  "productName": "PodFlow Studio",
+  "name": "seezee-clipbot-studio",
+  "productName": "SeeZee ClipBot Studio",
   "version": "1.0.0",
-  "description": "AI-powered video editor - clip detection, platform virality scoring, auto-editing, social scheduling",
+  "description": "AI-powered podcast clip detection - transform long-form content into viral short-form clips",
   "main": ".vite/build/index.js",
   "private": true,
   "scripts": {

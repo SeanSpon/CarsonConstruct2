@@ -48,13 +48,13 @@ const createWindow = () => {
     minHeight: 600,
     useContentSize: true,
     backgroundColor: '#0D1117',
-    title: 'PodFlow',
+    title: 'SeeZee ClipBot',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: false,
-      webSecurity: false,
+      sandbox: true,
+      webSecurity: true,
     },
   });
 

@@ -12,8 +12,8 @@ tell complete stories.
 import os
 import sys
 
-# Add core module to path
-CORE_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))), 'core')
+# Add core module to path (now bundled inside worker/)
+CORE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'core')
 sys.path.insert(0, CORE_PATH)
 
 from narrative.unit import NarrativeUnit, NarrativeVerdict

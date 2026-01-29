@@ -1946,3 +1946,383 @@ ipcMain.handle('get-video-dimensions', async (_event, filePath: string) => {
     });
   });
 });
+
+// ============================================================
+// AUTO-EDIT EXPORT: Remove dead spaces + burn captions
+// ============================================================
+
+interface AutoEditTranscript {
+  segments: { start: number; end: number; text: string }[];
+  words?: { start: number; end: number; text: string }[];
+  text?: string;
+}
+
+interface AutoEditExportData {
+  sourceFile: string;
+  outputDir: string;
+  deadSpaces: DeadSpace[];
+  transcript: AutoEditTranscript | null;
+  videoDuration: number;
+  burnCaptions: boolean;
+  captionStyle?: 'viral' | 'minimal' | 'bold';
+}
+
+/**
+ * Build an ASS subtitle file with captions adjusted for the edited timeline.
+ * Dead spaces are removed, so captions must be shifted accordingly.
+ */
+function generateEditedCaptions(
+  outputPath: string,
+  transcript: AutoEditTranscript,
+  deadSpaces: DeadSpace[],
+  videoDuration: number,
+  captionStyle: 'viral' | 'minimal' | 'bold' = 'minimal'
+): void {
+  // Style settings based on caption style
+  const styles = {
+    viral: { fontSize: 72, fontName: 'Arial Black', outline: 4, shadow: 2 },
+    minimal: { fontSize: 56, fontName: 'Arial', outline: 2, shadow: 1 },
+    bold: { fontSize: 80, fontName: 'Impact', outline: 6, shadow: 3 },
+  };
+  const style = styles[captionStyle];
+  
+  // Sort dead spaces by start time
+  const sortedDeadSpaces = [...deadSpaces]
+    .filter(ds => ds.remove)
+    .sort((a, b) => a.startTime - b.startTime);
+  
+  // Build time mapping: original time -> edited time
+  function originalToEdited(originalTime: number): number {
+    let offset = 0;
+    for (const ds of sortedDeadSpaces) {
+      if (originalTime >= ds.endTime) {
+        // We've passed this dead space entirely
+        offset += ds.endTime - ds.startTime;
+      } else if (originalTime > ds.startTime) {
+        // We're inside a dead space - map to the start of it
+        return ds.startTime - offset;
+      }
+    }
+    return originalTime - offset;
+  }
+  
+  // Check if a time falls within a dead space
+  function isInDeadSpace(time: number): boolean {
+    for (const ds of sortedDeadSpaces) {
+      if (time >= ds.startTime && time < ds.endTime) {
+        return true;
+      }
+    }
+    return false;
+  }
+  
+  // ASS header
+  const header = `[Script Info]
+Title: Auto-Edit Captions
+ScriptType: v4.00+
+PlayResX: 1920
+PlayResY: 1080
+WrapStyle: 0
+ScaledBorderAndShadow: yes
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: Default,${style.fontName},${style.fontSize},&H00FFFFFF,&H000000FF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,${style.outline},${style.shadow},2,40,40,60,1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+`;
+
+  const events: string[] = [];
+  const segments = transcript.segments || [];
+  
+  for (const seg of segments) {
+    // Skip segments that fall entirely within a dead space
+    if (isInDeadSpace(seg.start) && isInDeadSpace(seg.end)) {
+      continue;
+    }
+    
+    // Map times to edited timeline
+    const editedStart = originalToEdited(seg.start);
+    const editedEnd = originalToEdited(seg.end);
+    
+    // Skip if segment is too short after mapping
+    if (editedEnd - editedStart < 0.1) {
+      continue;
+    }
+    
+    // Format text
+    const text = seg.text.trim();
+    if (!text) continue;
+    
+    // Wrap text (max 40 chars, 2 lines for horizontal)
+    const wrapped = wrapTextHorizontal(text, 50, 2);
+    
+    // Format times as H:MM:SS.cc
+    const startStr = formatASSTime(editedStart);
+    const endStr = formatASSTime(editedEnd);
+    
+    const assText = wrapped.replace(/\n/g, '\\N');
+    events.push(`Dialogue: 0,${startStr},${endStr},Default,,0,0,0,,${assText}`);
+  }
+  
+  const content = header + events.join('\n') + (events.length > 0 ? '\n' : '');
+  fs.writeFileSync(outputPath, content, 'utf-8');
+  
+  console.log('[AutoEdit] Generated', events.length, 'caption events for edited timeline');
+}
+
+function wrapTextHorizontal(text: string, maxChars: number, maxLines: number): string {
+  const words = text.split(/\s+/);
+  const lines: string[] = [];
+  let currentLine: string[] = [];
+  let currentLen = 0;
+  
+  for (const word of words) {
+    const wordLen = word.length;
+    const spaceNeeded = currentLine.length > 0 ? 1 : 0;
+    
+    if (currentLen + wordLen + spaceNeeded > maxChars) {
+      if (currentLine.length > 0) {
+        lines.push(currentLine.join(' '));
+        if (lines.length >= maxLines) break;
+      }
+      currentLine = [word];
+      currentLen = wordLen;
+    } else {
+      currentLine.push(word);
+      currentLen += wordLen + spaceNeeded;
+    }
+  }
+  
+  if (currentLine.length > 0 && lines.length < maxLines) {
+    lines.push(currentLine.join(' '));
+  }
+  
+  return lines.join('\n');
+}
+
+/**
+ * Export full video with dead spaces removed and captions burned in.
+ */
+ipcMain.handle('export-auto-edit', async (_event, data: AutoEditExportData) => {
+  const { sourceFile, outputDir, deadSpaces, transcript, videoDuration, burnCaptions, captionStyle } = data;
+  const win = getMainWindow();
+  
+  console.log('[AutoEdit Export] Starting auto-edit export:');
+  console.log('  - Source:', sourceFile);
+  console.log('  - Output dir:', outputDir);
+  console.log('  - Dead spaces:', deadSpaces.length);
+  console.log('  - Has transcript:', !!transcript?.segments?.length);
+  console.log('  - Burn captions:', burnCaptions);
+  
+  if (!win) {
+    return { success: false, error: 'Window not found' };
+  }
+  
+  // Ensure output directory exists
+  if (!fs.existsSync(outputDir)) {
+    fs.mkdirSync(outputDir, { recursive: true });
+  }
+  
+  const baseName = path.basename(sourceFile, path.extname(sourceFile));
+  const outputFile = path.join(outputDir, `${baseName}_edited.mp4`);
+  const assFile = path.join(outputDir, `${baseName}_captions.ass`);
+  
+  try {
+    win.webContents.send('export-progress', {
+      current: 1,
+      total: 2,
+      clipName: 'Preparing edit...',
+      type: 'full',
+    });
+    
+    // Generate ASS captions if we have transcript and want to burn
+    let captionsPath: string | null = null;
+    if (burnCaptions && transcript?.segments?.length) {
+      console.log('[AutoEdit Export] Generating captions for edited timeline...');
+      generateEditedCaptions(assFile, transcript, deadSpaces, videoDuration, captionStyle || 'minimal');
+      captionsPath = assFile;
+    }
+    
+    win.webContents.send('export-progress', {
+      current: 1,
+      total: 2,
+      clipName: 'Exporting edited video...',
+      type: 'full',
+    });
+    
+    // Export with dead spaces removed (and captions if available)
+    await exportWithDeadSpacesAndCaptions(sourceFile, outputFile, deadSpaces, captionsPath);
+    
+    win.webContents.send('export-progress', {
+      current: 2,
+      total: 2,
+      clipName: 'Complete!',
+      type: 'full',
+    });
+    
+    // Calculate time saved
+    const timeSaved = deadSpaces
+      .filter(ds => ds.remove)
+      .reduce((sum, ds) => sum + (ds.endTime - ds.startTime), 0);
+    
+    console.log(`[AutoEdit Export] ✅ Export complete!`);
+    console.log(`  - Output: ${outputFile}`);
+    console.log(`  - Time saved: ${timeSaved.toFixed(1)}s`);
+    
+    win.webContents.send('export-complete', {
+      success: true,
+      outputDir,
+      clipCount: 1,
+      errors: [],
+    });
+    
+    // Open the folder
+    shell.openPath(outputDir);
+    
+    return { success: true, outputDir, outputFile };
+    
+  } catch (err) {
+    console.error('[AutoEdit Export] Error:', err);
+    win.webContents.send('export-complete', {
+      success: false,
+      outputDir,
+      clipCount: 0,
+      errors: [String(err)],
+    });
+    return { success: false, error: String(err) };
+  }
+});
+
+/**
+ * Export video with dead spaces removed and optional caption burning.
+ */
+function exportWithDeadSpacesAndCaptions(
+  sourceFile: string,
+  outputFile: string,
+  deadSpaces: DeadSpace[],
+  assFile: string | null
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const spacesToRemove = deadSpaces
+      .filter(ds => ds.remove)
+      .sort((a, b) => a.startTime - b.startTime);
+    
+    // Build segments to keep
+    const segments: { start: number; end: number }[] = [];
+    let currentStart = 0;
+    
+    for (const space of spacesToRemove) {
+      if (space.startTime > currentStart) {
+        segments.push({ start: currentStart, end: space.startTime });
+      }
+      currentStart = space.endTime;
+    }
+    
+    // Add final segment
+    segments.push({ start: currentStart, end: 999999 });
+    
+    if (segments.length === 0 || (segments.length === 1 && segments[0].start === 0)) {
+      // No dead spaces to remove
+      if (assFile) {
+        // Just burn captions
+        const args = [
+          '-y',
+          '-i', sourceFile,
+          '-vf', `ass='${assFile.replace(/\\/g, '/').replace(/'/g, "\\'")}'`,
+          '-c:v', 'libx264',
+          '-preset', 'fast',
+          '-crf', '23',
+          '-c:a', 'aac',
+          '-b:a', '192k',
+          outputFile
+        ];
+        
+        const ffmpeg = spawn(ffmpegPath, args, { windowsHide: true });
+        
+        ffmpeg.on('close', (code) => {
+          if (code === 0) resolve();
+          else reject(new Error(`FFmpeg exited with code ${code}`));
+        });
+        
+        ffmpeg.on('error', reject);
+      } else {
+        // Just copy
+        const ffmpeg = spawn(ffmpegPath, ['-y', '-i', sourceFile, '-c', 'copy', outputFile], { windowsHide: true });
+        
+        ffmpeg.on('close', (code) => {
+          if (code === 0) resolve();
+          else reject(new Error(`FFmpeg exited with code ${code}`));
+        });
+        
+        ffmpeg.on('error', reject);
+      }
+      return;
+    }
+    
+    // Build FFmpeg complex filter for concatenation
+    const filterParts: string[] = [];
+    const concatInputs: string[] = [];
+    
+    for (let i = 0; i < segments.length; i++) {
+      const seg = segments[i];
+      filterParts.push(`[0:v]trim=start=${seg.start}:end=${seg.end},setpts=PTS-STARTPTS[v${i}]`);
+      filterParts.push(`[0:a]atrim=start=${seg.start}:end=${seg.end},asetpts=PTS-STARTPTS[a${i}]`);
+      concatInputs.push(`[v${i}][a${i}]`);
+    }
+    
+    let filterComplex = filterParts.join(';') + 
+      `;${concatInputs.join('')}concat=n=${segments.length}:v=1:a=1[outv][outa]`;
+    
+    // Add caption burning if ASS file provided
+    if (assFile) {
+      // Escape the path for FFmpeg filter
+      const escapedAss = assFile.replace(/\\/g, '/').replace(/:/g, '\\:').replace(/'/g, "\\'");
+      filterComplex = filterComplex.replace('[outv]', '[precap]');
+      filterComplex += `;[precap]ass='${escapedAss}'[outv]`;
+    }
+    
+    const args = [
+      '-y',
+      '-i', sourceFile,
+      '-filter_complex', filterComplex,
+      '-map', '[outv]',
+      '-map', '[outa]',
+      '-c:v', 'libx264',
+      '-preset', 'fast',
+      '-crf', '23',
+      '-c:a', 'aac',
+      '-b:a', '192k',
+      outputFile
+    ];
+    
+    console.log('[AutoEdit Export] Running FFmpeg with', segments.length, 'segments');
+    
+    const ffmpeg = spawn(ffmpegPath, args, { windowsHide: true });
+    let errorOutput = '';
+    
+    ffmpeg.stderr.on('data', (data) => {
+      const msg = data.toString();
+      errorOutput += msg;
+      // Log progress frames
+      if (msg.includes('frame=')) {
+        const match = msg.match(/frame=\s*(\d+)/);
+        if (match) {
+          console.log('[AutoEdit Export] Encoding frame:', match[1]);
+        }
+      }
+    });
+    
+    ffmpeg.on('close', (code) => {
+      if (code === 0) {
+        resolve();
+      } else {
+        console.error('[AutoEdit Export] FFmpeg error:', errorOutput.substring(0, 1000));
+        reject(new Error(errorOutput || `FFmpeg exited with code ${code}`));
+      }
+    });
+    
+    ffmpeg.on('error', reject);
+  });
+}

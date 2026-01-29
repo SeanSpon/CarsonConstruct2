@@ -18,7 +18,7 @@ sys.path.insert(0, CORE_PATH)
 
 from narrative.unit import NarrativeUnit, NarrativeVerdict
 from narrative.detector import detect_narrative_structure
-from narrative.gate import apply_narrative_gate, apply_all_gates
+from narrative.gate import apply_narrative_gate
 from pipeline.config import PipelineConfig
 
 
@@ -43,6 +43,10 @@ def apply_story_gates(clips: list, transcript: dict, config: PipelineConfig = No
     # Get transcript text for each clip
     transcript_segments = transcript.get("segments", []) if transcript else []
     
+    # If no transcript available, bypass story gates (can't analyze narrative without text)
+    if not transcript or not transcript_segments:
+        return clips, [], {"total": len(clips), "survived": len(clips), "dropped": 0, "bypass_reason": "no_transcript"}
+    
     survivors = []
     dropped = []
     
@@ -54,24 +58,25 @@ def apply_story_gates(clips: list, transcript: dict, config: PipelineConfig = No
         clip_text = _extract_text_for_range(transcript_segments, start_time, end_time)
         
         if not clip_text or len(clip_text.strip()) < 50:
-            # Not enough text to analyze - mark as dropped
+            # Not enough text to analyze - pass through with warning instead of dropping
             clip["story_gate"] = {
-                "verdict": "DROP",
-                "reason": "insufficient_transcript",
-                "confidence": 0,
+                "verdict": "PASS",
+                "reason": "insufficient_transcript_for_analysis",
+                "confidence": 0.5,
+                "warning": True,
             }
-            dropped.append(clip)
+            survivors.append(clip)
             continue
         
         # Detect narrative structure
         unit = detect_narrative_structure(clip_text, start_time, end_time)
         
         # Apply quality gates
-        gate_report = apply_all_gates(unit, config)
+        gate_report = apply_narrative_gate(unit, {})
         
         # Annotate clip with gate results
         clip["story_gate"] = {
-            "verdict": gate_report.final_verdict.value,
+            "verdict": gate_report.verdict.value,
             "confidence": unit.confidence,
             "elements": {
                 "setup": unit.has_setup,
@@ -80,12 +85,15 @@ def apply_story_gates(clips: list, transcript: dict, config: PipelineConfig = No
             },
             "element_count": unit.story_element_count,
             "context_dependency": unit.context_dependency,
-            "gates_passed": gate_report.gates_passed,
-            "gates_failed": gate_report.gates_failed,
-            "gate_details": gate_report.gate_details,
+            "all_passed": gate_report.all_passed,
+            "primary_failure": gate_report.primary_failure,
+            "gate_details": [
+                {"gate": g.gate.value, "passed": g.passed, "score": g.score, "reason": g.reason}
+                for g in gate_report.gates
+            ],
         }
         
-        if gate_report.final_verdict == NarrativeVerdict.PASS:
+        if gate_report.verdict == NarrativeVerdict.PASS:
             # Add story metadata to clip
             clip["narrativeConfidence"] = int(unit.confidence * 100)
             clip["storyComplete"] = True

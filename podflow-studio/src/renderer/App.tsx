@@ -11,7 +11,7 @@
 import { useEffect, useCallback, useRef } from 'react';
 import { useStore } from './stores/store';
 import { useHistoryStore } from './stores/historyStore';
-import { UploadScreen, ProcessingScreen, ReviewScreen } from './pages';
+import { UploadScreen, ProcessingScreen, AutoEditReview } from './pages';
 import type { Clip, Transcript, ProcessingStage } from './types';
 
 // Map backend progress messages to UI stages
@@ -66,6 +66,7 @@ function App() {
     
     // Results
     clips,
+    deadSpaces,
     transcript,
     setResults,
     updateClipStatus,
@@ -108,7 +109,12 @@ function App() {
 
     const unsubComplete = window.api.onDetectionComplete((data) => {
       const jobId = currentJobIdRef.current;
-      if (jobId && data.projectId !== jobId) return;
+      if (jobId && data.projectId !== jobId) {
+        console.log('[App] Ignoring detection-complete for different job:', data.projectId, 'current:', jobId);
+        return;
+      }
+      
+      console.log('[App] Received detection-complete:', data.clips?.length || 0, 'clips,', data.deadSpaces?.length || 0, 'dead spaces');
       
       const rawClips = Array.isArray(data.clips) ? data.clips : [];
       const processedClips = (rawClips as Clip[]).map((clip, index) => ({
@@ -120,10 +126,15 @@ function App() {
         mood: clip.mood || 'impactful',
       }));
 
-      setResults(processedClips, [], data.transcript as Transcript | null);
+      // Extract dead spaces - these are the sections to remove
+      const rawDeadSpaces = Array.isArray(data.deadSpaces) ? data.deadSpaces : [];
+      console.log('[App] Dead spaces received:', rawDeadSpaces);
+
+      setResults(processedClips, rawDeadSpaces, data.transcript as Transcript | null);
       setCurrentJobId(null);
       setLastJobId(data.projectId);
       setCurrentStage('finalizing');
+      setDetecting(false); // CRITICAL: Mark detection as complete
       
       // Update history
       if (currentProjectIdRef.current) {
@@ -134,7 +145,8 @@ function App() {
         });
       }
       
-      // Go to review screen
+      // Go to review screen - ALWAYS, even with 0 clips
+      console.log('[App] Switching to review screen with', processedClips.length, 'clips');
       setScreen('review');
     });
 
@@ -236,61 +248,52 @@ function App() {
     console.log('Export clip:', clip.id);
   }, [project]);
 
+  // Auto-Edit Export: Remove dead spaces + burn captions
   const handleExportAll = useCallback(async () => {
     if (!project) return;
     
-    const acceptedClips = clips.filter(c => c.status === 'accepted');
-    if (acceptedClips.length === 0) return;
-
     try {
       const outputDir = await window.api.selectOutputDir();
       if (!outputDir) return;
 
       setExporting(true);
+      console.log('[App] Starting auto-edit export...');
+      console.log('[App] Dead spaces to remove:', deadSpaces.length);
+      console.log('[App] Has transcript:', !!transcript?.segments?.length);
 
-      const captionSettings = {
-        viral: { fontSize: 72, outline: 4, shadow: 2 },
-        minimal: { fontSize: 56, outline: 2, shadow: 1 },
-        bold: { fontSize: 84, outline: 6, shadow: 3 },
-      }[captionStyle] || { fontSize: 72, outline: 4, shadow: 2 };
-
-      await window.api.exportMvpClips({
+      const result = await window.api.exportAutoEdit({
         sourceFile: project.filePath,
-        clips: acceptedClips.map(clip => ({
-          clip_id: clip.id,
-          start: clip.startTime + clip.trimStartOffset,
-          end: clip.endTime + clip.trimEndOffset,
-          duration: (clip.endTime + clip.trimEndOffset) - (clip.startTime + clip.trimStartOffset),
-          captionStyle: clip.captionStyle || captionStyle,
-        })),
-        transcript: transcript || { segments: [] },
         outputDir,
-        inputWidth: project.width || 1920,
-        inputHeight: project.height || 1080,
-        settings: {
-          format: 'mp4',
-          vertical: true,
-          targetWidth: 1080,
-          targetHeight: 1920,
-          burnCaptions: true,
-          captionStyle: {
-            fontName: 'Arial Black',
-            ...captionSettings,
-          },
-        },
+        deadSpaces: deadSpaces.map(ds => ({
+          id: ds.id,
+          startTime: ds.startTime,
+          endTime: ds.endTime,
+          remove: ds.remove !== false, // Default to true if not specified
+        })),
+        transcript: transcript ? {
+          segments: transcript.segments || [],
+          words: transcript.words || [],
+          text: transcript.text || '',
+        } : null,
+        videoDuration: project.duration || 0,
+        burnCaptions: !!transcript?.segments?.length, // Only burn if we have captions
+        captionStyle: captionStyle,
       });
 
-      if (currentProjectIdRef.current) {
+      console.log('[App] Export result:', result);
+
+      if (result.success && currentProjectIdRef.current) {
         updateProject(currentProjectIdRef.current, {
           lastExportDir: outputDir,
-          exportedCount: acceptedClips.length,
+          exportedCount: 1,
         });
       }
     } catch (err) {
       console.error('Export failed:', err);
+    } finally {
       setExporting(false);
     }
-  }, [project, clips, transcript, captionStyle, setExporting, updateProject]);
+  }, [project, deadSpaces, transcript, captionStyle, setExporting, updateProject]);
 
   const handleBackToUpload = useCallback(() => {
     setProject(null);
@@ -315,24 +318,24 @@ function App() {
     return (
       <ProcessingScreen
         currentStage={currentStage}
+        detectionProgress={detectionProgress}
         error={detectionError}
         onCancel={handleCancelProcessing}
       />
     );
   }
 
-  // Screen 3: Review
+  // Screen 3: Review - Auto-Edit Preview
   if (screen === 'review') {
     return (
-      <ReviewScreen
+      <AutoEditReview
         clips={clips}
+        deadSpaces={deadSpaces}
         transcript={transcript}
         videoPath={project?.filePath || ''}
-        onClipStatusChange={handleClipStatusChange}
-        onExportClip={handleExportClip}
-        onExportAll={handleExportAll}
+        videoDuration={project?.duration || 0}
         onBack={handleBackToUpload}
-        captionStyle={captionStyle}
+        onExport={handleExportAll}
         isExporting={isExporting}
       />
     );

@@ -5,3 +5,4 @@
 export { UploadScreen } from './UploadScreen';
 export { ProcessingScreen } from './ProcessingScreen';
 export { ReviewScreen } from './ReviewScreen';
+export { AutoEditReview } from './AutoEditReview';

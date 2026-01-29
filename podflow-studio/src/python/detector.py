@@ -19,7 +19,7 @@ import tempfile
 import os
 import hashlib
 
-CACHE_VERSION = 4  # Bumped to invalidate old caches with old duration limits
+CACHE_VERSION = 5  # Bumped to invalidate old caches without silence_mask
 
 def send_progress(progress: int, message: str):
     """Send progress update to Electron via stdout"""
@@ -96,6 +96,146 @@ def _transcript_cache_key(input_hash: str) -> str:
         "model": "whisper-1",
     }
     return json.dumps(payload, sort_keys=True, ensure_ascii=True)
+
+
+def transcribe_with_openai_chunked(audio_path: str, openai_key: str, ffmpeg_path: str = None, chunk_duration_s: int = 600) -> dict:
+    """
+    Transcribe audio using OpenAI Whisper API, chunking large files.
+    
+    OpenAI has a 25MB file size limit. For larger files, we split into chunks
+    and merge the transcripts.
+    
+    Args:
+        audio_path: Path to the audio file
+        openai_key: OpenAI API key
+        ffmpeg_path: Path to ffmpeg binary
+        chunk_duration_s: Duration of each chunk in seconds (default 10 min)
+    
+    Returns:
+        Transcript dict with segments, words, and text
+    """
+    import subprocess
+    import shutil
+    
+    # Check file size
+    file_size = os.path.getsize(audio_path)
+    max_size = 24 * 1024 * 1024  # 24MB to be safe (limit is 25MB)
+    
+    if file_size <= max_size:
+        # File is small enough, transcribe directly
+        return _transcribe_single_file(audio_path, openai_key)
+    
+    send_progress(22, f"Large file ({file_size / 1024 / 1024:.1f}MB) - splitting into chunks...")
+    
+    # Get audio duration
+    import librosa
+    y, sr = librosa.load(audio_path, sr=None, mono=True)
+    total_duration = len(y) / sr
+    
+    # Calculate number of chunks
+    num_chunks = int(total_duration / chunk_duration_s) + 1
+    send_progress(22, f"Transcribing in {num_chunks} chunks...")
+    
+    # Find ffmpeg
+    ffmpeg_cmd = ffmpeg_path or shutil.which('ffmpeg') or 'ffmpeg'
+    
+    # Create temp directory for chunks
+    chunk_dir = os.path.join(os.path.dirname(audio_path), "audio_chunks")
+    os.makedirs(chunk_dir, exist_ok=True)
+    
+    all_segments = []
+    full_text_parts = []
+    
+    try:
+        for i in range(num_chunks):
+            start_time = i * chunk_duration_s
+            chunk_path = os.path.join(chunk_dir, f"chunk_{i:03d}.wav")
+            
+            # Extract chunk using ffmpeg
+            cmd = [
+                ffmpeg_cmd, '-y',
+                '-ss', str(start_time),
+                '-i', audio_path,
+                '-t', str(chunk_duration_s),
+                '-acodec', 'pcm_s16le',
+                '-ar', '16000',  # OpenAI prefers 16kHz
+                '-ac', '1',
+                chunk_path
+            ]
+            
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+            if result.returncode != 0:
+                send_progress(22, f"Warning: Failed to extract chunk {i+1}")
+                continue
+            
+            # Check chunk size
+            chunk_size = os.path.getsize(chunk_path)
+            if chunk_size < 1000:  # Skip tiny chunks (end of file)
+                continue
+            
+            send_progress(22, f"Transcribing chunk {i+1}/{num_chunks}...")
+            
+            try:
+                chunk_transcript = _transcribe_single_file(chunk_path, openai_key)
+                
+                # Adjust segment times by adding the chunk offset
+                for seg in chunk_transcript.get("segments", []):
+                    seg["start"] = seg["start"] + start_time
+                    seg["end"] = seg["end"] + start_time
+                    all_segments.append(seg)
+                
+                if chunk_transcript.get("text"):
+                    full_text_parts.append(chunk_transcript["text"])
+                    
+            except Exception as e:
+                send_progress(22, f"Warning: Chunk {i+1} transcription failed: {e}")
+                continue
+        
+        # Clean up chunks
+        shutil.rmtree(chunk_dir, ignore_errors=True)
+        
+        # Sort segments by start time
+        all_segments.sort(key=lambda s: s["start"])
+        
+        return {
+            "segments": all_segments,
+            "words": [],
+            "text": " ".join(full_text_parts)
+        }
+        
+    except Exception as e:
+        shutil.rmtree(chunk_dir, ignore_errors=True)
+        raise e
+
+
+def _transcribe_single_file(audio_path: str, openai_key: str) -> dict:
+    """Transcribe a single audio file using OpenAI Whisper API."""
+    import openai
+    
+    client = openai.OpenAI(api_key=openai_key)
+    
+    with open(audio_path, "rb") as audio_file:
+        response = client.audio.transcriptions.create(
+            model="whisper-1",
+            file=audio_file,
+            response_format="verbose_json",
+            timestamp_granularities=["segment"]
+        )
+    
+    segments = []
+    for seg in getattr(response, 'segments', []):
+        segments.append({
+            "start": seg.get('start', 0) if isinstance(seg, dict) else getattr(seg, 'start', 0),
+            "end": seg.get('end', 0) if isinstance(seg, dict) else getattr(seg, 'end', 0),
+            "text": seg.get('text', '') if isinstance(seg, dict) else getattr(seg, 'text', '')
+        })
+    
+    return {
+        "segments": segments,
+        "words": [],
+        "text": getattr(response, 'text', '')
+    }
+
 
 def extract_audio_ffmpeg(video_path: str, audio_path: str, ffmpeg_path: str = None):
     """Extract audio from video using FFmpeg"""
@@ -202,6 +342,75 @@ def normalize_audio(y, sr):
     return y
 
 
+def detect_dead_spaces(features: dict, min_silence_s: float = 2.0) -> list:
+    """
+    Detect dead spaces (extended silence) in the audio.
+    
+    Dead spaces are periods of silence longer than min_silence_s.
+    These are good candidates for removal in auto-editing.
+    
+    Args:
+        features: Feature dict with 'times', 'silence_mask' or 'rms_db'
+        min_silence_s: Minimum silence duration to count as "dead space"
+    
+    Returns:
+        List of dead space dicts with id, startTime, endTime, duration, remove
+    """
+    import numpy as np
+    
+    times = np.array(features.get("times", []))
+    silence_mask = np.array(features.get("silence_mask", []))
+    
+    if len(times) == 0 or len(silence_mask) == 0:
+        return []
+    
+    hop_s = features.get("frame_duration", 0.1)
+    min_frames = int(min_silence_s / hop_s)
+    
+    dead_spaces = []
+    in_silence = False
+    silence_start = 0
+    silence_frames = 0
+    dead_id = 0
+    
+    for i, (t, is_silent) in enumerate(zip(times, silence_mask)):
+        if is_silent:
+            if not in_silence:
+                in_silence = True
+                silence_start = t
+                silence_frames = 1
+            else:
+                silence_frames += 1
+        else:
+            if in_silence and silence_frames >= min_frames:
+                # End of significant silence
+                dead_id += 1
+                dead_spaces.append({
+                    "id": f"dead_{dead_id:03d}",
+                    "startTime": float(silence_start),
+                    "endTime": float(times[i-1] if i > 0 else t),
+                    "duration": float(silence_frames * hop_s),
+                    "remove": True,
+                    "type": "silence",
+                })
+            in_silence = False
+            silence_frames = 0
+    
+    # Handle silence at end of audio
+    if in_silence and silence_frames >= min_frames:
+        dead_id += 1
+        dead_spaces.append({
+            "id": f"dead_{dead_id:03d}",
+            "startTime": float(silence_start),
+            "endTime": float(times[-1]),
+            "duration": float(silence_frames * hop_s),
+            "remove": True,
+            "type": "silence",
+        })
+    
+    return dead_spaces
+
+
 def run_mvp_pipeline(video_path: str, settings: dict):
     """
     MVP Detection Pipeline with deterministic scoring and stage resume.
@@ -215,12 +424,16 @@ def run_mvp_pipeline(video_path: str, settings: dict):
     F) Export clips (handled by Electron)
     G) Caption burn (handled by Electron)
     """
-    import numpy as np
-    import librosa
-    
-    from features import extract_features, features_to_json, features_from_json
-    from utils.mvp_candidates import detect_all_candidates, candidates_to_json, candidates_from_json
-    from utils.mvp_scoring import score_and_select_clips
+    try:
+        import numpy as np
+        import librosa
+        
+        from features import extract_features, features_to_json, features_from_json
+        from utils.mvp_candidates import detect_all_candidates, candidates_to_json, candidates_from_json
+        from utils.mvp_scoring import score_and_select_clips
+    except ImportError as e:
+        send_error(f"Failed to import required modules: {e}. Please install dependencies: pip install -r requirements.txt")
+        sys.exit(1)
     
     # Settings
     job_dir = settings.get("job_dir") or settings.get("cache_dir")
@@ -228,10 +441,23 @@ def run_mvp_pipeline(video_path: str, settings: dict):
     openai_key = settings.get("openai_api_key", "")
     ffmpeg_path = settings.get("ffmpeg_path")
     top_n = settings.get("target_count", 10)
-    skip_intro = settings.get("skip_intro", 30)
-    skip_outro = settings.get("skip_outro", 30)
-    min_duration = settings.get("min_duration", 45)
-    max_duration = settings.get("max_duration", 150)
+    
+    # Get initial duration estimate for adaptive settings
+    # Will be refined after audio extraction
+    video_duration_hint = settings.get("video_duration", 0)
+    
+    # Requested settings (may be adapted for short videos)
+    requested_skip_intro = settings.get("skip_intro", 30)
+    requested_skip_outro = settings.get("skip_outro", 30)
+    requested_min_duration = settings.get("min_duration", 45)
+    requested_max_duration = settings.get("max_duration", 150)
+    
+    # For short videos, use adaptive settings
+    # Will be finalized after we know actual duration
+    skip_intro = requested_skip_intro
+    skip_outro = requested_skip_outro
+    min_duration = requested_min_duration
+    max_duration = requested_max_duration
     
     if not job_dir:
         send_error("MVP mode requires job_dir or cache_dir")
@@ -239,28 +465,12 @@ def run_mvp_pipeline(video_path: str, settings: dict):
     
     os.makedirs(job_dir, exist_ok=True)
     
-    # Create a settings hash to detect when scoring params change
-    scoring_key = hashlib.sha256(json.dumps({
-        "min_duration": min_duration,
-        "max_duration": max_duration,
-        "top_n": top_n,
-        "version": CACHE_VERSION,
-    }, sort_keys=True).encode()).hexdigest()[:8]
-    
-    # Output paths
+    # Output paths (clips_path will be set after adaptive settings)
     audio_path = os.path.join(job_dir, "audio.wav")
     features_path = os.path.join(job_dir, "features.json")
     transcript_path = os.path.join(job_dir, "transcript.json")
     candidates_path = os.path.join(job_dir, "candidates.json")
-    clips_path = os.path.join(job_dir, f"clips_{scoring_key}.json")
-    
-    # Clean up old clips files with different settings
-    for old_file in os.listdir(job_dir):
-        if old_file.startswith("clips_") and old_file.endswith(".json") and old_file != f"clips_{scoring_key}.json":
-            try:
-                os.remove(os.path.join(job_dir, old_file))
-            except:
-                pass
+    # clips_path will be set after adaptive settings are computed
     
     # Stage A: Extract audio (UI: "Preparing your video")
     if not should_skip_stage(audio_path, force):
@@ -288,8 +498,12 @@ def run_mvp_pipeline(video_path: str, settings: dict):
         else:
             # Only try to transcribe if no transcript was uploaded
             send_progress(20, "Listening to the conversation...")
+            transcript = None
+            
+            # Try faster-whisper (local) first
             try:
                 from faster_whisper import WhisperModel
+                send_progress(22, "Transcribing locally...")
                 # Use base model for good quality/speed balance
                 model = WhisperModel("base", device="auto", compute_type="auto")
                 segments_list, _ = model.transcribe(audio_path, language="en", vad_filter=True)
@@ -309,8 +523,17 @@ def run_mvp_pipeline(video_path: str, settings: dict):
                     "text": " ".join([s["text"] for s in segments])
                 }
             except ImportError:
-                send_progress(20, "faster-whisper not installed")
-                transcript = {"segments": [], "words": [], "text": ""}
+                # faster-whisper not available, try OpenAI API if key is available
+                if openai_key:
+                    try:
+                        send_progress(22, "Transcribing via OpenAI...")
+                        transcript = transcribe_with_openai_chunked(audio_path, openai_key, ffmpeg_path)
+                    except Exception as e:
+                        send_progress(23, f"OpenAI transcription failed: {e}")
+                        transcript = {"segments": [], "words": [], "text": ""}
+                else:
+                    send_progress(23, "No transcription available (install faster-whisper or provide OpenAI key)")
+                    transcript = {"segments": [], "words": [], "text": ""}
             except Exception as e:
                 send_progress(20, f"Transcription error: {e}, continuing without...")
                 transcript = {"segments": [], "words": [], "text": ""}
@@ -357,6 +580,46 @@ def run_mvp_pipeline(video_path: str, settings: dict):
         else:
             send_error("Failed to load cached features")
             sys.exit(1)
+    
+    # ========================================
+    # ADAPTIVE SETTINGS FOR SHORT VIDEOS
+    # ========================================
+    # Now that we know actual duration, adapt settings for short videos
+    if duration > 0:
+        # For very short videos (< 60s), use much more lenient settings
+        if duration < 60:
+            # Minimum clip is 5s or 30% of video
+            min_duration = max(5, duration * 0.3)
+            # Max clip is the full video minus a bit
+            max_duration = max(min_duration + 5, duration * 0.95)
+            # No skip intro/outro for short videos
+            skip_intro = 0
+            skip_outro = 0
+            send_progress(36, f"Short video ({duration:.0f}s): adapting settings...")
+        elif duration < 180:
+            # For medium videos (1-3 min), reduce settings proportionally
+            min_duration = max(8, min(requested_min_duration, duration * 0.3))
+            max_duration = max(min_duration + 10, min(requested_max_duration, duration * 0.9))
+            skip_intro = min(requested_skip_intro, duration * 0.1)
+            skip_outro = min(requested_skip_outro, duration * 0.1)
+        # For longer videos, keep the requested settings
+    
+    # Now compute clips_path with final (adapted) settings
+    scoring_key = hashlib.sha256(json.dumps({
+        "min_duration": min_duration,
+        "max_duration": max_duration,
+        "top_n": top_n,
+        "version": CACHE_VERSION,
+    }, sort_keys=True).encode()).hexdigest()[:8]
+    clips_path = os.path.join(job_dir, f"clips_{scoring_key}.json")
+    
+    # Clean up old clips files with different settings
+    for old_file in os.listdir(job_dir):
+        if old_file.startswith("clips_") and old_file.endswith(".json") and old_file != f"clips_{scoring_key}.json":
+            try:
+                os.remove(os.path.join(job_dir, old_file))
+            except:
+                pass
     
     # Define analysis bounds
     start_time = skip_intro
@@ -409,8 +672,17 @@ def run_mvp_pipeline(video_path: str, settings: dict):
     if not should_skip_stage(clips_path, force):
         send_progress(70, "Building story clips...")
         try:
+            # Adaptive clip lengths based on video duration
+            if duration < 60:
+                # For short videos: try very small clips
+                adaptive_clip_lengths = [5, 8, 10, 15, 20, int(duration * 0.8)]
+            elif duration < 180:
+                adaptive_clip_lengths = [15, 20, 30, 45, min(60, int(duration * 0.7))]
+            else:
+                adaptive_clip_lengths = settings.get("clip_lengths", [30, 45, 60, 90, 120])
+            
             scoring_settings = {
-                "clip_lengths": settings.get("clip_lengths", [30, 45, 60, 90, 120]),
+                "clip_lengths": adaptive_clip_lengths,
                 "min_clip_s": min_duration,
                 "max_clip_s": max_duration,
                 "snap_window_s": settings.get("snap_window_s", 2.0),
@@ -441,6 +713,21 @@ def run_mvp_pipeline(video_path: str, settings: dict):
                         "score": cand.get("score", 0),
                         "score_breakdown": cand.get("score_breakdown", {}),
                     })
+            
+            # Ultimate fallback: if still no clips AND no candidates, create a single clip from the whole video
+            if len(clips) == 0 and len(candidates) == 0 and duration > 0:
+                send_progress(80, "No patterns found - creating full clip...")
+                clips = [{
+                    "id": "full_001",
+                    "startTime": 0.0,
+                    "endTime": float(duration),
+                    "duration": float(duration),
+                    "pattern": "full_video",
+                    "patternLabel": "Full Video",
+                    "description": "No clip-worthy moments detected - full video included for review",
+                    "score": 50,
+                    "score_breakdown": {"note": "fallback_full_video"},
+                }]
 
             send_progress(85, "Finalizing results...")
             
@@ -534,7 +821,22 @@ def run_mvp_pipeline(video_path: str, settings: dict):
         send_progress(88, f"Story gate error: {e} - using all clips")
         final_clips = formatted_clips
     
-    send_progress(95, f"Complete! {len(final_clips)} clips ready for review")
+    # ============================================================
+    # Stage G: Detect Dead Spaces (for auto-edit mode)
+    # ============================================================
+    send_progress(92, "Finding dead air to remove...")
+    
+    # Debug: check if silence_mask is present
+    has_times = "times" in features and len(features["times"]) > 0
+    has_silence = "silence_mask" in features and len(features.get("silence_mask", [])) > 0
+    send_progress(92, f"Features: times={has_times}, silence_mask={has_silence}")
+    
+    dead_spaces = detect_dead_spaces(features, min_silence_s=2.0)
+    send_progress(93, f"Found {len(dead_spaces)} dead spaces to remove")
+    
+    # Calculate time saved
+    total_dead_time = sum(d.get("duration", 0) for d in dead_spaces)
+    send_progress(95, f"Complete! Removing {total_dead_time:.1f}s of dead air")
     
     # Send results
     debug_payload = {
@@ -543,9 +845,11 @@ def run_mvp_pipeline(video_path: str, settings: dict):
         "candidates_count": len(candidates),
         "clips_before_gates": len(formatted_clips),
         "clips_count": len(final_clips),
+        "dead_spaces_count": len(dead_spaces),
+        "dead_time_seconds": total_dead_time,
         "story_gates_applied": True,
     }
-    send_result(final_clips, [], transcript, [], debug=debug_payload)
+    send_result(final_clips, dead_spaces, transcript, [], debug=debug_payload)
 
 
 def _format_timestamp(seconds: float) -> str:

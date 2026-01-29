@@ -1,7 +1,7 @@
-# PodFlow Studio - Agent Instructions
+# SeeZee ClipBot Studio - Agent Instructions
 
 ## Project Overview
-This is PodFlow Studio, an Electron + React + Python application for AI-powered podcast clip detection. The app saves/loads `.podflow` project files that contain the full project state.
+This is SeeZee ClipBot Studio, an Electron + React + Python application for AI-powered podcast clip detection. The app saves/loads `.podflow` project files that contain the full project state.
 
 ## CRITICAL: Project File Schema Versioning
 
@@ -87,43 +87,58 @@ When adding a new feature that affects saved state:
 ## Code Organization
 
 ```
-podflow-studio/
-├── src/
-│   ├── main/           # Electron main process (Node.js)
-│   │   ├── index.ts    # Main entry, window creation
-│   │   ├── ipc/        # IPC handlers
-│   │   │   ├── fileHandlers.ts       # File selection, FFprobe
-│   │   │   ├── detectionHandlers.ts  # Python detection spawning
-│   │   │   ├── exportHandlers.ts     # FFmpeg export
-│   │   │   ├── reviewHandlers.ts     # Clip project persistence
-│   │   │   ├── projectFileHandlers.ts # .podflow save/load
-│   │   │   ├── aiEffectsHandlers.ts  # AI effects processing
-│   │   │   └── premiereExport.ts     # NLE export formats
-│   │   └── jobs/       # Job queue system
+seezee-clipbot-studio/
+├── podflow-studio/           # Main Electron application
+│   ├── src/
+│   │   ├── main/             # Electron main process (Node.js)
+│   │   │   ├── index.ts      # Main entry, window creation
+│   │   │   ├── ipc/          # IPC handlers
+│   │   │   │   ├── fileHandlers.ts       # File selection, FFprobe
+│   │   │   │   ├── detectionHandlers.ts  # Worker spawning
+│   │   │   │   ├── exportHandlers.ts     # FFmpeg export
+│   │   │   │   ├── projectHandlers.ts    # Project management
+│   │   │   │   ├── styleHandlers.ts      # Style presets
+│   │   │   │   └── transcriptHandlers.ts # Transcript handling
+│   │   │   └── window.ts     # Window management
+│   │   │
+│   │   ├── preload/          # Electron preload (contextBridge)
+│   │   │   └── preload.ts    # Exposes window.api
+│   │   │
+│   │   ├── renderer/         # React frontend
+│   │   │   ├── App.tsx       # Root component
+│   │   │   ├── components/   # UI components
+│   │   │   │   └── ui/       # Primitives (Button, Card, etc.)
+│   │   │   ├── pages/        # Screen components
+│   │   │   ├── stores/       # Zustand state
+│   │   │   │   ├── store.ts        # Main app store
+│   │   │   │   ├── historyStore.ts # History management
+│   │   │   │   └── index.ts        # Exports
+│   │   │   └── types/        # TypeScript types
+│   │   │
+│   │   └── worker/           # Detection pipeline (Python)
+│   │       ├── detector.py   # Main entry point
+│   │       ├── features.py   # Feature extraction
+│   │       ├── vad_utils.py  # Voice activity detection
+│   │       ├── story_gate.py # Story quality gates
+│   │       ├── core/         # Narrative detection logic
+│   │       │   ├── narrative/  # Story structure
+│   │       │   └── pipeline/   # Processing stages
+│   │       ├── patterns/     # Pattern detectors
+│   │       ├── utils/        # Scoring, baselines
+│   │       ├── ai/           # AI enhancement (optional)
+│   │       ├── broll/        # B-roll system
+│   │       ├── export/       # Multi-format export
+│   │       ├── storage/      # Project persistence
+│   │       └── scripts/      # Utility scripts
 │   │
-│   ├── preload/        # Electron preload (contextBridge)
-│   │   └── preload.ts  # Exposes window.api
-│   │
-│   ├── renderer/       # React frontend
-│   │   ├── App.tsx     # Root component
-│   │   ├── components/ # UI components
-│   │   │   ├── ui/     # Primitives (Button, Card, etc.)
-│   │   │   ├── layout/ # Page layouts
-│   │   │   └── editor/ # Editor components (main UI)
-│   │   ├── pages/      # Legacy pages (not actively used)
-│   │   ├── stores/     # Zustand state
-│   │   │   ├── store.ts        # Main app store
-│   │   │   ├── projectFile.ts  # Project file manager
-│   │   │   └── index.ts        # Exports
-│   │   └── types/      # TypeScript types
-│   │
-│   └── python/         # Python detection pipeline
-│       ├── detector.py # Main entry point
-│       ├── features.py # Feature extraction
-│       ├── vad_utils.py # Voice activity detection
-│       ├── patterns/   # Pattern detectors
-│       ├── utils/      # Scoring, baselines
-│       └── ai/         # AI enhancement (optional)
+│   └── package.json
+│
+├── docs/                     # Documentation
+│   └── legacy/               # Archived docs
+└── dev_extras/               # Development tools & data
+    ├── scripts/              # Dev scripts
+    ├── tools/                # Evaluation tools
+    └── data/                 # Sample data
 ```
 
 ## IPC Communication
@@ -131,13 +146,14 @@ podflow-studio/
 ### Renderer → Main (invoke)
 - `select-file` - File picker dialog
 - `validate-file` - FFprobe validation
-- `start-detection` - Start Python detection
+- `start-detection` - Start detection worker
 - `cancel-detection` - Cancel detection
 - `export-clips` - Export to files
-- `project-save` / `project-save-as` - Save .podflow
-- `project-open` / `project-load` - Load .podflow
-- `project-autosave` - Auto-save
-- `project-get-recent` - Recent projects list
+- `list-projects` - Get project list
+- `get-project` - Get single project
+- `delete-project` - Delete project
+- `get-style-presets` - Get style presets
+- `save-custom-style` - Save custom style
 
 ### Main → Renderer (send)
 - `detection-progress` - Progress updates
@@ -145,7 +161,7 @@ podflow-studio/
 - `detection-error` - Errors
 - `export-progress` - Export progress
 
-## Python Detection Pipeline
+## Worker Detection Pipeline
 
 The detector outputs via stdout:
 - `PROGRESS:<percent>:<message>` - Progress updates
@@ -165,8 +181,8 @@ Use SeeZee design tokens:
 
 ## Testing
 
-- Python: `cd podflow-studio/src/python && python -m unittest discover -s tests`
-- Eval: `python tools/eval/run_eval.py --dataset data/sample.json --k 10`
+- Python: `cd podflow-studio/src/worker && python -m unittest discover -s tests`
+- Eval: `python dev_extras/tools/eval/run_eval.py --dataset dev_extras/data/sample.json --k 10`
 
 ## Common Issues
 

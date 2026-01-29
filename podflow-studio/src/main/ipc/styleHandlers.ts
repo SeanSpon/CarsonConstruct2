@@ -10,10 +10,10 @@ function getPythonScriptPath(scriptName: string): string {
   const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged;
   
   if (isDev) {
-    return path.join(__dirname, '../../python/scripts', scriptName);
+    return path.join(__dirname, '../../worker/scripts', scriptName);
   }
   
-  return path.join(process.resourcesPath, 'python/scripts', scriptName);
+  return path.join(process.resourcesPath, 'worker/scripts', scriptName);
 }
 
 // Get custom styles directory path

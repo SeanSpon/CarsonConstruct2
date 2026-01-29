@@ -7,15 +7,15 @@ import path from 'path';
 
 // Get the path to Python scripts
 function getPythonScriptPath(scriptName: string): string {
-  // In development, scripts are in src/python/scripts
+  // In development, scripts are in src/worker/scripts
   // In production, they're bundled with the app
   const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged;
   
   if (isDev) {
-    return path.join(__dirname, '../../python/scripts', scriptName);
+    return path.join(__dirname, '../../worker/scripts', scriptName);
   }
   
-  return path.join(process.resourcesPath, 'python/scripts', scriptName);
+  return path.join(process.resourcesPath, 'worker/scripts', scriptName);
 }
 
 // Get projects directory path

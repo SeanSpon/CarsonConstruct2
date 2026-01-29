@@ -1,4 +1,4 @@
-# ClipBot
+# SeeZee ClipBot Studio
 
 **AI-powered podcast clip detection and auto-editing for short-form content.**
 
@@ -29,14 +29,14 @@
 
 ```bash
 # Clone
-git clone https://github.com/SeanSpon/CarsonConstruct2.git
-cd CarsonConstruct2/podflow-studio
+git clone https://github.com/your-org/seezee-clipbot-studio.git
+cd seezee-clipbot-studio/podflow-studio
 
 # Install Node dependencies
 npm install
 
 # Install Python dependencies
-cd src/python
+cd src/worker
 pip install -r requirements.txt
 cd ../..
 
@@ -92,53 +92,31 @@ Every clip passes 4 quality gates before being shown:
 
 ---
 
-## Architecture
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                    Electron + React UI                       │
-│         Upload → Processing → Review (3 screens only)        │
-└─────────────────────────────┬───────────────────────────────┘
-                              │ IPC
-┌─────────────────────────────┴───────────────────────────────┐
-│                    Node.js Main Process                      │
-│     File Handlers · Detection · Export · Project Storage     │
-└─────────────────────────────┬───────────────────────────────┘
-                              │ spawn
-┌─────────────────────────────┴───────────────────────────────┐
-│                    Python Pipeline                           │
-│  Transcription → Features → Detection → Scoring → Export     │
-└─────────────────────────────────────────────────────────────┘
-```
-
----
-
 ## Project Structure
 
 ```
-clipbot/
-├── podflow-studio/           # Electron desktop app
+seezee-clipbot-studio/
+├── podflow-studio/           # Main Electron application
 │   ├── src/
-│   │   ├── main/             # Node.js main process
+│   │   ├── main/             # Electron main process
 │   │   │   └── ipc/          # IPC handlers
 │   │   ├── renderer/         # React UI
 │   │   │   ├── components/   # UI components
 │   │   │   ├── pages/        # Screen components
 │   │   │   └── stores/       # Zustand state
 │   │   ├── preload/          # Electron bridge
-│   │   └── python/           # Detection pipeline
+│   │   └── worker/           # Detection pipeline (Python)
 │   │       ├── detector.py   # Main entry
+│   │       ├── core/         # Narrative detection logic
 │   │       ├── patterns/     # Pattern detectors
 │   │       ├── ai/           # AI enhancement
 │   │       ├── broll/        # B-roll system
 │   │       ├── export/       # Multi-format export
 │   │       └── storage/      # Project persistence
 │   └── package.json
-├── core/                     # Narrative detection logic
-│   ├── narrative/            # Story structure
-│   └── pipeline/             # Processing stages
-├── config/                   # Configuration
-└── docs/                     # Documentation
+├── docs/                     # Documentation
+│   └── legacy/               # Archived docs
+└── dev_extras/               # Development tools & data
 ```
 
 ---
@@ -168,7 +146,7 @@ Configurable in the Settings modal:
 Run detection directly without the UI:
 
 ```bash
-cd podflow-studio/src/python
+cd podflow-studio/src/worker
 python detector.py /path/to/video.mp4 '{"mvp_mode": true}'
 ```
 
@@ -197,14 +175,11 @@ Output format:
 
 ```bash
 # Python unit tests
-cd podflow-studio/src/python
+cd podflow-studio/src/worker
 python -m unittest discover -s tests
 
-# Core logic tests
-python scripts/test_core.py
-
-# Evaluation harness
-python tools/eval/run_eval.py --dataset data/sample.json --k 10
+# Evaluation harness (from dev_extras)
+python dev_extras/tools/eval/run_eval.py --dataset dev_extras/data/sample.json --k 10
 ```
 
 ---
@@ -249,15 +224,6 @@ python tools/eval/run_eval.py --dataset data/sample.json --k 10
 | [MVP_RULES.md](./docs/MVP_RULES.md) | Quality gates |
 | [PIPELINE_FLOW.md](./docs/PIPELINE_FLOW.md) | Processing stages |
 | [REVIEWER_GUIDE.md](./docs/REVIEWER_GUIDE.md) | PR review checklist |
-| [ARCHITECTURE.md](./ARCHITECTURE.md) | Full system docs |
-
----
-
-## Contributing
-
-1. Check [docs/MVP_PLAN.md](./docs/MVP_PLAN.md) for priorities
-2. Follow `.github/pull_request_template.md`
-3. Run tests before submitting
 
 ---
 
@@ -268,4 +234,4 @@ Proprietary - All rights reserved.
 ---
 
 **Version:** 1.0.0  
-**Status:** Beta Ready
+**Status:** Production Ready

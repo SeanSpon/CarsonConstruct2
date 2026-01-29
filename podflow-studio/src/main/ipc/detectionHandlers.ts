@@ -83,14 +83,20 @@ const startJob = async (data: {
     activeProcesses.delete(projectId);
   }
 
-  // Get the Python script path
+  // Get worker paths
   const appPath = app.getAppPath();
   const isDev = !app.isPackaged;
-  const pythonDir = isDev
-    ? path.join(appPath, 'src/python')
-    : path.join(process.resourcesPath, 'python');
+  const workerDir = isDev
+    ? path.join(appPath, 'src/worker')
+    : path.join(process.resourcesPath, 'worker');
 
-  const pythonScript = path.join(pythonDir, 'detector.py');
+  // In production, use bundled executable; in dev, use Python script
+  const workerExe = process.platform === 'win32' ? 'clipbot-worker.exe' : 'clipbot-worker';
+  const bundledWorkerPath = path.join(workerDir, workerExe);
+  const pythonScript = path.join(workerDir, 'detector.py');
+  
+  // Check if bundled worker exists (production) or fall back to Python (dev)
+  const useBundledWorker = !isDev && fs.existsSync(bundledWorkerPath);
 
   // Prepare settings JSON
   // Relax defaults to ensure clips are produced and force recompute every run
@@ -132,29 +138,52 @@ const startJob = async (data: {
     durationSeconds: durationSeconds,
   });
 
-  console.log('[Detection] Starting:', pythonScript);
-
-  // Spawn Python process
-  const pythonCmd = process.platform === 'win32' ? 'python' : 'python3';
-  let pythonProcess: ChildProcess;
-  try {
-    pythonProcess = spawn(pythonCmd, ['-u', pythonScript, filePath, settingsJson], {
-      cwd: pythonDir,
-      env: {
-        ...process.env,
-        PYTHONUNBUFFERED: '1',
-      },
-    });
-    console.log('[Detection] Python process started, PID:', pythonProcess.pid);
-  } catch (spawnError: unknown) {
-    const errMsg = spawnError instanceof Error ? spawnError.message : String(spawnError);
-    console.error('[Detection] Failed to spawn Python:', errMsg);
-    win.webContents.send('detection-error', { 
-      projectId, 
-      error: `Python not found. Please install Python 3.8+ and restart the app.` 
-    });
-    return { success: false, error: errMsg };
+  // Spawn worker process (bundled exe in production, Python in dev)
+  let workerProcess: ChildProcess;
+  
+  if (useBundledWorker) {
+    // Production: use bundled executable (no Python required)
+    console.log('[Detection] Starting bundled worker:', bundledWorkerPath);
+    try {
+      workerProcess = spawn(bundledWorkerPath, [filePath, settingsJson], {
+        cwd: workerDir,
+        env: { ...process.env },
+      });
+      console.log('[Detection] Bundled worker started, PID:', workerProcess.pid);
+    } catch (spawnError: unknown) {
+      const errMsg = spawnError instanceof Error ? spawnError.message : String(spawnError);
+      console.error('[Detection] Failed to spawn bundled worker:', errMsg);
+      win.webContents.send('detection-error', { 
+        projectId, 
+        error: `Failed to start clip detection. Please reinstall the application.` 
+      });
+      return { success: false, error: errMsg };
+    }
+  } else {
+    // Development: use Python directly
+    console.log('[Detection] Starting Python worker:', pythonScript);
+    const pythonCmd = process.platform === 'win32' ? 'python' : 'python3';
+    try {
+      workerProcess = spawn(pythonCmd, ['-u', pythonScript, filePath, settingsJson], {
+        cwd: workerDir,
+        env: {
+          ...process.env,
+          PYTHONUNBUFFERED: '1',
+        },
+      });
+      console.log('[Detection] Python worker started, PID:', workerProcess.pid);
+    } catch (spawnError: unknown) {
+      const errMsg = spawnError instanceof Error ? spawnError.message : String(spawnError);
+      console.error('[Detection] Failed to spawn Python:', errMsg);
+      win.webContents.send('detection-error', { 
+        projectId, 
+        error: `Python not found. Please install Python 3.8+ and restart the app.` 
+      });
+      return { success: false, error: errMsg };
+    }
   }
+  
+  const pythonProcess = workerProcess; // Keep variable name for minimal code changes below
 
   activeProcesses.set(projectId, pythonProcess);
   stdoutBuffers.set(projectId, '');

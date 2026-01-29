@@ -503,6 +503,115 @@ contextBridge.exposeInMainWorld('api', {
     }>;
     error?: string;
   }> => ipcRenderer.invoke('select-camera-files'),
+
+  // ===== ClipBot MVP Pipeline =====
+  
+  // Select video for ClipBot clip generation
+  clipbotSelectVideo: (): Promise<{
+    path: string;
+    name: string;
+    size: number;
+  } | null> => ipcRenderer.invoke('clipbot-select-video'),
+
+  // Select output directory for clips
+  clipbotSelectOutputDir: (): Promise<string | null> => 
+    ipcRenderer.invoke('clipbot-select-output-dir'),
+
+  // Start ClipBot clip generation
+  clipbotGenerate: (data: {
+    jobId: string;
+    videoPath: string;
+    outputDir: string;
+    config?: {
+      whisperModel?: string;
+      minDuration?: number;
+      maxDuration?: number;
+      maxClips?: number;
+      minStoryScore?: number;
+      captionStyle?: 'word_by_word' | 'three_word_chunks';
+      cutsPerMinute?: number;
+      stylePreset?: 'viral_fast' | 'storytelling' | 'educational' | 'raw_authentic' | 'hype';
+    };
+  }): Promise<{
+    success: boolean;
+    jobId?: string;
+    outputDir?: string;
+    error?: string;
+  }> => ipcRenderer.invoke('clipbot-generate', data),
+
+  // Cancel ClipBot job
+  clipbotCancel: (jobId: string): Promise<{
+    success: boolean;
+    error?: string;
+  }> => ipcRenderer.invoke('clipbot-cancel', jobId),
+
+  // Get ClipBot job status
+  clipbotStatus: (jobId: string): Promise<{
+    running: boolean;
+  }> => ipcRenderer.invoke('clipbot-status', jobId),
+
+  // Export single clip to user location
+  clipbotExportClip: (data: {
+    sourcePath: string;
+    suggestedName?: string;
+  }): Promise<{
+    success: boolean;
+    path?: string;
+    canceled?: boolean;
+    error?: string;
+  }> => ipcRenderer.invoke('clipbot-export-clip', data),
+
+  // Open folder in file manager
+  clipbotOpenFolder: (folderPath: string): Promise<{
+    success: boolean;
+    error?: string;
+  }> => ipcRenderer.invoke('clipbot-open-folder', folderPath),
+
+  // ClipBot progress events
+  onClipbotProgress: (callback: (data: {
+    jobId: string;
+    percent: number;
+    message: string;
+  }) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, data: { jobId: string; percent: number; message: string }) => callback(data);
+    ipcRenderer.on('clipbot-progress', handler);
+    return () => ipcRenderer.removeListener('clipbot-progress', handler);
+  },
+
+  // ClipBot completion events
+  onClipbotComplete: (callback: (data: {
+    jobId: string;
+    clips: Array<{
+      path: string;
+      filename: string;
+      index: number;
+      duration: number;
+      story_score: number;
+      has_setup: boolean;
+      has_conflict: boolean;
+      has_payoff: boolean;
+      engagement_score: number;
+      word_count: number;
+      text_preview: string;
+      source_start: number;
+      source_end: number;
+    }>;
+    outputDir: string;
+  }) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, data: unknown) => callback(data as Parameters<typeof callback>[0]);
+    ipcRenderer.on('clipbot-complete', handler);
+    return () => ipcRenderer.removeListener('clipbot-complete', handler);
+  },
+
+  // ClipBot error events
+  onClipbotError: (callback: (data: {
+    jobId: string;
+    error: string;
+  }) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, data: { jobId: string; error: string }) => callback(data);
+    ipcRenderer.on('clipbot-error', handler);
+    return () => ipcRenderer.removeListener('clipbot-error', handler);
+  },
 });
 
 // Type declaration for the window object
@@ -668,6 +777,32 @@ declare global {
       styleAnalyze: (data: { filePath: string; url?: string }) => Promise<{ success: boolean; features?: unknown; filePath?: string; error?: string }>;
       styleAnalyzeCombine: (data: { files: Array<{ filePath: string; url?: string; weight?: number }>; name?: string }) => Promise<{ success: boolean; combinedStyle?: unknown; individualStyles?: unknown[]; filePath?: string; error?: string }>;
       selectCameraFiles: () => Promise<{ success: boolean; files: Array<{ id: string; name: string; filePath: string; fileName: string; size: number; isMain: boolean }>; error?: string }>;
+      
+      // ClipBot MVP Pipeline
+      clipbotSelectVideo: () => Promise<{ path: string; name: string; size: number } | null>;
+      clipbotSelectOutputDir: () => Promise<string | null>;
+      clipbotGenerate: (data: {
+        jobId: string;
+        videoPath: string;
+        outputDir: string;
+        config?: {
+          whisperModel?: string;
+          minDuration?: number;
+          maxDuration?: number;
+          maxClips?: number;
+          minStoryScore?: number;
+          captionStyle?: 'word_by_word' | 'three_word_chunks';
+          cutsPerMinute?: number;
+          stylePreset?: 'viral_fast' | 'storytelling' | 'educational' | 'raw_authentic' | 'hype';
+        };
+      }) => Promise<{ success: boolean; jobId?: string; outputDir?: string; error?: string }>;
+      clipbotCancel: (jobId: string) => Promise<{ success: boolean; error?: string }>;
+      clipbotStatus: (jobId: string) => Promise<{ running: boolean }>;
+      clipbotExportClip: (data: { sourcePath: string; suggestedName?: string }) => Promise<{ success: boolean; path?: string; canceled?: boolean; error?: string }>;
+      clipbotOpenFolder: (folderPath: string) => Promise<{ success: boolean; error?: string }>;
+      onClipbotProgress: (callback: (data: { jobId: string; percent: number; message: string }) => void) => () => void;
+      onClipbotComplete: (callback: (data: { jobId: string; clips: Array<{ path: string; filename: string; index: number; duration: number; story_score: number; has_setup: boolean; has_conflict: boolean; has_payoff: boolean; engagement_score: number; word_count: number; text_preview: string; source_start: number; source_end: number }>; outputDir: string }) => void) => () => void;
+      onClipbotError: (callback: (data: { jobId: string; error: string }) => void) => () => void;
     };
   }
 }

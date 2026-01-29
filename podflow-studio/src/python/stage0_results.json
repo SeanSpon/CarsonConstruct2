@@ -1,0 +1,1311 @@
+{
+  "transcript": {
+    "text": "So let me tell you about this crazy thing that happened. I was working on this project and everything was going great. But then suddenly the whole thing just crashed. I mean completely failed, nothing worked. Turns out there was a bug in the database connection. So I spent three hours debugging it. And finally I realized the problem was just a typo. That's why you should always double check your config files. Here's the thing about podcasting that nobody tells you. Everyone thinks it's just talking into a microphone. But actually it's way more complicated than that. The editing alone takes hours and hours. And don't even get me started on the technical issues. Picture this. You're at a coffee shop working on your laptop. And this guy walks up and says he loves your work. I was honestly shocked because I had like ten followers. Turns out he was a major investor looking for startups. Long story short we ended up getting funded. That's literally how it happened. Mind blowing right? The lesson here is you never know who's watching. Yeah I don't know. Maybe. Could be. I guess so. The question everyone asks me is how to get started. And I always tell them the same thing. Just start. Don't wait for perfect conditions. Because the truth is there's never a perfect time. Every successful person I know just started anyway. And that's the secret that nobody wants to hear. You have to be willing to fail first.",
+    "words": [
+      {
+        "text": "So",
+        "start": 0.0,
+        "end": 0.33999999999999997
+      },
+      {
+        "text": "let",
+        "start": 0.43999999999999995,
+        "end": 0.7999999999999999
+      },
+      {
+        "text": "me",
+        "start": 0.8999999999999999,
+        "end": 1.2399999999999998
+      },
+      {
+        "text": "tell",
+        "start": 1.3399999999999999,
+        "end": 1.7199999999999998
+      },
+      {
+        "text": "you",
+        "start": 1.8199999999999998,
+        "end": 2.1799999999999997
+      },
+      {
+        "text": "about",
+        "start": 2.28,
+        "end": 2.6799999999999997
+      },
+      {
+        "text": "this",
+        "start": 2.78,
+        "end": 3.1599999999999997
+      },
+      {
+        "text": "crazy",
+        "start": 3.26,
+        "end": 3.6599999999999997
+      },
+      {
+        "text": "thing",
+        "start": 3.76,
+        "end": 4.16
+      },
+      {
+        "text": "that",
+        "start": 4.26,
+        "end": 4.64
+      },
+      {
+        "text": "happened.",
+        "start": 4.74,
+        "end": 5.220000000000001
+      },
+      {
+        "text": "I",
+        "start": 5.32,
+        "end": 5.640000000000001
+      },
+      {
+        "text": "was",
+        "start": 5.74,
+        "end": 6.1000000000000005
+      },
+      {
+        "text": "working",
+        "start": 6.2,
+        "end": 6.640000000000001
+      },
+      {
+        "text": "on",
+        "start": 6.74,
+        "end": 7.08
+      },
+      {
+        "text": "this",
+        "start": 7.18,
+        "end": 7.56
+      },
+      {
+        "text": "project",
+        "start": 7.66,
+        "end": 8.1
+      },
+      {
+        "text": "and",
+        "start": 8.2,
+        "end": 8.559999999999999
+      },
+      {
+        "text": "everything",
+        "start": 8.66,
+        "end": 9.16
+      },
+      {
+        "text": "was",
+        "start": 9.26,
+        "end": 9.62
+      },
+      {
+        "text": "going",
+        "start": 9.719999999999999,
+        "end": 10.12
+      },
+      {
+        "text": "great.",
+        "start": 10.219999999999999,
+        "end": 10.639999999999999
+      },
+      {
+        "text": "But",
+        "start": 10.739999999999998,
+        "end": 11.099999999999998
+      },
+      {
+        "text": "then",
+        "start": 11.2,
+        "end": 11.58
+      },
+      {
+        "text": "suddenly",
+        "start": 11.68,
+        "end": 12.14
+      },
+      {
+        "text": "the",
+        "start": 12.24,
+        "end": 12.6
+      },
+      {
+        "text": "whole",
+        "start": 12.7,
+        "end": 13.1
+      },
+      {
+        "text": "thing",
+        "start": 13.2,
+        "end": 13.6
+      },
+      {
+        "text": "just",
+        "start": 13.7,
+        "end": 14.08
+      },
+      {
+        "text": "crashed.",
+        "start": 14.18,
+        "end": 14.64
+      },
+      {
+        "text": "I",
+        "start": 14.74,
+        "end": 15.06
+      },
+      {
+        "text": "mean",
+        "start": 15.16,
+        "end": 15.540000000000001
+      },
+      {
+        "text": "completely",
+        "start": 15.64,
+        "end": 16.14
+      },
+      {
+        "text": "failed,",
+        "start": 16.240000000000002,
+        "end": 16.680000000000003
+      },
+      {
+        "text": "nothing",
+        "start": 16.78,
+        "end": 17.220000000000002
+      },
+      {
+        "text": "worked.",
+        "start": 17.32,
+        "end": 17.76
+      },
+      {
+        "text": "Turns",
+        "start": 17.86,
+        "end": 18.259999999999998
+      },
+      {
+        "text": "out",
+        "start": 18.36,
+        "end": 18.72
+      },
+      {
+        "text": "there",
+        "start": 18.82,
+        "end": 19.22
+      },
+      {
+        "text": "was",
+        "start": 19.32,
+        "end": 19.68
+      },
+      {
+        "text": "a",
+        "start": 19.78,
+        "end": 20.1
+      },
+      {
+        "text": "bug",
+        "start": 20.200000000000003,
+        "end": 20.560000000000002
+      },
+      {
+        "text": "in",
+        "start": 20.660000000000004,
+        "end": 21.000000000000004
+      },
+      {
+        "text": "the",
+        "start": 21.100000000000005,
+        "end": 21.460000000000004
+      },
+      {
+        "text": "database",
+        "start": 21.560000000000006,
+        "end": 22.020000000000007
+      },
+      {
+        "text": "connection.",
+        "start": 22.120000000000005,
+        "end": 22.640000000000004
+      },
+      {
+        "text": "So",
+        "start": 22.740000000000006,
+        "end": 23.080000000000005
+      },
+      {
+        "text": "I",
+        "start": 23.180000000000007,
+        "end": 23.500000000000007
+      },
+      {
+        "text": "spent",
+        "start": 23.60000000000001,
+        "end": 24.000000000000007
+      },
+      {
+        "text": "three",
+        "start": 24.10000000000001,
+        "end": 24.500000000000007
+      },
+      {
+        "text": "hours",
+        "start": 24.60000000000001,
+        "end": 25.000000000000007
+      },
+      {
+        "text": "debugging",
+        "start": 25.10000000000001,
+        "end": 25.58000000000001
+      },
+      {
+        "text": "it.",
+        "start": 25.680000000000007,
+        "end": 26.040000000000006
+      },
+      {
+        "text": "And",
+        "start": 26.140000000000008,
+        "end": 26.500000000000007
+      },
+      {
+        "text": "finally",
+        "start": 26.60000000000001,
+        "end": 27.04000000000001
+      },
+      {
+        "text": "I",
+        "start": 27.140000000000008,
+        "end": 27.460000000000008
+      },
+      {
+        "text": "realized",
+        "start": 27.56000000000001,
+        "end": 28.02000000000001
+      },
+      {
+        "text": "the",
+        "start": 28.120000000000008,
+        "end": 28.480000000000008
+      },
+      {
+        "text": "problem",
+        "start": 28.58000000000001,
+        "end": 29.02000000000001
+      },
+      {
+        "text": "was",
+        "start": 29.120000000000008,
+        "end": 29.480000000000008
+      },
+      {
+        "text": "just",
+        "start": 29.58000000000001,
+        "end": 29.960000000000008
+      },
+      {
+        "text": "a",
+        "start": 30.06000000000001,
+        "end": 30.38000000000001
+      },
+      {
+        "text": "typo.",
+        "start": 30.48000000000001,
+        "end": 30.88000000000001
+      },
+      {
+        "text": "That's",
+        "start": 30.98000000000001,
+        "end": 31.400000000000013
+      },
+      {
+        "text": "why",
+        "start": 31.50000000000001,
+        "end": 31.86000000000001
+      },
+      {
+        "text": "you",
+        "start": 31.96000000000001,
+        "end": 32.320000000000014
+      },
+      {
+        "text": "should",
+        "start": 32.42000000000001,
+        "end": 32.84000000000001
+      },
+      {
+        "text": "always",
+        "start": 32.94000000000001,
+        "end": 33.360000000000014
+      },
+      {
+        "text": "double",
+        "start": 33.460000000000015,
+        "end": 33.88000000000002
+      },
+      {
+        "text": "check",
+        "start": 33.98000000000002,
+        "end": 34.38000000000002
+      },
+      {
+        "text": "your",
+        "start": 34.48000000000002,
+        "end": 34.86000000000002
+      },
+      {
+        "text": "config",
+        "start": 34.960000000000015,
+        "end": 35.38000000000002
+      },
+      {
+        "text": "files.",
+        "start": 35.48000000000002,
+        "end": 35.90000000000002
+      },
+      {
+        "text": "Here's",
+        "start": 38.00000000000002,
+        "end": 38.42000000000002
+      },
+      {
+        "text": "the",
+        "start": 38.520000000000024,
+        "end": 38.880000000000024
+      },
+      {
+        "text": "thing",
+        "start": 38.980000000000025,
+        "end": 39.380000000000024
+      },
+      {
+        "text": "about",
+        "start": 39.480000000000025,
+        "end": 39.880000000000024
+      },
+      {
+        "text": "podcasting",
+        "start": 39.980000000000025,
+        "end": 40.480000000000025
+      },
+      {
+        "text": "that",
+        "start": 40.58000000000003,
+        "end": 40.96000000000003
+      },
+      {
+        "text": "nobody",
+        "start": 41.060000000000024,
+        "end": 41.480000000000025
+      },
+      {
+        "text": "tells",
+        "start": 41.58000000000003,
+        "end": 41.980000000000025
+      },
+      {
+        "text": "you.",
+        "start": 42.08000000000003,
+        "end": 42.46000000000003
+      },
+      {
+        "text": "Everyone",
+        "start": 42.560000000000024,
+        "end": 43.020000000000024
+      },
+      {
+        "text": "thinks",
+        "start": 43.120000000000026,
+        "end": 43.54000000000003
+      },
+      {
+        "text": "it's",
+        "start": 43.64000000000003,
+        "end": 44.02000000000003
+      },
+      {
+        "text": "just",
+        "start": 44.120000000000026,
+        "end": 44.50000000000003
+      },
+      {
+        "text": "talking",
+        "start": 44.60000000000002,
+        "end": 45.04000000000002
+      },
+      {
+        "text": "into",
+        "start": 45.14000000000002,
+        "end": 45.520000000000024
+      },
+      {
+        "text": "a",
+        "start": 45.62000000000002,
+        "end": 45.94000000000002
+      },
+      {
+        "text": "microphone.",
+        "start": 46.04000000000002,
+        "end": 46.560000000000024
+      },
+      {
+        "text": "But",
+        "start": 46.66000000000002,
+        "end": 47.02000000000002
+      },
+      {
+        "text": "actually",
+        "start": 47.12000000000002,
+        "end": 47.58000000000002
+      },
+      {
+        "text": "it's",
+        "start": 47.68000000000002,
+        "end": 48.060000000000024
+      },
+      {
+        "text": "way",
+        "start": 48.16000000000002,
+        "end": 48.52000000000002
+      },
+      {
+        "text": "more",
+        "start": 48.62000000000002,
+        "end": 49.00000000000002
+      },
+      {
+        "text": "complicated",
+        "start": 49.100000000000016,
+        "end": 49.62000000000002
+      },
+      {
+        "text": "than",
+        "start": 49.72000000000001,
+        "end": 50.100000000000016
+      },
+      {
+        "text": "that.",
+        "start": 50.20000000000001,
+        "end": 50.60000000000001
+      },
+      {
+        "text": "The",
+        "start": 50.70000000000001,
+        "end": 51.06000000000001
+      },
+      {
+        "text": "editing",
+        "start": 51.16000000000001,
+        "end": 51.60000000000001
+      },
+      {
+        "text": "alone",
+        "start": 51.70000000000001,
+        "end": 52.10000000000001
+      },
+      {
+        "text": "takes",
+        "start": 52.20000000000001,
+        "end": 52.60000000000001
+      },
+      {
+        "text": "hours",
+        "start": 52.70000000000001,
+        "end": 53.10000000000001
+      },
+      {
+        "text": "and",
+        "start": 53.20000000000001,
+        "end": 53.56000000000001
+      },
+      {
+        "text": "hours.",
+        "start": 53.66000000000001,
+        "end": 54.08000000000001
+      },
+      {
+        "text": "And",
+        "start": 54.180000000000014,
+        "end": 54.54000000000001
+      },
+      {
+        "text": "don't",
+        "start": 54.640000000000015,
+        "end": 55.04000000000001
+      },
+      {
+        "text": "even",
+        "start": 55.140000000000015,
+        "end": 55.52000000000002
+      },
+      {
+        "text": "get",
+        "start": 55.62000000000001,
+        "end": 55.98000000000001
+      },
+      {
+        "text": "me",
+        "start": 56.08000000000001,
+        "end": 56.420000000000016
+      },
+      {
+        "text": "started",
+        "start": 56.52000000000001,
+        "end": 56.96000000000001
+      },
+      {
+        "text": "on",
+        "start": 57.06000000000001,
+        "end": 57.40000000000001
+      },
+      {
+        "text": "the",
+        "start": 57.50000000000001,
+        "end": 57.86000000000001
+      },
+      {
+        "text": "technical",
+        "start": 57.96000000000001,
+        "end": 58.440000000000005
+      },
+      {
+        "text": "issues.",
+        "start": 58.540000000000006,
+        "end": 58.980000000000004
+      },
+      {
+        "text": "Picture",
+        "start": 61.080000000000005,
+        "end": 61.52
+      },
+      {
+        "text": "this.",
+        "start": 61.620000000000005,
+        "end": 62.02
+      },
+      {
+        "text": "You're",
+        "start": 62.120000000000005,
+        "end": 62.540000000000006
+      },
+      {
+        "text": "at",
+        "start": 62.64000000000001,
+        "end": 62.98000000000001
+      },
+      {
+        "text": "a",
+        "start": 63.080000000000005,
+        "end": 63.400000000000006
+      },
+      {
+        "text": "coffee",
+        "start": 63.50000000000001,
+        "end": 63.92000000000001
+      },
+      {
+        "text": "shop",
+        "start": 64.02000000000001,
+        "end": 64.4
+      },
+      {
+        "text": "working",
+        "start": 64.50000000000001,
+        "end": 64.94000000000001
+      },
+      {
+        "text": "on",
+        "start": 65.04000000000002,
+        "end": 65.38000000000002
+      },
+      {
+        "text": "your",
+        "start": 65.48000000000002,
+        "end": 65.86000000000001
+      },
+      {
+        "text": "laptop.",
+        "start": 65.96000000000002,
+        "end": 66.40000000000002
+      },
+      {
+        "text": "And",
+        "start": 66.50000000000003,
+        "end": 66.86000000000003
+      },
+      {
+        "text": "this",
+        "start": 66.96000000000002,
+        "end": 67.34000000000002
+      },
+      {
+        "text": "guy",
+        "start": 67.44000000000003,
+        "end": 67.80000000000003
+      },
+      {
+        "text": "walks",
+        "start": 67.90000000000002,
+        "end": 68.30000000000003
+      },
+      {
+        "text": "up",
+        "start": 68.40000000000002,
+        "end": 68.74000000000002
+      },
+      {
+        "text": "and",
+        "start": 68.84000000000002,
+        "end": 69.20000000000002
+      },
+      {
+        "text": "says",
+        "start": 69.30000000000001,
+        "end": 69.68
+      },
+      {
+        "text": "he",
+        "start": 69.78000000000002,
+        "end": 70.12000000000002
+      },
+      {
+        "text": "loves",
+        "start": 70.22000000000001,
+        "end": 70.62000000000002
+      },
+      {
+        "text": "your",
+        "start": 70.72000000000001,
+        "end": 71.10000000000001
+      },
+      {
+        "text": "work.",
+        "start": 71.20000000000002,
+        "end": 71.60000000000002
+      },
+      {
+        "text": "I",
+        "start": 71.70000000000002,
+        "end": 72.02000000000001
+      },
+      {
+        "text": "was",
+        "start": 72.12000000000002,
+        "end": 72.48000000000002
+      },
+      {
+        "text": "honestly",
+        "start": 72.58000000000001,
+        "end": 73.04
+      },
+      {
+        "text": "shocked",
+        "start": 73.14000000000001,
+        "end": 73.58000000000001
+      },
+      {
+        "text": "because",
+        "start": 73.68000000000002,
+        "end": 74.12000000000002
+      },
+      {
+        "text": "I",
+        "start": 74.22000000000003,
+        "end": 74.54000000000002
+      },
+      {
+        "text": "had",
+        "start": 74.64000000000003,
+        "end": 75.00000000000003
+      },
+      {
+        "text": "like",
+        "start": 75.10000000000002,
+        "end": 75.48000000000002
+      },
+      {
+        "text": "ten",
+        "start": 75.58000000000003,
+        "end": 75.94000000000003
+      },
+      {
+        "text": "followers.",
+        "start": 76.04000000000002,
+        "end": 76.54000000000002
+      },
+      {
+        "text": "Turns",
+        "start": 76.64000000000001,
+        "end": 77.04000000000002
+      },
+      {
+        "text": "out",
+        "start": 77.14000000000001,
+        "end": 77.50000000000001
+      },
+      {
+        "text": "he",
+        "start": 77.60000000000001,
+        "end": 77.94000000000001
+      },
+      {
+        "text": "was",
+        "start": 78.04,
+        "end": 78.4
+      },
+      {
+        "text": "a",
+        "start": 78.5,
+        "end": 78.82
+      },
+      {
+        "text": "major",
+        "start": 78.92,
+        "end": 79.32000000000001
+      },
+      {
+        "text": "investor",
+        "start": 79.42,
+        "end": 79.88
+      },
+      {
+        "text": "looking",
+        "start": 79.98,
+        "end": 80.42
+      },
+      {
+        "text": "for",
+        "start": 80.52000000000001,
+        "end": 80.88000000000001
+      },
+      {
+        "text": "startups.",
+        "start": 80.98,
+        "end": 81.46000000000001
+      },
+      {
+        "text": "Long",
+        "start": 81.56,
+        "end": 81.94
+      },
+      {
+        "text": "story",
+        "start": 82.04,
+        "end": 82.44000000000001
+      },
+      {
+        "text": "short",
+        "start": 82.54,
+        "end": 82.94000000000001
+      },
+      {
+        "text": "we",
+        "start": 83.04,
+        "end": 83.38000000000001
+      },
+      {
+        "text": "ended",
+        "start": 83.48,
+        "end": 83.88000000000001
+      },
+      {
+        "text": "up",
+        "start": 83.98,
+        "end": 84.32000000000001
+      },
+      {
+        "text": "getting",
+        "start": 84.42,
+        "end": 84.86
+      },
+      {
+        "text": "funded.",
+        "start": 84.96000000000001,
+        "end": 85.4
+      },
+      {
+        "text": "That's",
+        "start": 85.50000000000001,
+        "end": 85.92000000000002
+      },
+      {
+        "text": "literally",
+        "start": 86.02000000000001,
+        "end": 86.50000000000001
+      },
+      {
+        "text": "how",
+        "start": 86.60000000000001,
+        "end": 86.96000000000001
+      },
+      {
+        "text": "it",
+        "start": 87.06,
+        "end": 87.4
+      },
+      {
+        "text": "happened.",
+        "start": 87.5,
+        "end": 87.98
+      },
+      {
+        "text": "Mind",
+        "start": 88.08,
+        "end": 88.46
+      },
+      {
+        "text": "blowing",
+        "start": 88.56,
+        "end": 89.0
+      },
+      {
+        "text": "right?",
+        "start": 89.10000000000001,
+        "end": 89.52000000000001
+      },
+      {
+        "text": "The",
+        "start": 89.62,
+        "end": 89.98
+      },
+      {
+        "text": "lesson",
+        "start": 90.08,
+        "end": 90.5
+      },
+      {
+        "text": "here",
+        "start": 90.6,
+        "end": 90.97999999999999
+      },
+      {
+        "text": "is",
+        "start": 91.08,
+        "end": 91.42
+      },
+      {
+        "text": "you",
+        "start": 91.52,
+        "end": 91.88
+      },
+      {
+        "text": "never",
+        "start": 91.97999999999999,
+        "end": 92.38
+      },
+      {
+        "text": "know",
+        "start": 92.47999999999999,
+        "end": 92.85999999999999
+      },
+      {
+        "text": "who's",
+        "start": 92.96,
+        "end": 93.36
+      },
+      {
+        "text": "watching.",
+        "start": 93.46,
+        "end": 93.94
+      },
+      {
+        "text": "Yeah",
+        "start": 96.03999999999999,
+        "end": 96.41999999999999
+      },
+      {
+        "text": "I",
+        "start": 96.52,
+        "end": 96.83999999999999
+      },
+      {
+        "text": "don't",
+        "start": 96.94,
+        "end": 97.34
+      },
+      {
+        "text": "know.",
+        "start": 97.44,
+        "end": 97.84
+      },
+      {
+        "text": "Maybe.",
+        "start": 97.94,
+        "end": 98.36
+      },
+      {
+        "text": "Could",
+        "start": 98.46,
+        "end": 98.86
+      },
+      {
+        "text": "be.",
+        "start": 98.96,
+        "end": 99.32
+      },
+      {
+        "text": "I",
+        "start": 99.41999999999999,
+        "end": 99.73999999999998
+      },
+      {
+        "text": "guess",
+        "start": 99.83999999999999,
+        "end": 100.24
+      },
+      {
+        "text": "so.",
+        "start": 100.33999999999999,
+        "end": 100.69999999999999
+      },
+      {
+        "text": "The",
+        "start": 102.79999999999998,
+        "end": 103.15999999999998
+      },
+      {
+        "text": "question",
+        "start": 103.25999999999998,
+        "end": 103.71999999999997
+      },
+      {
+        "text": "everyone",
+        "start": 103.81999999999998,
+        "end": 104.27999999999997
+      },
+      {
+        "text": "asks",
+        "start": 104.37999999999998,
+        "end": 104.75999999999998
+      },
+      {
+        "text": "me",
+        "start": 104.85999999999999,
+        "end": 105.19999999999999
+      },
+      {
+        "text": "is",
+        "start": 105.29999999999998,
+        "end": 105.63999999999999
+      },
+      {
+        "text": "how",
+        "start": 105.73999999999998,
+        "end": 106.09999999999998
+      },
+      {
+        "text": "to",
+        "start": 106.19999999999997,
+        "end": 106.53999999999998
+      },
+      {
+        "text": "get",
+        "start": 106.63999999999997,
+        "end": 106.99999999999997
+      },
+      {
+        "text": "started.",
+        "start": 107.09999999999997,
+        "end": 107.55999999999996
+      },
+      {
+        "text": "And",
+        "start": 107.65999999999997,
+        "end": 108.01999999999997
+      },
+      {
+        "text": "I",
+        "start": 108.11999999999996,
+        "end": 108.43999999999996
+      },
+      {
+        "text": "always",
+        "start": 108.53999999999996,
+        "end": 108.95999999999997
+      },
+      {
+        "text": "tell",
+        "start": 109.05999999999996,
+        "end": 109.43999999999996
+      },
+      {
+        "text": "them",
+        "start": 109.53999999999996,
+        "end": 109.91999999999996
+      },
+      {
+        "text": "the",
+        "start": 110.01999999999997,
+        "end": 110.37999999999997
+      },
+      {
+        "text": "same",
+        "start": 110.47999999999996,
+        "end": 110.85999999999996
+      },
+      {
+        "text": "thing.",
+        "start": 110.95999999999997,
+        "end": 111.37999999999997
+      },
+      {
+        "text": "Just",
+        "start": 111.47999999999996,
+        "end": 111.85999999999996
+      },
+      {
+        "text": "start.",
+        "start": 111.95999999999997,
+        "end": 112.37999999999997
+      },
+      {
+        "text": "Don't",
+        "start": 112.47999999999996,
+        "end": 112.87999999999997
+      },
+      {
+        "text": "wait",
+        "start": 112.97999999999996,
+        "end": 113.35999999999996
+      },
+      {
+        "text": "for",
+        "start": 113.45999999999997,
+        "end": 113.81999999999996
+      },
+      {
+        "text": "perfect",
+        "start": 113.91999999999996,
+        "end": 114.35999999999996
+      },
+      {
+        "text": "conditions.",
+        "start": 114.45999999999997,
+        "end": 114.97999999999996
+      },
+      {
+        "text": "Because",
+        "start": 115.07999999999997,
+        "end": 115.51999999999997
+      },
+      {
+        "text": "the",
+        "start": 115.61999999999998,
+        "end": 115.97999999999998
+      },
+      {
+        "text": "truth",
+        "start": 116.07999999999997,
+        "end": 116.47999999999998
+      },
+      {
+        "text": "is",
+        "start": 116.57999999999997,
+        "end": 116.91999999999997
+      },
+      {
+        "text": "there's",
+        "start": 117.01999999999997,
+        "end": 117.45999999999997
+      },
+      {
+        "text": "never",
+        "start": 117.55999999999997,
+        "end": 117.95999999999998
+      },
+      {
+        "text": "a",
+        "start": 118.05999999999997,
+        "end": 118.37999999999997
+      },
+      {
+        "text": "perfect",
+        "start": 118.47999999999998,
+        "end": 118.91999999999997
+      },
+      {
+        "text": "time.",
+        "start": 119.01999999999998,
+        "end": 119.41999999999999
+      },
+      {
+        "text": "Every",
+        "start": 119.51999999999998,
+        "end": 119.91999999999999
+      },
+      {
+        "text": "successful",
+        "start": 120.01999999999998,
+        "end": 120.51999999999998
+      },
+      {
+        "text": "person",
+        "start": 120.61999999999998,
+        "end": 121.03999999999998
+      },
+      {
+        "text": "I",
+        "start": 121.13999999999997,
+        "end": 121.45999999999997
+      },
+      {
+        "text": "know",
+        "start": 121.55999999999997,
+        "end": 121.93999999999997
+      },
+      {
+        "text": "just",
+        "start": 122.03999999999998,
+        "end": 122.41999999999997
+      },
+      {
+        "text": "started",
+        "start": 122.51999999999998,
+        "end": 122.95999999999998
+      },
+      {
+        "text": "anyway.",
+        "start": 123.05999999999999,
+        "end": 123.49999999999999
+      },
+      {
+        "text": "And",
+        "start": 123.6,
+        "end": 123.96
+      },
+      {
+        "text": "that's",
+        "start": 124.05999999999999,
+        "end": 124.47999999999999
+      },
+      {
+        "text": "the",
+        "start": 124.57999999999998,
+        "end": 124.93999999999998
+      },
+      {
+        "text": "secret",
+        "start": 125.03999999999998,
+        "end": 125.45999999999998
+      },
+      {
+        "text": "that",
+        "start": 125.55999999999997,
+        "end": 125.93999999999997
+      },
+      {
+        "text": "nobody",
+        "start": 126.03999999999998,
+        "end": 126.45999999999998
+      },
+      {
+        "text": "wants",
+        "start": 126.55999999999997,
+        "end": 126.95999999999998
+      },
+      {
+        "text": "to",
+        "start": 127.05999999999997,
+        "end": 127.39999999999998
+      },
+      {
+        "text": "hear.",
+        "start": 127.49999999999997,
+        "end": 127.89999999999998
+      },
+      {
+        "text": "You",
+        "start": 127.99999999999997,
+        "end": 128.35999999999999
+      },
+      {
+        "text": "have",
+        "start": 128.45999999999998,
+        "end": 128.83999999999997
+      },
+      {
+        "text": "to",
+        "start": 128.93999999999997,
+        "end": 129.27999999999997
+      },
+      {
+        "text": "be",
+        "start": 129.37999999999997,
+        "end": 129.71999999999997
+      },
+      {
+        "text": "willing",
+        "start": 129.81999999999996,
+        "end": 130.25999999999996
+      },
+      {
+        "text": "to",
+        "start": 130.35999999999996,
+        "end": 130.69999999999996
+      },
+      {
+        "text": "fail",
+        "start": 130.79999999999995,
+        "end": 131.17999999999995
+      },
+      {
+        "text": "first.",
+        "start": 131.27999999999994,
+        "end": 131.69999999999993
+      }
+    ],
+    "segments": [],
+    "language": "en"
+  },
+  "segments": [
+    {
+      "start_time": 0.0,
+      "end_time": 50.60000000000001,
+      "duration": 50.60000000000001,
+      "start_index": 0,
+      "end_index": 97,
+      "text": "So let me tell you about this crazy thing that happened. I was working on this project and everything was going great. But then suddenly the whole thing just crashed. I mean completely failed, nothing worked. Turns out there was a bug in the database connection. So I spent three hours debugging it. And finally I realized the problem was just a typo. That's why you should always double check your config files. Here's the thing about podcasting that nobody tells you. Everyone thinks it's just talking into a microphone. But actually it's way more complicated than that.",
+      "word_count": 98,
+      "story_score": 95,
+      "has_setup": true,
+      "has_conflict": true,
+      "has_payoff": true,
+      "engagement_score": 25,
+      "structure_score": 60
+    },
+    {
+      "start_time": 55.140000000000015,
+      "end_time": 111.37999999999997,
+      "duration": 56.23999999999995,
+      "start_index": 107,
+      "end_index": 209,
+      "text": "even get me started on the technical issues. Picture this. You're at a coffee shop working on your laptop. And this guy walks up and says he loves your work. I was honestly shocked because I had like ten followers. Turns out he was a major investor looking for startups. Long story short we ended up getting funded. That's literally how it happened. Mind blowing right? The lesson here is you never know who's watching. Yeah I don't know. Maybe. Could be. I guess so. The question everyone asks me is how to get started. And I always tell them the same thing.",
+      "word_count": 103,
+      "story_score": 95,
+      "has_setup": true,
+      "has_conflict": true,
+      "has_payoff": true,
+      "engagement_score": 25,
+      "structure_score": 60
+    },
+    {
+      "start_time": 116.07999999999997,
+      "end_time": 131.69999999999993,
+      "duration": 15.619999999999962,
+      "start_index": 219,
+      "end_index": 250,
+      "text": "truth is there's never a perfect time. Every successful person I know just started anyway. And that's the secret that nobody wants to hear. You have to be willing to fail first.",
+      "word_count": 32,
+      "story_score": 75,
+      "has_setup": true,
+      "has_conflict": false,
+      "has_payoff": true,
+      "engagement_score": 20,
+      "structure_score": 45
+    }
+  ]
+}

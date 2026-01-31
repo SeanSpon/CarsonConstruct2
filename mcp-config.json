@@ -1,0 +1,202 @@
+{
+  "$schema": "https://raw.githubusercontent.com/anthropics/mcp/main/schema/mcp-config.json",
+  "mcpServers": {
+    "filesystem": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@anthropic-ai/mcp-server-filesystem",
+        "c:/Users/Sean/Desktop/donebytmr"
+      ],
+      "description": "Access to PodFlow Studio project files for schema tracking and migrations"
+    },
+    "git": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@anthropic-ai/mcp-server-git",
+        "--repository",
+        "c:/Users/Sean/Desktop/donebytmr"
+      ],
+      "description": "Git operations for tracking schema version changes"
+    },
+    "memory": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-memory"
+      ],
+      "description": "Persistent memory for tracking project context across sessions"
+    },
+    "gdrive": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@anthropic-ai/mcp-server-gdrive"
+      ],
+      "env": {
+        "GDRIVE_CREDENTIALS_PATH": "${USERPROFILE}/.config/podflow/gdrive-credentials.json"
+      },
+      "description": "Google Drive integration for cloud backup and sharing of project files"
+    },
+    "fetch": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@anthropic-ai/mcp-server-fetch"
+      ],
+      "description": "Fetch web content for documentation and API references"
+    }
+  },
+  "contextProviders": {
+    "schemaFiles": {
+      "description": "Critical files that define the project file schema - changes require version bump",
+      "files": [
+        "podflow-studio/src/renderer/types/index.ts",
+        "podflow-studio/src/renderer/stores/projectFile.ts",
+        "podflow-studio/src/renderer/stores/store.ts",
+        "podflow-studio/src/main/ipc/projectFileHandlers.ts"
+      ]
+    },
+    "architecture": {
+      "description": "Architecture documentation",
+      "files": [
+        "ARCHITECTURE.md",
+        ".cursorrules"
+      ]
+    },
+    "timelineComponents": {
+      "description": "Timeline and editor components",
+      "files": [
+        "podflow-studio/src/renderer/components/editor/Timeline.tsx",
+        "podflow-studio/src/renderer/components/editor/EditorView.tsx",
+        "podflow-studio/src/renderer/components/editor/EffectsPanel.tsx",
+        "podflow-studio/src/renderer/components/editor/ClipStrip.tsx"
+      ]
+    },
+    "ipcHandlers": {
+      "description": "IPC handlers for main process communication",
+      "files": [
+        "podflow-studio/src/main/ipc/fileHandlers.ts",
+        "podflow-studio/src/main/ipc/detectionHandlers.ts",
+        "podflow-studio/src/main/ipc/exportHandlers.ts",
+        "podflow-studio/src/main/ipc/aiEffectsHandlers.ts",
+        "podflow-studio/src/main/ipc/cloudHandlers.ts",
+        "podflow-studio/src/main/ipc/projectFileHandlers.ts"
+      ]
+    },
+    "pythonPipeline": {
+      "description": "Python detection and analysis pipeline",
+      "files": [
+        "podflow-studio/src/python/detector.py",
+        "podflow-studio/src/python/features.py",
+        "podflow-studio/src/python/vad_utils.py"
+      ]
+    },
+    "cloudIntegration": {
+      "description": "Cloud storage and export components",
+      "files": [
+        "podflow-studio/src/main/ipc/cloudHandlers.ts",
+        "podflow-studio/src/renderer/components/editor/CloudExport.tsx"
+      ]
+    }
+  },
+  "projectNotes": {
+    "schemaVersioning": {
+      "currentVersion": "1.2.0",
+      "versionFile": "podflow-studio/src/renderer/stores/projectFile.ts",
+      "versionConstant": "PROJECT_FILE_VERSION",
+      "migrationFunction": "parseProjectFile",
+      "changelog": [
+        {
+          "version": "1.1.0",
+          "date": "2026-01-19",
+          "changes": [
+            "Added TimelineGroup type for clip grouping",
+            "Added AppliedEffect type for effects tracking",
+            "Added TimelineTrack type for track configuration",
+            "Extended AudioTrack with fileName, muted, locked, waveformData",
+            "Extended Clip with groupId, locked, appliedEffects",
+            "Added store actions: splitClipAtTime, duplicateClip, groupClips, ungroupClips",
+            "Added store actions: addClipEffect, removeClipEffect, toggleClipEffect"
+          ]
+        },
+        {
+          "version": "1.2.0",
+          "date": "2026-01-19",
+          "changes": [
+            "Added projectFilePath tracking for save/load",
+            "Added auto-save with recovery support",
+            "Added cloud sync settings",
+            "Added deleteClip action"
+          ]
+        }
+      ]
+    },
+    "criticalReminders": [
+      "ALWAYS increment PROJECT_FILE_VERSION when modifying types/stores",
+      "ALWAYS add migration logic for new fields in parseProjectFile()",
+      "ALWAYS add null-safety (|| or ??) when loading optional fields",
+      "Test loading old .podflow files after schema changes"
+    ],
+    "keyboardShortcuts": {
+      "timeline": {
+        "S": "Split clip at playhead",
+        "D": "Duplicate selected clip",
+        "C": "Toggle razor/cut tool",
+        "Delete/Backspace": "Delete selected clip",
+        "Ctrl+G": "Group selected clips",
+        "J/K/L": "Playback speed control",
+        "←/→": "Seek back/forward",
+        "Shift+←/→": "Seek 10 seconds",
+        "Ctrl+Scroll": "Zoom timeline",
+        "Ctrl+S": "Save project",
+        "Ctrl+Shift+S": "Save project as",
+        "Ctrl+O": "Open project"
+      }
+    },
+    "featureStatus": {
+      "implemented": [
+        "Video clip detection and scoring",
+        "Timeline with multi-track support",
+        "Clip split/cut at playhead",
+        "Clip duplication",
+        "Clip grouping/ungrouping",
+        "Multi-select clips (Ctrl+click)",
+        "Audio track import (MP3, WAV, etc.)",
+        "Effects panel with AI/video/audio/text effects",
+        "Applied effects tracking per clip",
+        "Effect parameters editing",
+        "Context menu for clips and audio tracks",
+        "Project file save/load",
+        "Google Drive cloud upload",
+        "Auto-save with recovery"
+      ],
+      "planned": [
+        "Real-time effect preview",
+        "Drag-to-resize clips",
+        "Snap to beat/markers",
+        "Undo/redo system",
+        "Multi-camera switching",
+        "Export to Premiere/FCP",
+        "Dropbox/OneDrive integration"
+      ]
+    },
+    "cloudStorage": {
+      "googleDrive": {
+        "setupInstructions": [
+          "1. Go to Google Cloud Console (console.cloud.google.com)",
+          "2. Create a new project or select existing",
+          "3. Enable Google Drive API",
+          "4. Create OAuth 2.0 credentials (Desktop app)",
+          "5. Set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET environment variables",
+          "6. The app will handle OAuth flow automatically"
+        ],
+        "envVariables": [
+          "GOOGLE_CLIENT_ID",
+          "GOOGLE_CLIENT_SECRET"
+        ]
+      }
+    }
+  }
+}

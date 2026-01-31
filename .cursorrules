@@ -1,0 +1,185 @@
+# PodFlow Studio - Agent Instructions
+
+## Project Overview
+This is PodFlow Studio, an Electron + React + Python application for AI-powered podcast clip detection. The app saves/loads `.podflow` project files that contain the full project state.
+
+## CRITICAL: Project File Schema Versioning
+
+### When to Update the Schema Version
+**Every time you modify any of these files, you MUST update the project file schema:**
+
+1. `podflow-studio/src/renderer/types/index.ts` - Type definitions
+2. `podflow-studio/src/renderer/stores/projectFile.ts` - Project file structure
+3. `podflow-studio/src/renderer/stores/store.ts` - Zustand store structure
+
+### How to Update the Schema Version
+
+1. **Increment the version** in `projectFile.ts`:
+```typescript
+// BEFORE: const PROJECT_FILE_VERSION = '1.0.0';
+// AFTER:  const PROJECT_FILE_VERSION = '1.1.0';
+```
+
+2. **Add migration logic** in `parseProjectFile()`:
+```typescript
+export function parseProjectFile(json: string): ProjectFile {
+  const data = JSON.parse(json);
+  
+  // Migration from older versions
+  if (data.version === '1.0.0') {
+    // Add default values for new fields
+    data.newField = data.newField ?? defaultValue;
+    data.version = '1.1.0';
+  }
+  
+  return data as ProjectFile;
+}
+```
+
+3. **Add null-safety** in `loadProjectFile()`:
+```typescript
+// Always use ?? or || for optional fields
+setCameras(projectFile.cameras || []);
+setNewFeature(projectFile.newFeature ?? defaultValue);
+```
+
+### Version History
+Track all schema changes here:
+
+| Version | Date | Changes |
+|---------|------|---------|
+| 1.0.0 | Initial | Base schema |
+| (add new versions here) | | |
+
+## Project File Structure
+
+The `.podflow` project file contains:
+- `version` - Schema version for migration
+- `meta` - Project metadata (name, dates)
+- `source` - Source video info (Project type)
+- `clips` - Detected clips array
+- `deadSpaces` - Dead space regions
+- `transcript` - Whisper transcript
+- `editingPreferences` - User editing prefs
+- `cameras` - Multi-camera inputs
+- `cameraCuts` - Camera switching decisions
+- `speakerSegments` - Speaker diarization
+- `audioTracks` - Audio mixing tracks
+- `qaChecks` - QA check results
+- `detectionSettings` - Detection parameters
+- `exportSettings` - Export parameters
+- `uiState` - UI state (zoom, selection, etc.)
+- `cache` - Cached AI results, waveforms, thumbnails
+
+## Adding New Features Checklist
+
+When adding a new feature that affects saved state:
+
+1. [ ] Add type definition in `types/index.ts`
+2. [ ] Add field to `ProjectFile` interface in `projectFile.ts`
+3. [ ] Add field to Zustand store in `store.ts`
+4. [ ] Add to `createProjectFile()` function
+5. [ ] Add to `loadProjectFile()` function with null-safety
+6. [ ] Increment `PROJECT_FILE_VERSION`
+7. [ ] Add migration logic in `parseProjectFile()`
+8. [ ] Update this changelog
+
+## Code Organization
+
+```
+podflow-studio/
+├── src/
+│   ├── main/           # Electron main process (Node.js)
+│   │   ├── index.ts    # Main entry, window creation
+│   │   ├── ipc/        # IPC handlers
+│   │   │   ├── fileHandlers.ts       # File selection, FFprobe
+│   │   │   ├── detectionHandlers.ts  # Python detection spawning
+│   │   │   ├── exportHandlers.ts     # FFmpeg export
+│   │   │   ├── reviewHandlers.ts     # Clip project persistence
+│   │   │   ├── projectFileHandlers.ts # .podflow save/load
+│   │   │   ├── aiEffectsHandlers.ts  # AI effects processing
+│   │   │   └── premiereExport.ts     # NLE export formats
+│   │   └── jobs/       # Job queue system
+│   │
+│   ├── preload/        # Electron preload (contextBridge)
+│   │   └── preload.ts  # Exposes window.api
+│   │
+│   ├── renderer/       # React frontend
+│   │   ├── App.tsx     # Root component
+│   │   ├── components/ # UI components
+│   │   │   ├── ui/     # Primitives (Button, Card, etc.)
+│   │   │   ├── layout/ # Page layouts
+│   │   │   └── editor/ # Editor components (main UI)
+│   │   ├── pages/      # Legacy pages (not actively used)
+│   │   ├── stores/     # Zustand state
+│   │   │   ├── store.ts        # Main app store
+│   │   │   ├── projectFile.ts  # Project file manager
+│   │   │   └── index.ts        # Exports
+│   │   └── types/      # TypeScript types
+│   │
+│   └── python/         # Python detection pipeline
+│       ├── detector.py # Main entry point
+│       ├── features.py # Feature extraction
+│       ├── vad_utils.py # Voice activity detection
+│       ├── patterns/   # Pattern detectors
+│       ├── utils/      # Scoring, baselines
+│       └── ai/         # AI enhancement (optional)
+```
+
+## IPC Communication
+
+### Renderer → Main (invoke)
+- `select-file` - File picker dialog
+- `validate-file` - FFprobe validation
+- `start-detection` - Start Python detection
+- `cancel-detection` - Cancel detection
+- `export-clips` - Export to files
+- `project-save` / `project-save-as` - Save .podflow
+- `project-open` / `project-load` - Load .podflow
+- `project-autosave` - Auto-save
+- `project-get-recent` - Recent projects list
+
+### Main → Renderer (send)
+- `detection-progress` - Progress updates
+- `detection-complete` - Results
+- `detection-error` - Errors
+- `export-progress` - Export progress
+
+## Python Detection Pipeline
+
+The detector outputs via stdout:
+- `PROGRESS:<percent>:<message>` - Progress updates
+- `RESULT:<json>` - Final results
+- `ERROR:<message>` - Error messages
+
+Always handle JSON parsing errors gracefully.
+
+## Design System
+
+Use SeeZee design tokens:
+- `sz-bg`, `sz-bg-secondary`, `sz-bg-tertiary`
+- `sz-text`, `sz-text-secondary`, `sz-text-muted`
+- `sz-accent`, `sz-accent-hover`
+- `sz-border`, `sz-border-light`
+- `sz-success`, `sz-danger`, `sz-warning`
+
+## Testing
+
+- Python: `cd podflow-studio/src/python && python -m unittest discover -s tests`
+- Eval: `python tools/eval/run_eval.py --dataset data/sample.json --k 10`
+
+## Common Issues
+
+### Project file won't open
+- Check schema version mismatch
+- Add migration logic for new fields
+- Ensure null-safety in loadProjectFile()
+
+### Detection fails
+- Check Python path
+- Verify FFmpeg is accessible
+- Check for stderr output in terminal
+
+### Export fails
+- Fast mode may fail on some codecs - fallback to accurate mode
+- Check FFprobe path detection

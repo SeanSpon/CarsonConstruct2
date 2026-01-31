@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { CaptionSettingsPopover } from './CaptionSettingsPopover';
 
 export type CaptionStyle = 'viral' | 'minimal' | 'bold';
 
@@ -30,11 +31,13 @@ const STYLE_OPTIONS: Array<{ value: CaptionStyle; label: string; description: st
 
 export function CaptionStyleSelector({ selectedStyle, onStyleChange }: CaptionStyleSelectorProps) {
   const [isExpanded, setIsExpanded] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
 
   const selectedOption = STYLE_OPTIONS.find(opt => opt.value === selectedStyle) || STYLE_OPTIONS[0];
 
   return (
-    <div className="relative">
+    <div className="relative flex items-center gap-1">
+      {/* Style Dropdown Button */}
       <button
         onClick={() => setIsExpanded(!isExpanded)}
         className="flex items-center gap-2 px-4 py-2 bg-sz-bg-secondary border border-sz-border rounded-lg hover:bg-sz-bg-tertiary transition-colors"
@@ -53,13 +56,30 @@ export function CaptionStyleSelector({ selectedStyle, onStyleChange }: CaptionSt
         </svg>
       </button>
 
+      {/* Settings Gear Button */}
+      <button
+        onClick={() => setShowSettings(!showSettings)}
+        className={`p-2 rounded-lg border transition-colors ${
+          showSettings
+            ? 'bg-sz-accent border-sz-accent text-white'
+            : 'bg-sz-bg-secondary border-sz-border hover:bg-sz-bg-tertiary text-sz-text-muted hover:text-sz-text'
+        }`}
+        title="Caption & SFX Settings"
+      >
+        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+        </svg>
+      </button>
+
+      {/* Style Dropdown */}
       {isExpanded && (
         <>
           <div
             className="fixed inset-0 z-10"
             onClick={() => setIsExpanded(false)}
           />
-          <div className="absolute top-full mt-2 w-80 bg-sz-bg-secondary border border-sz-border rounded-lg shadow-lg z-20 overflow-hidden">
+          <div className="absolute top-full left-0 mt-2 w-80 bg-sz-bg-secondary border border-sz-border rounded-lg shadow-lg z-20 overflow-hidden">
             {STYLE_OPTIONS.map((option) => (
               <button
                 key={option.value}
@@ -90,6 +110,17 @@ export function CaptionStyleSelector({ selectedStyle, onStyleChange }: CaptionSt
               </button>
             ))}
           </div>
+        </>
+      )}
+
+      {/* Settings Popover */}
+      {showSettings && (
+        <>
+          <div
+            className="fixed inset-0 z-20"
+            onClick={() => setShowSettings(false)}
+          />
+          <CaptionSettingsPopover onClose={() => setShowSettings(false)} />
         </>
       )}
     </div>

@@ -14,6 +14,7 @@ class TestVadSnapping(unittest.TestCase):
             min_duration=5.0,
             max_duration=90.0,
             snap_window_s=2.0,
+            head_padding_s=0.0,
             tail_padding_s=0.0,
         )
         self.assertTrue(snapped)
@@ -31,6 +32,7 @@ class TestVadSnapping(unittest.TestCase):
             min_duration=5.0,
             max_duration=90.0,
             snap_window_s=2.0,
+            head_padding_s=0.0,
             tail_padding_s=0.0,
         )
         self.assertTrue(snapped)
@@ -47,6 +49,7 @@ class TestVadSnapping(unittest.TestCase):
             min_duration=15.0,
             max_duration=90.0,
             snap_window_s=2.0,
+            head_padding_s=0.0,
             tail_padding_s=0.0,
         )
         self.assertFalse(snapped)
@@ -64,6 +67,7 @@ class TestVadSnapping(unittest.TestCase):
             min_duration=5.0,
             max_duration=90.0,
             snap_window_s=2.0,
+            head_padding_s=0.0,
             tail_padding_s=0.4,
         )
         self.assertTrue(snapped)

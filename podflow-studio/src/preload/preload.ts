@@ -1,4 +1,32 @@
 import { contextBridge, ipcRenderer } from 'electron';
+import type { FramingModel, FramingKeyframe } from '../shared/framing';
+
+// Forward fatal renderer errors to main so we can diagnose "blank screen" issues
+// even when DevTools isn't visible.
+window.addEventListener('error', (event) => {
+  try {
+    ipcRenderer.send('renderer-error', {
+      message: event.message,
+      filename: event.filename,
+      lineno: event.lineno,
+      colno: event.colno,
+      stack: (event.error && (event.error as Error).stack) || undefined,
+    });
+  } catch {
+    // ignore
+  }
+});
+
+window.addEventListener('unhandledrejection', (event) => {
+  try {
+    const reason = (event as PromiseRejectionEvent).reason;
+    const message = reason instanceof Error ? reason.message : String(reason);
+    const stack = reason instanceof Error ? reason.stack : undefined;
+    ipcRenderer.send('renderer-error', { message, stack });
+  } catch {
+    // ignore
+  }
+});
 
 // Type definitions for the API
 export interface FileInfo {
@@ -51,6 +79,13 @@ export interface DetectionProgress {
   projectId: string;
   progress: number;
   message: string;
+}
+
+export interface DetectionLogEvent {
+  projectId: string;
+  line: string;
+  stream: 'stdout' | 'stderr';
+  ts: number;
 }
 
 export interface DetectionResult {
@@ -244,6 +279,12 @@ contextBridge.exposeInMainWorld('api', {
     return () => ipcRenderer.removeListener('detection-error', handler);
   },
 
+  onDetectionLog: (callback: (data: DetectionLogEvent) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, data: DetectionLogEvent) => callback(data);
+    ipcRenderer.on('detection-log', handler);
+    return () => ipcRenderer.removeListener('detection-log', handler);
+  },
+
   onExportProgress: (callback: (data: ExportProgress) => void) => {
     const handler = (_event: Electron.IpcRendererEvent, data: ExportProgress) => callback(data);
     ipcRenderer.on('export-progress', handler);
@@ -408,6 +449,7 @@ contextBridge.exposeInMainWorld('api', {
       end: number;
       duration: number;
       captionStyle?: 'viral' | 'minimal' | 'bold';
+      framing?: FramingModel;
     }>;
     transcript: {
       segments?: Array<{ start: number; end: number; text: string }>;
@@ -602,6 +644,7 @@ declare global {
       onDetectionProgress: (callback: (data: DetectionProgress) => void) => () => void;
       onDetectionComplete: (callback: (data: DetectionResult) => void) => () => void;
       onDetectionError: (callback: (data: DetectionError) => void) => () => void;
+      onDetectionLog: (callback: (data: DetectionLogEvent) => void) => () => void;
       onExportProgress: (callback: (data: ExportProgress) => void) => () => void;
       onExportComplete: (callback: (data: ExportResult) => void) => () => void;
       onVerticalReelProgress: (callback: (data: { clipId: string; percent: number; message: string }) => void) => () => void;
@@ -642,8 +685,17 @@ declare global {
       }) => Promise<{ success: boolean; path?: string; error?: string }>;
       exportMvpClips: (data: {
         sourceFile: string;
-        clips: Array<{ clip_id: string; start: number; end: number; duration: number }>;
-        transcript: { segments?: Array<{ start: number; end: number; text: string }> };
+        clips: Array<{ 
+          clip_id: string; 
+          start: number; 
+          end: number; 
+          duration: number; 
+          captionStyle?: 'viral' | 'minimal' | 'bold'; 
+          framing?: FramingModel;
+          framingKeyframes?: FramingKeyframe[];
+          autoOrientEnabled?: boolean;
+        }>;
+        transcript: { segments?: Array<{ start: number; end: number; text: string }>; words?: Array<{ word: string; start: number; end: number }> };
         outputDir: string;
         inputWidth: number;
         inputHeight: number;

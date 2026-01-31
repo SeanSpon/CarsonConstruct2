@@ -1,3 +1,8 @@
+import type { FramingModel, FramingKeyframe, SpeakerPositionMap, SpeakerPosition } from '../../shared/framing';
+
+// Re-export framing types for convenience
+export type { FramingModel, FramingKeyframe, SpeakerPositionMap, SpeakerPosition };
+
 // Project type for editing workflow
 export type ProjectType = 'short-form' | 'long-form' | 'long-form-clips';
 
@@ -157,7 +162,17 @@ export interface Clip {
   duration: number;
   
   // Algorithm detection
-  pattern: 'payoff' | 'monologue' | 'laughter' | 'debate';
+  pattern:
+    | 'payoff'
+    | 'monologue'
+    | 'laughter'
+    | 'debate'
+    | 'silence'
+    | 'story_beat'
+    | 'natural_break'
+    | 'topic_shift'
+    | 'quotable'
+    | 'emotional_peak';
   patternLabel: string;
   description: string;
   algorithmScore: number;
@@ -224,6 +239,29 @@ export interface Clip {
 
   // Caption styling (per-clip override)
   captionStyle?: 'viral' | 'minimal' | 'bold';
+
+  // Shared preview/export framing contract
+  framing?: FramingModel;
+  
+  // Speaker-aware auto-framing keyframes
+  // These override the static framing during playback/export for smooth speaker tracking
+  framingKeyframes?: FramingKeyframe[];
+  
+  // Whether auto-orient is enabled for this clip
+  autoOrientEnabled?: boolean;
+  
+  // Manual speaker position override (left/center/right)
+  // Used when auto-detection doesn't work
+  manualSpeakerPosition?: 'left' | 'center' | 'right';
+  
+  // Exact face center X position from detection (0-1)
+  // Used for precise face-centered cropping
+  faceCenterX?: number;
+
+  // Face detection diagnostics (used to decide whether we truly detected a subject)
+  faceDetectionNumFaces?: number;
+  faceDetectionConfidence?: number;
+  faceDetectionSource?: 'face' | 'person' | 'fallback' | 'project-bias';
 }
 
 // Dead space detected for auto-edit
@@ -400,6 +438,64 @@ export interface ReelCaptionSettings {
   highlightColor: string;
   position: ReelCaptionPosition;
 }
+
+// SFX effect types for clips
+export type SFXType = 'zoom-pulse' | 'shake' | 'flash' | 'bass-boost' | 'reverb-tail' | 'whoosh' | 'impact';
+
+export interface SFXEffect {
+  type: SFXType;
+  enabled: boolean;
+  intensity: number; // 0-100
+}
+
+// Caption customization settings
+export interface CaptionCustomization {
+  // Font settings
+  fontFamily: 'Montserrat' | 'Roboto' | 'Bebas Neue' | 'Impact' | 'Arial';
+  fontSize: 'small' | 'medium' | 'large' | 'xl';
+  fontWeight: 'normal' | 'bold' | 'black';
+  
+  // Colors
+  primaryColor: string;
+  highlightColor: string;
+  outlineColor: string;
+  
+  // Effects
+  outlineWidth: number; // 0-10
+  shadowIntensity: number; // 0-100
+  animation: 'none' | 'pop' | 'typewriter' | 'bounce' | 'glow';
+  
+  // Position
+  verticalPosition: 'top' | 'center' | 'bottom';
+  
+  // SFX settings for clips
+  sfxEnabled: boolean;
+  sfxEffects: SFXEffect[];
+}
+
+// Default caption customization
+export const DEFAULT_CAPTION_CUSTOMIZATION: CaptionCustomization = {
+  fontFamily: 'Montserrat',
+  fontSize: 'large',
+  fontWeight: 'bold',
+  primaryColor: '#FFFFFF',
+  highlightColor: '#FFD700',
+  outlineColor: '#000000',
+  outlineWidth: 4,
+  shadowIntensity: 50,
+  animation: 'pop',
+  verticalPosition: 'bottom',
+  sfxEnabled: false,
+  sfxEffects: [
+    { type: 'zoom-pulse', enabled: false, intensity: 50 },
+    { type: 'shake', enabled: false, intensity: 30 },
+    { type: 'flash', enabled: false, intensity: 40 },
+    { type: 'bass-boost', enabled: false, intensity: 60 },
+    { type: 'reverb-tail', enabled: false, intensity: 50 },
+    { type: 'whoosh', enabled: false, intensity: 50 },
+    { type: 'impact', enabled: false, intensity: 50 },
+  ],
+};
 
 export interface ReelExportSettings {
   platform: ReelPlatform;

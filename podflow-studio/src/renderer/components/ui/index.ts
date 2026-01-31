@@ -10,5 +10,6 @@ export { default as IconButton, type IconButtonProps } from './IconButton';
 export { default as Modal, Modal as BaseModal, ModalFooter, SlideInPanel, ConfirmModal, AlertModal, type ModalProps, type ModalFooterProps, type SlideInPanelProps, type ConfirmModalProps, type AlertModalProps } from './Modal';
 export { ClipTypeSelector, type ClipMood } from './ClipTypeSelector';
 export { CaptionStyleSelector, type CaptionStyle } from './CaptionStyleSelector';
+export { CaptionSettingsPopover } from './CaptionSettingsPopover';
 export { HistoryScreen } from './HistoryScreen';
 export { HistoryProjectDetail } from './HistoryProjectDetail';

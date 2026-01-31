@@ -5,6 +5,7 @@ export type ClipMood = 'all' | 'impactful' | 'funny' | 'serious' | 'somber' | 'e
 interface ClipTypeSelectorProps {
   selectedMood: ClipMood;
   onMoodChange: (mood: ClipMood) => void;
+  moodCounts?: Partial<Record<ClipMood, number>>;
 }
 
 const MOOD_OPTIONS: Array<{ value: ClipMood; label: string; emoji: string; description: string }> = [
@@ -17,10 +18,11 @@ const MOOD_OPTIONS: Array<{ value: ClipMood; label: string; emoji: string; descr
   { value: 'revealing', label: 'Revealing', emoji: '💡', description: 'Insights, payoffs, reveals' },
 ];
 
-export function ClipTypeSelector({ selectedMood, onMoodChange }: ClipTypeSelectorProps) {
+export function ClipTypeSelector({ selectedMood, onMoodChange, moodCounts }: ClipTypeSelectorProps) {
   const [isExpanded, setIsExpanded] = useState(false);
 
   const selectedOption = MOOD_OPTIONS.find(opt => opt.value === selectedMood) || MOOD_OPTIONS[0];
+  const selectedCount = (moodCounts?.[selectedOption.value] ?? 0).toLocaleString();
 
   return (
     <div className="relative">
@@ -30,6 +32,9 @@ export function ClipTypeSelector({ selectedMood, onMoodChange }: ClipTypeSelecto
       >
         <span className="text-xl">{selectedOption.emoji}</span>
         <span className="font-medium">{selectedOption.label}</span>
+        <span className="text-xs px-2 py-0.5 rounded bg-sz-bg-tertiary text-sz-text-muted">
+          {selectedCount}
+        </span>
         <svg
           className={`w-4 h-4 transition-transform ${isExpanded ? 'rotate-180' : ''}`}
           fill="none"
@@ -60,7 +65,12 @@ export function ClipTypeSelector({ selectedMood, onMoodChange }: ClipTypeSelecto
               >
                 <span className="text-2xl">{option.emoji}</span>
                 <div className="flex-1 text-left">
-                  <div className="font-medium">{option.label}</div>
+                  <div className="font-medium flex items-center justify-between gap-3">
+                    <span>{option.label}</span>
+                    <span className="text-xs px-2 py-0.5 rounded bg-sz-bg-tertiary text-sz-text-muted shrink-0">
+                      {(moodCounts?.[option.value] ?? 0).toLocaleString()}
+                    </span>
+                  </div>
                   <div className="text-sm text-sz-text-muted">{option.description}</div>
                 </div>
                 {selectedMood === option.value && (

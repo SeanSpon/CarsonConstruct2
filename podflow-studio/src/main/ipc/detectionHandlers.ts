@@ -19,8 +19,53 @@ try {
 const activeProcesses = new Map<string, ChildProcess>();
 const progressState = new Map<string, { lastSentAt: number; lastProgress: number; lastMessage: string }>();
 const stdoutBuffers = new Map<string, string>();
+const stderrBuffers = new Map<string, string>();
 const PROGRESS_MIN_INTERVAL_MS = 100;
 const PROGRESS_MIN_DELTA = 1;
+
+const sendDetectionLogLine = (projectId: string, line: string, stream: 'stdout' | 'stderr') => {
+  const win = getMainWindow();
+  if (!win) return;
+  const safeLine = line.length > 2000 ? `${line.slice(0, 2000)}…` : line;
+  win.webContents.send('detection-log', { projectId, line: safeLine, stream, ts: Date.now() });
+};
+
+const resolvePythonCommand = () => {
+  const explicit = process.env.PODFLOW_PYTHON || process.env.PYTHON_EXECUTABLE;
+  if (explicit && fs.existsSync(explicit)) {
+    return explicit;
+  }
+
+  const isWin = process.platform === 'win32';
+  const venv = process.env.VIRTUAL_ENV;
+  if (venv) {
+    const venvPython = path.join(venv, isWin ? 'Scripts\\python.exe' : 'bin/python');
+    if (fs.existsSync(venvPython)) {
+      return venvPython;
+    }
+  }
+
+  // Dev fallback: try to find a repo-level .venv next to the Electron app folder
+  // app.getAppPath() in dev is typically <repo>/podflow-studio
+  try {
+    const appPath = app.getAppPath();
+    const candidates = [
+      path.resolve(appPath, '..', '.venv'),
+      path.resolve(appPath, '.venv'),
+      path.resolve(process.cwd(), '.venv'),
+    ];
+    for (const candidate of candidates) {
+      const candidatePython = path.join(candidate, isWin ? 'Scripts\\python.exe' : 'bin/python');
+      if (fs.existsSync(candidatePython)) {
+        return candidatePython;
+      }
+    }
+  } catch {
+    // ignore and fall back to PATH
+  }
+
+  return isWin ? 'python' : 'python3';
+};
 
 interface DetectionSettings {
   targetCount: number;
@@ -68,13 +113,11 @@ const startJob = async (data: {
   const filenameTranscriptPath = path.join(filenameCacheDir, 'transcript.json');
   
   // Check which transcript to use (prefer inputHash, fallback to filename)
-  let selectedTranscriptPath = transcriptPath;
   if (!fs.existsSync(transcriptPath) && fs.existsSync(filenameTranscriptPath)) {
     console.log('[Detection] Found transcript with filename cache, copying to input hash cache');
     fs.mkdirSync(cacheDir, { recursive: true });
     const content = fs.readFileSync(filenameTranscriptPath, 'utf-8');
     fs.writeFileSync(transcriptPath, content);
-    selectedTranscriptPath = transcriptPath;
   }
 
   // Cancel any existing detection for this project
@@ -133,7 +176,8 @@ const startJob = async (data: {
   console.log('[Detection] Starting:', pythonScript);
 
   // Spawn Python process
-  const pythonCmd = process.platform === 'win32' ? 'python' : 'python3';
+  const pythonCmd = resolvePythonCommand();
+  console.log('[Detection] Using Python:', pythonCmd);
   let pythonProcess: ChildProcess;
   try {
     pythonProcess = spawn(pythonCmd, ['-u', pythonScript, filePath, settingsJson], {
@@ -154,11 +198,28 @@ const startJob = async (data: {
     return { success: false, error: errMsg };
   }
 
+  // spawn() failures are commonly delivered via the 'error' event (not thrown).
+  pythonProcess.on('error', (err) => {
+    console.error('[Detection] Python process spawn error:', err);
+    win.webContents.send('detection-error', {
+      projectId,
+      error:
+        `Failed to start Python (${pythonCmd}): ${err.message}. ` +
+        `If you're using a virtualenv, set PODFLOW_PYTHON to its python executable and install deps: ` +
+        `pip install -r src/python/requirements.txt`,
+    });
+
+    activeProcesses.delete(projectId);
+    progressState.delete(projectId);
+    stdoutBuffers.delete(projectId);
+  });
+
   activeProcesses.set(projectId, pythonProcess);
   stdoutBuffers.set(projectId, '');
+  stderrBuffers.set(projectId, '');
 
   // Handle stdout
-  pythonProcess.stdout.on('data', (data) => {
+  if (pythonProcess.stdout) pythonProcess.stdout.on('data', (data) => {
     const buffer = (stdoutBuffers.get(projectId) || '') + data.toString();
     const parts = buffer.split('\n');
     const incompleteData = parts.pop() || '';
@@ -167,6 +228,7 @@ const startJob = async (data: {
     const lines = parts.filter((line: string) => line.trim());
 
     for (const line of lines) {
+      sendDetectionLogLine(projectId, line, 'stdout');
       if (line.startsWith('PROGRESS:')) {
         const parts = line.substring(9).split(':');
         const progress = parseInt(parts[0], 10);
@@ -219,17 +281,28 @@ const startJob = async (data: {
   });
 
   // Handle stderr
-  pythonProcess.stderr.on('data', (data) => {
-    const errorMessage = data.toString();
-    console.error('[Detection] stderr:', errorMessage);
-    if (errorMessage.includes('Error') || errorMessage.includes('Exception')) {
-      win.webContents.send('detection-error', { projectId, error: errorMessage });
+  if (pythonProcess.stderr) pythonProcess.stderr.on('data', (data) => {
+    const buffer = (stderrBuffers.get(projectId) || '') + data.toString();
+    const parts = buffer.split('\n');
+    const incompleteData = parts.pop() || '';
+    stderrBuffers.set(projectId, incompleteData);
+    const lines = parts.filter((line: string) => line.trim());
+
+    for (const line of lines) {
+      console.error('[Detection] stderr:', line);
+      sendDetectionLogLine(projectId, line, 'stderr');
+      if (line.includes('Error') || line.includes('Exception')) {
+        win.webContents.send('detection-error', { projectId, error: line });
+      }
     }
   });
 
   // Handle process exit
   pythonProcess.on('close', (code) => {
     console.log('[Detection] Process exited with code:', code);
+    if (code !== 0 && code !== null) {
+      sendDetectionLogLine(projectId, `Process exited with code: ${code}`, 'stderr');
+    }
     
     // Process remaining buffered data
     const remainingData = stdoutBuffers.get(projectId) || '';
@@ -258,6 +331,7 @@ const startJob = async (data: {
     activeProcesses.delete(projectId);
     progressState.delete(projectId);
     stdoutBuffers.delete(projectId);
+    stderrBuffers.delete(projectId);
 
     if (code !== 0 && code !== null) {
       win.webContents.send('detection-error', {

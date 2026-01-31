@@ -156,7 +156,7 @@ function getFFprobePath(): string | null {
       console.log('[FileHandlers] Found ffprobe in PATH:', foundPath);
       return foundPath;
     }
-  } catch (e) {
+  } catch {
     console.log('[FileHandlers] ffprobe not found in PATH');
   }
 
@@ -214,7 +214,7 @@ function getFFmpegPath(): string | null {
     if (ffmpegStatic && typeof ffmpegStatic === 'string' && fs.existsSync(ffmpegStatic)) {
       return ffmpegStatic;
     }
-  } catch (e) {
+  } catch {
     // Not available
   }
 
@@ -238,7 +238,7 @@ function getFFmpegPath(): string | null {
     if (foundPath && fs.existsSync(foundPath)) {
       return foundPath;
     }
-  } catch (e) {
+  } catch {
     // Not in PATH
   }
 
@@ -361,7 +361,6 @@ ipcMain.handle('validate-file', async (_event, filePath: string) => {
         let thumbnailPath: string | undefined;
         if (videoStream) {
           try {
-            const { app } = require('electron');
             const thumbnailDir = path.join(app.getPath('userData'), 'thumbnails');
             if (!fs.existsSync(thumbnailDir)) {
               fs.mkdirSync(thumbnailDir, { recursive: true });
@@ -388,7 +387,7 @@ ipcMain.handle('validate-file', async (_event, filePath: string) => {
           thumbnailPath,
           bitrate: info.format?.bit_rate ? parseInt(info.format.bit_rate) : undefined,
         });
-      } catch (e) {
+      } catch {
         resolve({
           valid: false,
           error: 'Failed to parse video information',
@@ -587,12 +586,10 @@ ipcMain.handle('extract-waveform', async (_event, filePath: string, numPoints: n
       '-'
     ], { windowsHide: true });
 
-    let stderrOutput = '';
     const peaks: number[] = [];
 
     ffmpeg.stderr.on('data', (data) => {
       const text = data.toString();
-      stderrOutput += text;
       
       // Parse peak levels from output
       const peakMatches = text.match(/lavfi\.astats\.Overall\.Peak_level=(-?\d+\.?\d*)/g);
@@ -607,7 +604,7 @@ ipcMain.handle('extract-waveform', async (_event, filePath: string, numPoints: n
       }
     });
 
-    ffmpeg.on('close', (code) => {
+    ffmpeg.on('close', () => {
       console.log('[FileHandlers] Waveform extraction complete, got', peaks.length, 'peaks');
       
       if (peaks.length === 0) {

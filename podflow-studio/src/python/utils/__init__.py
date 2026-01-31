@@ -3,6 +3,7 @@ from .mvp_scoring import (
     score_clip,
     score_and_select_clips,
     compute_iou,
+    compute_overlap_ratio,
     nms_clips,
 )
 from .mvp_candidates import (
@@ -24,6 +25,7 @@ __all__ = [
     'propose_clip_windows',
     'score_and_select_clips',
     'compute_iou',
+    'compute_overlap_ratio',
     'nms_clips',
     # MVP Candidates
     'detect_energy_spikes',

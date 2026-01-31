@@ -136,11 +136,13 @@
 
   .caption-viral .caption-highlight {
     color: #00FF00;
-    background: linear-gradient(180deg, #00FF00 0%, #00CC00 100%);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    background-clip: text;
-    filter: drop-shadow(0 0 6px rgba(0, 255, 0, 0.6));
+    /* Avoid background-clip/text-fill tricks that can render as blocky artifacts in Electron */
+    text-shadow:
+      -2px -2px 0 #000,
+      2px -2px 0 #000,
+      -2px 2px 0 #000,
+      2px 2px 0 #000,
+      0 0 10px rgba(0, 255, 0, 0.55);
   }
 
   /* Minimal Style - Clean white text */
@@ -284,6 +286,44 @@
 /* Playhead animation */
 .playhead {
   transition: left 50ms linear;
+}
+
+/* Bigger, touch-friendly range scrubber */
+input.sz-timeline-range {
+  height: 12px;
+}
+
+input.sz-timeline-range::-webkit-slider-runnable-track {
+  height: 12px;
+  border-radius: 999px;
+  background: #2D333B;
+  border: 1px solid #444C56;
+}
+
+input.sz-timeline-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 18px;
+  height: 18px;
+  margin-top: -3px;
+  border-radius: 999px;
+  background: currentColor;
+  border: 2px solid rgba(255, 255, 255, 0.25);
+}
+
+input.sz-timeline-range::-moz-range-track {
+  height: 12px;
+  border-radius: 999px;
+  background: #2D333B;
+  border: 1px solid #444C56;
+}
+
+input.sz-timeline-range::-moz-range-thumb {
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  background: currentColor;
+  border: 2px solid rgba(255, 255, 255, 0.25);
 }
 
 /* Clip strip scroll shadow */

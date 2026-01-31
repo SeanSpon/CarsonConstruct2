@@ -7,7 +7,11 @@ import type {
   Transcript, 
   DetectionSettings, 
   DetectionProgress,
+  CaptionCustomization,
+  SpeakerSegment,
+  SpeakerPositionMap,
 } from '../types';
+import { DEFAULT_CAPTION_CUSTOMIZATION } from '../types';
 
 interface AppState {
   // Hydration
@@ -23,6 +27,9 @@ interface AppState {
   isDetecting: boolean;
   detectionProgress: DetectionProgress | null;
   detectionError: string | null;
+  detectionLogs: Array<{ ts: number; line: string; stream: 'stdout' | 'stderr' }>;
+  addDetectionLog: (entry: { ts: number; line: string; stream: 'stdout' | 'stderr' }) => void;
+  clearDetectionLogs: () => void;
   
   // Results
   clips: Clip[];
@@ -31,6 +38,14 @@ interface AppState {
   transcriptAvailable: boolean;
   transcriptError: string | null;
   transcriptSource: string | null;
+  
+  // Speaker data from diarization
+  speakerSegments: SpeakerSegment[];
+  speakerPositions: SpeakerPositionMap;
+  autoOrientEnabled: boolean;
+  setSpeakerSegments: (segments: SpeakerSegment[]) => void;
+  setSpeakerPositions: (positions: SpeakerPositionMap) => void;
+  setAutoOrientEnabled: (enabled: boolean) => void;
   
   // Settings (minimal)
   settings: DetectionSettings;
@@ -43,6 +58,11 @@ interface AppState {
   lastExportDir: string | null;
   captionStyle: 'viral' | 'minimal' | 'bold';
   setCaptionStyle: (style: 'viral' | 'minimal' | 'bold') => void;
+  
+  // Caption Customization
+  captionCustomization: CaptionCustomization;
+  setCaptionCustomization: (customization: CaptionCustomization) => void;
+  updateCaptionCustomization: (updates: Partial<CaptionCustomization>) => void;
   
   // Actions
   setProject: (project: Project | null) => void;
@@ -68,10 +88,13 @@ interface AppState {
       transcriptAvailable?: boolean;
       transcriptError?: string | null;
       transcriptSource?: string | null;
-    }
+    },
+    speakerSegments?: SpeakerSegment[]
   ) => void;
   updateClipStatus: (clipId: string, status: Clip['status']) => void;
   updateClipTrim: (clipId: string, trimStartOffset: number, trimEndOffset: number) => void;
+  updateClipAutoOrient: (clipId: string, enabled: boolean) => void;
+  updateClipSpeakerPosition: (clipId: string, position: 'left' | 'center' | 'right') => void;
   
   setExporting: (isExporting: boolean) => void;
   setExportProgress: (progress: { current: number; total: number; clipName: string } | null) => void;
@@ -100,17 +123,22 @@ export const useStore = create<AppState>()(
       isDetecting: false,
       detectionProgress: null,
       detectionError: null,
+      detectionLogs: [],
       clips: [],
       deadSpaces: [],
       transcript: null,
       transcriptAvailable: false,
       transcriptError: null,
       transcriptSource: null,
+      speakerSegments: [],
+      speakerPositions: {},
+      autoOrientEnabled: true,
       settings: defaultSettings,
       isExporting: false,
       exportProgress: null,
       lastExportDir: null,
       captionStyle: 'viral',
+      captionCustomization: DEFAULT_CAPTION_CUSTOMIZATION,
       openaiApiKey: null,
 
       // Actions
@@ -128,6 +156,8 @@ export const useStore = create<AppState>()(
         transcriptAvailable: false,
         transcriptError: null,
         transcriptSource: null,
+        speakerSegments: [],
+        speakerPositions: {},
         detectionProgress: null,
         detectionError: null,
       }),
@@ -148,19 +178,29 @@ export const useStore = create<AppState>()(
         detectionProgress: null,
       }),
 
+      addDetectionLog: (entry) =>
+        set((state) => {
+          const next = [...state.detectionLogs, entry];
+          const MAX = 400;
+          return { detectionLogs: next.length > MAX ? next.slice(next.length - MAX) : next };
+        }),
+
+      clearDetectionLogs: () => set({ detectionLogs: [] }),
+
       setTranscriptMeta: (meta) => set({
         transcriptAvailable: meta.transcriptAvailable ?? false,
         transcriptError: meta.transcriptError ?? null,
         transcriptSource: meta.transcriptSource ?? null,
       }),
       
-      setResults: (clips, deadSpaces, transcript, transcriptMeta) => set({
+      setResults: (clips, deadSpaces, transcript, transcriptMeta, speakerSegments) => set({
         clips,
         deadSpaces,
         transcript,
         transcriptAvailable: transcriptMeta?.transcriptAvailable ?? !!(transcript && transcript.segments && transcript.segments.length),
         transcriptError: transcriptMeta?.transcriptError ?? null,
         transcriptSource: transcriptMeta?.transcriptSource ?? null,
+        speakerSegments: speakerSegments ?? [],
         isDetecting: false,
         detectionProgress: null,
       }),
@@ -176,11 +216,31 @@ export const useStore = create<AppState>()(
           clip.id === clipId ? { ...clip, trimStartOffset, trimEndOffset } : clip
         ),
       })),
+      
+      updateClipAutoOrient: (clipId, enabled) => set((state) => ({
+        clips: state.clips.map((clip) =>
+          clip.id === clipId ? { ...clip, autoOrientEnabled: enabled } : clip
+        ),
+      })),
+      
+      updateClipSpeakerPosition: (clipId, position) => set((state) => ({
+        clips: state.clips.map((clip) =>
+          clip.id === clipId ? { ...clip, manualSpeakerPosition: position } : clip
+        ),
+      })),
 
       setExporting: (isExporting) => set({ isExporting }),
       setExportProgress: (exportProgress) => set({ exportProgress }),
       setLastExportDir: (lastExportDir) => set({ lastExportDir }),
       setCaptionStyle: (captionStyle) => set({ captionStyle }),
+      setCaptionCustomization: (captionCustomization) => set({ captionCustomization }),
+      updateCaptionCustomization: (updates) => set((state) => ({
+        captionCustomization: { ...state.captionCustomization, ...updates },
+      })),
+      
+      setSpeakerSegments: (speakerSegments) => set({ speakerSegments }),
+      setSpeakerPositions: (speakerPositions) => set({ speakerPositions }),
+      setAutoOrientEnabled: (autoOrientEnabled) => set({ autoOrientEnabled }),
 
       reset: () => set({
         project: null,
@@ -189,12 +249,15 @@ export const useStore = create<AppState>()(
         isDetecting: false,
         detectionProgress: null,
         detectionError: null,
+        detectionLogs: [],
         clips: [],
         deadSpaces: [],
         transcript: null,
         transcriptAvailable: false,
         transcriptError: null,
         transcriptSource: null,
+        speakerSegments: [],
+        speakerPositions: {},
         isExporting: false,
         exportProgress: null,
       }),
@@ -213,6 +276,7 @@ export const useStore = create<AppState>()(
         transcriptError: state.transcriptError,
         transcriptSource: state.transcriptSource,
         captionStyle: state.captionStyle,
+        captionCustomization: state.captionCustomization,
         openaiApiKey: state.openaiApiKey,
       }),
     }

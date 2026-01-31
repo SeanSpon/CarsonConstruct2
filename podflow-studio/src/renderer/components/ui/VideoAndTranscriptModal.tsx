@@ -1,7 +1,7 @@
 import { useState } from 'react';
 
 interface VideoAndTranscriptModalProps {
-  onConfirm: (data: { videoPath: string; videoName: string; videoSize: number; videoHash: string }) => void;
+  onConfirm: (data: { videoPath: string; videoName: string; videoSize: number; videoHash: string }) => Promise<void> | void;
   onCancel: () => void;
 }
 
@@ -157,26 +157,35 @@ export function VideoAndTranscriptModal({ onConfirm, onCancel }: VideoAndTranscr
           <div className="flex gap-3 pt-4 border-t border-sz-border">
             <button
               onClick={onCancel}
+              disabled={loading}
               className="flex-1 px-4 py-2 bg-sz-bg-secondary hover:bg-sz-bg-tertiary border border-sz-border rounded-lg font-medium transition-colors"
             >
               Cancel
             </button>
             <button
-              onClick={() => {
-                if (videoFile) {
-                  // Use filename as the videoHash identifier
-                  onConfirm({
+              onClick={async () => {
+                if (!videoFile) return;
+                try {
+                  setLoading(true);
+                  setError(null);
+
+                  await onConfirm({
                     videoPath: videoFile.path,
                     videoName: videoFile.name,
                     videoSize: videoFile.size,
                     videoHash: videoFile.name,
                   });
+                } catch (err: unknown) {
+                  const msg = err instanceof Error ? err.message : String(err);
+                  setError(msg || 'Failed to start detection');
+                } finally {
+                  setLoading(false);
                 }
               }}
-              disabled={!canProceed}
+              disabled={!canProceed || loading}
               className="flex-1 px-4 py-2 bg-green-600 hover:bg-green-700 text-white font-medium rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              Start Detection
+              {loading ? 'Starting…' : 'Start Detection'}
             </button>
           </div>
         </div>

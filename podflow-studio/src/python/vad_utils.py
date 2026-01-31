@@ -254,9 +254,13 @@ def snap_to_word_boundaries(
     transcript: Optional[Dict[str, Any]],
     prefer_sentence_boundaries: bool = True,
     max_adjustment: float = 1.0,
+    add_breathing_room: bool = True,
+    head_padding_s: float = 0.15,
+    tail_padding_s: float = 0.3,
 ) -> Tuple[float, float, bool, str]:
     """
-    Snap clip boundaries to word boundaries to avoid mid-word cuts.
+    Snap clip boundaries to word boundaries to avoid mid-word cuts,
+    with optional breathing room padding for natural feel.
     
     Args:
         start_time: Original start time
@@ -264,6 +268,9 @@ def snap_to_word_boundaries(
         transcript: Whisper transcript with word timestamps
         prefer_sentence_boundaries: Prefer sentence boundaries when possible
         max_adjustment: Maximum time to adjust boundaries
+        add_breathing_room: Add small padding before/after for natural feel
+        head_padding_s: Pre-roll padding before clip start (e.g. 0.15s)
+        tail_padding_s: Post-roll padding after clip end (e.g. 0.3s)
         
     Returns:
         Tuple of (new_start, new_end, was_snapped, reason)
@@ -308,6 +315,16 @@ def snap_to_word_boundaries(
         if abs(safe_end - end_time) <= max_adjustment:
             new_end = safe_end
             end_adjusted = True
+    
+    # Add breathing room padding for natural starts/ends
+    if add_breathing_room:
+        # Add small pre-roll so clip doesn't start too abruptly
+        if head_padding_s > 0:
+            new_start = max(0, new_start - head_padding_s)
+        
+        # Add small post-roll so clip doesn't end too abruptly
+        if tail_padding_s > 0:
+            new_end = new_end + tail_padding_s
     
     # Determine reason
     was_snapped = start_adjusted or end_adjusted
@@ -450,6 +467,7 @@ def snap_clip_to_segments(
     min_duration: float,
     max_duration: float,
     snap_window_s: float = 2.0,
+    head_padding_s: float = 0.2,
     tail_padding_s: float = 0.4,
 ) -> Tuple[float, float, bool, str]:
     """
@@ -472,20 +490,34 @@ def snap_clip_to_segments(
                 best_delta = delta
         return best
 
-    new_start = nearest_boundary(start_time, segment_starts) or start_time
-    new_end = nearest_boundary(end_time, segment_ends) or end_time
+    base_start = nearest_boundary(start_time, segment_starts) or start_time
+    base_end = nearest_boundary(end_time, segment_ends) or end_time
+
+    # Apply small pre-roll/post-roll so clips don't start/end too abruptly.
+    new_start = base_start
+    new_end = base_end
+
+    if head_padding_s > 0:
+        new_start = new_start - head_padding_s
+    if tail_padding_s > 0:
+        new_end = new_end + tail_padding_s
 
     new_start = max(bounds[0], new_start)
     new_end = min(bounds[1], new_end)
 
-    if tail_padding_s > 0:
-        new_end = min(new_end + tail_padding_s, bounds[1])
-
     if new_end <= new_start:
         return original[0], original[1], False, "invalid_bounds"
 
+    # Ensure duration stays within constraints. Prefer preserving the (clean) end,
+    # and adjust the start if needed.
     duration = new_end - new_start
-    if duration < min_duration or duration > max_duration:
+    if duration > max_duration:
+        new_start = max(bounds[0], new_end - max_duration)
+        duration = new_end - new_start
+    if duration < min_duration:
+        return original[0], original[1], False, "duration_out_of_bounds"
+
+    if duration > max_duration:
         return original[0], original[1], False, "duration_out_of_bounds"
 
     if new_start == start_time and new_end == end_time:

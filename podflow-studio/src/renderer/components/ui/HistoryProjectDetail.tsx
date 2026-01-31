@@ -1,6 +1,49 @@
-import { useMemo, useState, useEffect, useRef } from 'react';
+import { useMemo, useState, useEffect } from 'react';
 import type { HistoryProject, HistoryClip } from '../../stores/historyStore';
 import { CaptionStyleSelector, type CaptionStyle } from './CaptionStyleSelector';
+
+type TranscriptLike = {
+  segments?: Array<{ text: string; start: number; end: number }>;
+  text?: string;
+  words?: Array<{ word: string; start: number; end: number }>;
+};
+
+type TimeInterval = { start: number; end: number };
+
+function clamp(value: number, min: number, max: number): number {
+  if (!Number.isFinite(value)) return min;
+  return Math.min(max, Math.max(min, value));
+}
+
+function mergeIntervals(intervals: TimeInterval[], gapThresholdSeconds: number): TimeInterval[] {
+  const normalized = intervals
+    .filter((i) => Number.isFinite(i.start) && Number.isFinite(i.end) && i.end > i.start)
+    .map((i) => ({ start: i.start, end: i.end }))
+    .sort((a, b) => a.start - b.start);
+
+  if (normalized.length === 0) return [];
+
+  const merged: TimeInterval[] = [];
+  let current = normalized[0];
+  for (let idx = 1; idx < normalized.length; idx += 1) {
+    const next = normalized[idx];
+    if (next.start <= current.end + gapThresholdSeconds) {
+      current = { start: current.start, end: Math.max(current.end, next.end) };
+      continue;
+    }
+    merged.push(current);
+    current = next;
+  }
+  merged.push(current);
+  return merged;
+}
+
+function chooseTickStepSeconds(durationSeconds: number): number {
+  if (durationSeconds <= 10 * 60) return 60;
+  if (durationSeconds <= 30 * 60) return 2 * 60;
+  if (durationSeconds <= 2 * 60 * 60) return 5 * 60;
+  return 10 * 60;
+}
 
 interface HistoryProjectDetailProps {
   project: HistoryProject;
@@ -25,7 +68,7 @@ export function HistoryProjectDetail({
   onUpdateClipStyle,
 }: HistoryProjectDetailProps) {
   const [scrubTime, setScrubTime] = useState(0);
-  const [transcript, setTranscript] = useState<{ segments?: Array<{ text: string; start: number; end: number }>; text?: string; words?: Array<{ word: string; start: number; end: number }> } | null>((project.transcript || null) as { segments?: Array<{ text: string; start: number; end: number }>; text?: string; words?: Array<{ word: string; start: number; end: number }> } | null);
+  const [transcript, setTranscript] = useState<TranscriptLike | null>((project.transcript || null) as TranscriptLike | null);
   const [loadingTranscript, setLoadingTranscript] = useState(false);
 
   // Try to load transcript from cache if not in project record
@@ -51,10 +94,53 @@ export function HistoryProjectDetail({
     loadTranscriptFromCache();
   }, [project.filePath, transcript]);
 
-  const duration = project.duration || 0;
-  const activeClip = useMemo(() => clips.find(c => scrubTime >= c.startTime && scrubTime <= c.endTime), [clips, scrubTime]);
   const transcriptSegments = transcript?.segments || [];
   const transcriptText = transcript?.text || '';
+
+  const duration = useMemo(() => {
+    const projectDuration = project.duration || 0;
+    const maxClipEnd = clips.reduce((max, c) => Math.max(max, c.endTime || 0), 0);
+    const maxTranscriptEnd = transcriptSegments.reduce((max, seg) => Math.max(max, seg.end || 0), 0);
+    return Math.max(projectDuration, maxClipEnd, maxTranscriptEnd);
+  }, [clips, project.duration, transcriptSegments]);
+
+  const activeClip = useMemo(
+    () => clips.find(c => scrubTime >= c.startTime && scrubTime <= c.endTime),
+    [clips, scrubTime]
+  );
+
+  const speechBlocks = useMemo(() => {
+    if (transcriptSegments.length === 0) return [];
+    const merged = mergeIntervals(
+      transcriptSegments.map((s) => ({ start: s.start, end: s.end })),
+      0.25
+    );
+    const maxDuration = Math.max(duration, 1);
+    return merged
+      .map((b) => ({ start: clamp(b.start, 0, maxDuration), end: clamp(b.end, 0, maxDuration) }))
+      .filter((b) => b.end > b.start);
+  }, [duration, transcriptSegments]);
+
+  const timelineTicks = useMemo(() => {
+    const maxDuration = Math.max(duration, 1);
+    const step = chooseTickStepSeconds(maxDuration);
+    const maxTicks = 12;
+    const raw: Array<{ t: number; label: string }> = [];
+    for (let t = 0; t <= maxDuration; t += step) {
+      raw.push({ t, label: formatTime(t) });
+      if (raw.length >= maxTicks) break;
+    }
+    if (raw.length > 0 && raw[raw.length - 1].t < maxDuration) {
+      raw.push({ t: maxDuration, label: formatTime(maxDuration) });
+    }
+    return raw;
+  }, [duration]);
+
+  const transcriptCoveragePercent = useMemo(() => {
+    if (duration <= 0 || speechBlocks.length === 0) return 0;
+    const coveredSeconds = speechBlocks.reduce((sum, b) => sum + (b.end - b.start), 0);
+    return Math.round((coveredSeconds / duration) * 100);
+  }, [duration, speechBlocks]);
 
   return (
     <div className="fixed inset-0 z-40 bg-black/70 flex items-center justify-center p-6">
@@ -89,6 +175,15 @@ export function HistoryProjectDetail({
               <div className="text-sm text-sz-text-muted">{formatTime(scrubTime)} / {formatTime(duration)}</div>
             </div>
 
+            <div className="flex items-center justify-between text-xs text-sz-text-muted">
+              <div>
+                Clips: {clips.length} • Transcript: {loadingTranscript ? 'loading…' : (transcriptSegments.length > 0 ? `${transcriptCoveragePercent}% coverage` : 'none')}
+              </div>
+              <div>
+                Created: {new Date(project.createdAt).toLocaleString()}
+              </div>
+            </div>
+
             {/* Scrubber */}
             <input
               type="range"
@@ -101,7 +196,38 @@ export function HistoryProjectDetail({
             />
 
             {/* Clip map */}
-            <div className="relative w-full h-12 bg-sz-bg-tertiary rounded-lg overflow-hidden border border-sz-border">
+            <div className="relative w-full h-14 bg-sz-bg-tertiary rounded-lg overflow-hidden border border-sz-border">
+              {/* Ticks */}
+              {timelineTicks.map((tick, idx) => {
+                const left = (tick.t / Math.max(duration, 1)) * 100;
+                return (
+                  <div key={`${tick.t}-${idx}`} className="absolute inset-y-0" style={{ left: `${left}%` }}>
+                    <div className="absolute top-0 bottom-0 w-px bg-white/10" />
+                    {idx === 0 || idx === timelineTicks.length - 1 || idx % 2 === 0 ? (
+                      <div className="absolute -top-5 -translate-x-1/2 text-[10px] text-sz-text-muted whitespace-nowrap">
+                        {tick.label}
+                      </div>
+                    ) : null}
+                  </div>
+                );
+              })}
+
+              {/* Transcript speech coverage */}
+              {speechBlocks.map((block, idx) => {
+                const left = (block.start / Math.max(duration, 1)) * 100;
+                const width = ((block.end - block.start) / Math.max(duration, 1)) * 100;
+                return (
+                  <div
+                    key={`${block.start}-${block.end}-${idx}`}
+                    className="absolute top-0 h-full bg-emerald-400/15"
+                    style={{ left: `${left}%`, width: `${width}%` }}
+                    title={`Speech: ${formatTime(block.start)} - ${formatTime(block.end)}`}
+                    onMouseEnter={() => setScrubTime(block.start)}
+                    onClick={() => setScrubTime(block.start)}
+                  />
+                );
+              })}
+
               {clips.map((clip) => {
                 const left = (clip.startTime / Math.max(duration, 1)) * 100;
                 const width = ((clip.endTime - clip.startTime) / Math.max(duration, 1)) * 100;
@@ -121,6 +247,17 @@ export function HistoryProjectDetail({
                 className="absolute top-0 bottom-0 w-0.5 bg-white/80"
                 style={{ left: `${(Math.min(scrubTime, duration) / Math.max(duration, 1)) * 100}%` }}
               />
+            </div>
+
+            <div className="flex items-center gap-4 text-xs text-sz-text-muted">
+              <div className="flex items-center gap-2">
+                <span className="inline-block w-3 h-3 rounded bg-emerald-400/30 border border-emerald-400/30" />
+                Speech
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="inline-block w-3 h-3 rounded bg-blue-500/50 border border-blue-500/40" />
+                Clips
+              </div>
             </div>
 
             {/* Video Preview - Coming Soon */}

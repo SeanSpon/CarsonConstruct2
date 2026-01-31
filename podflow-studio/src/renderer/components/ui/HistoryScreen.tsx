@@ -2,13 +2,25 @@ import { useState } from 'react';
 import { useHistoryStore } from '../../stores/historyStore';
 import { HistoryProjectDetail } from './HistoryProjectDetail';
 
+function filePathToFileUrl(filePath: string): string {
+  const trimmed = filePath.trim();
+  if (trimmed.startsWith('file://')) return trimmed;
+
+  const normalized = trimmed.replace(/%/g, '%25').replace(/\\/g, '/');
+  const withLeadingSlash = normalized.startsWith('/') ? normalized : `/${normalized}`;
+  const encoded = encodeURI(withLeadingSlash)
+    .replace(/#/g, '%23')
+    .replace(/\?/g, '%3F');
+  return `file://${encoded}`;
+}
+
 interface HistoryScreenProps {
   onBack: () => void;
   onLoadProject: (projectId: string) => void;
 }
 
 export function HistoryScreen({ onBack, onLoadProject }: HistoryScreenProps) {
-  const { projects, clips, removeProject, getProjectClips, updateClip } = useHistoryStore();
+  const { projects, removeProject, getProjectClips, updateClip } = useHistoryStore();
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
 
   const formatDuration = (seconds: number) => {
@@ -50,7 +62,7 @@ export function HistoryScreen({ onBack, onLoadProject }: HistoryScreenProps) {
 
   if (projects.length === 0) {
     return (
-      <div className="h-screen w-screen flex flex-col bg-sz-bg text-sz-text">
+      <div className="h-screen w-screen flex flex-col min-h-0 bg-sz-bg text-sz-text">
         {/* Header */}
         <div className="p-6 border-b border-sz-border">
           <div className="flex items-center gap-4">
@@ -87,7 +99,7 @@ export function HistoryScreen({ onBack, onLoadProject }: HistoryScreenProps) {
   }
 
   return (
-    <div className="h-screen w-screen flex flex-col bg-sz-bg text-sz-text">
+    <div className="h-screen w-screen flex flex-col min-h-0 bg-sz-bg text-sz-text">
       {/* Header */}
       <div className="p-6 border-b border-sz-border">
         <div className="flex items-center justify-between">
@@ -109,7 +121,7 @@ export function HistoryScreen({ onBack, onLoadProject }: HistoryScreenProps) {
       </div>
 
       {/* Projects Grid */}
-      <div className="flex-1 overflow-y-auto p-6">
+      <div className="flex-1 min-h-0 overflow-y-auto p-6">
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 max-w-7xl mx-auto">
           {projects.map((project) => {
             const projectClips = getProjectClips(project.id);
@@ -125,7 +137,7 @@ export function HistoryScreen({ onBack, onLoadProject }: HistoryScreenProps) {
                 <div className="aspect-video bg-sz-bg-tertiary flex items-center justify-center relative">
                   {project.thumbnailPath ? (
                     <img
-                      src={`file://${project.thumbnailPath}`}
+                      src={filePathToFileUrl(project.thumbnailPath)}
                       alt={project.fileName}
                       className="w-full h-full object-cover"
                     />

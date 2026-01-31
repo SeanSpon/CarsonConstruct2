@@ -14,6 +14,15 @@ ipcMain.on('window-minimize', () => {
   if (win) win.minimize();
 });
 
+// Renderer error forwarding (from preload)
+ipcMain.on('renderer-error', (_event, payload) => {
+  try {
+    console.error('[RendererError]', payload);
+  } catch {
+    console.error('[RendererError] (unserializable payload)');
+  }
+});
+
 ipcMain.on('window-maximize', () => {
   const win = getMainWindow();
   if (win) {

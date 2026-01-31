@@ -1,6 +1,24 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 
+export interface DetectedClip {
+  id: string;
+  startTime: number;
+  endTime: number;
+  duration: number;
+  title?: string;
+  mood?: string;
+  pattern?: string;
+  patternLabel?: string;
+  description?: string;
+  algorithmScore?: number;
+  finalScore?: number;
+  hookStrength?: number;
+  hookMultiplier?: number;
+  status?: 'pending' | 'accepted' | 'rejected';
+  captionStyle?: 'viral' | 'minimal' | 'bold';
+}
+
 export interface HistoryProject {
   id: string;
   fileName: string;
@@ -18,10 +36,11 @@ export interface HistoryProject {
   height?: number;
   fps?: number;
   bitrate?: number;
-  transcript?: any;
+  transcript?: unknown;
   transcriptAvailable?: boolean;
   transcriptError?: string | null;
   transcriptSource?: string | null;
+  detectedClips?: DetectedClip[];
 }
 
 export interface HistoryClip {

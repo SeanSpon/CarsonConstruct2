@@ -28,6 +28,70 @@ Candidate types: energy_spike, silence_to_spike, laughter_like
 from typing import List, Tuple, Optional
 import numpy as np
 
+from .sentence_boundary import detect_sentence_boundaries
+
+
+def _sorted_sentence_boundary_times(transcript: dict) -> List[float]:
+    boundaries = detect_sentence_boundaries(transcript or {})
+    times = [float(b.time) for b in boundaries if b.boundary_type in ("sentence", "topic", "clause")]
+    times.sort()
+    return times
+
+
+def _prev_boundary(boundary_times: List[float], t: float) -> Optional[float]:
+    prev = None
+    for bt in boundary_times:
+        if bt <= t:
+            prev = bt
+        else:
+            break
+    return prev
+
+
+def _next_boundary(boundary_times: List[float], t: float) -> Optional[float]:
+    for bt in boundary_times:
+        if bt >= t:
+            return bt
+    return None
+
+
+def snap_to_sentence_boundaries(
+    clip_start: float,
+    clip_end: float,
+    transcript: dict,
+    duration: float,
+    max_search_s: float = 6.0,
+) -> Tuple[Optional[float], Optional[float], bool, str]:
+    """Snap start/end so clips start/end at natural sentence boundaries.
+
+    Uses detected *sentence end* boundary timestamps as safe cut points.
+    Start snaps to the nearest boundary at-or-before clip_start.
+    End snaps to the nearest boundary at-or-after clip_end.
+
+    Returns (new_start, new_end, snapped, reason). If boundaries are unavailable
+    (or we can't find a boundary within max_search_s), returns (None, None, False, reason).
+    """
+    boundary_times = _sorted_sentence_boundary_times(transcript)
+    if not boundary_times:
+        return None, None, False, "no_sentence_boundaries"
+
+    start_bt = _prev_boundary(boundary_times, clip_start)
+    end_bt = _next_boundary(boundary_times, clip_end)
+
+    if start_bt is None or end_bt is None:
+        return None, None, False, "no_boundary_match"
+
+    if abs(clip_start - start_bt) > max_search_s or abs(end_bt - clip_end) > max_search_s:
+        return None, None, False, "boundary_too_far"
+
+    new_start = max(0.0, float(start_bt))
+    new_end = min(float(duration), float(end_bt))
+    if new_end <= new_start:
+        return None, None, False, "invalid_boundary_window"
+
+    snapped = (abs(new_start - clip_start) > 1e-6) or (abs(new_end - clip_end) > 1e-6)
+    return new_start, new_end, snapped, "sentence_boundaries"
+
 
 def snap_to_segment_boundary(
     target_time: float,
@@ -138,6 +202,21 @@ def propose_clip_windows(
         # Apply padding
         snapped_start = max(0, snapped_start - start_padding_s)
         snapped_end = min(duration, snapped_end + end_padding_s)
+
+        # Hard rule: prefer sentence-safe boundaries (prevents mid-sentence cuts).
+        sent_start, sent_end, sent_snapped, sent_reason = snap_to_sentence_boundaries(
+            snapped_start,
+            snapped_end,
+            transcript,
+            duration,
+            max_search_s=max(4.0, float(snap_window_s) * 2.0),
+        )
+        if sent_start is not None and sent_end is not None:
+            snapped_start, snapped_end = sent_start, sent_end
+        else:
+            # Keep the segment-snapped window, but annotate why sentence snapping failed.
+            # Downstream scoring can reject these in deterministic mode.
+            sent_snapped = False
         
         # Validate clip duration
         clip_duration = snapped_end - snapped_start
@@ -159,8 +238,10 @@ def propose_clip_windows(
         seen_ranges.add(range_key)
         
         # Determine snapping status
-        was_snapped = start_snapped or end_snapped
-        if start_snapped and end_snapped:
+        was_snapped = start_snapped or end_snapped or sent_snapped
+        if sent_start is not None and sent_end is not None:
+            snap_reason = sent_reason
+        elif start_snapped and end_snapped:
             snap_reason = "both_snapped"
         elif start_snapped:
             snap_reason = start_reason

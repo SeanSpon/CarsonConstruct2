@@ -2,9 +2,12 @@ import { ipcMain, dialog, app } from 'electron';
 import path from 'path';
 import fs from 'fs';
 
+type TranscriptSegment = { start: number; end: number; text: string };
+type TranscriptPayload = { segments: TranscriptSegment[]; words: unknown[]; text: string };
+
 // Parse SRT format
-function parseSRT(content: string): any {
-  const segments: any[] = [];
+function parseSRT(content: string): TranscriptPayload {
+  const segments: TranscriptSegment[] = [];
   const blocks = content.trim().split(/\n\s*\n/);
   
   for (const block of blocks) {
@@ -32,9 +35,9 @@ function parseSRT(content: string): any {
 }
 
 // Parse VTT format
-function parseVTT(content: string): any {
+function parseVTT(content: string): TranscriptPayload {
   const lines = content.split('\n');
-  const segments: any[] = [];
+  const segments: TranscriptSegment[] = [];
   
   let i = 0;
   while (i < lines.length) {
@@ -111,9 +114,15 @@ export function registerTranscriptHandlers() {
       const content = fs.readFileSync(transcriptPath, 'utf-8');
       const ext = path.extname(transcriptPath).toLowerCase();
       
-      let transcript: any;
+      let transcript: TranscriptPayload;
       if (ext === '.json') {
-        transcript = JSON.parse(content);
+        const parsed: unknown = JSON.parse(content);
+        const maybe = parsed as { segments?: unknown; words?: unknown; text?: unknown };
+        transcript = {
+          segments: Array.isArray(maybe.segments) ? (maybe.segments as TranscriptSegment[]) : [],
+          words: Array.isArray(maybe.words) ? maybe.words : [],
+          text: typeof maybe.text === 'string' ? maybe.text : '',
+        };
       } else if (ext === '.srt') {
         transcript = parseSRT(content);
       } else if (ext === '.vtt') {
@@ -133,9 +142,10 @@ export function registerTranscriptHandlers() {
       console.log('[Transcript] Video hash used:', videoHash);
       console.log('[Transcript] Segments loaded:', transcript.segments?.length || 0);
       return { success: true, segmentCount: transcript.segments?.length || 0 };
-    } catch (error: any) {
-      console.error('[Transcript] Upload error:', error);
-      return { success: false, error: error.message };
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error('[Transcript] Upload error:', message);
+      return { success: false, error: message };
     }
   });
 }

@@ -1,36 +1,61 @@
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import { useStore } from './stores/store';
 import { useHistoryStore } from './stores/historyStore';
 import { ClipTypeSelector, type ClipMood } from './components/ui/ClipTypeSelector';
 import { CaptionStyleSelector } from './components/ui/CaptionStyleSelector';
 import { CaptionOverlay } from './components/ui/CaptionOverlay';
-import { ProgressLoader } from './components/ui/LoadingState';
 import { HistoryScreen } from './components/ui/HistoryScreen';
 import { VideoAndTranscriptModal } from './components/ui/VideoAndTranscriptModal';
 import { SettingsModal } from './components/ui/SettingsModal';
-import type { Clip, Transcript } from './types';
+import { CutsPanel } from './components/ui/CutsPanel';
+import GlobalBusyOverlay from './components/ui/GlobalBusyOverlay';
+import type { Clip, Transcript, SpeakerSegment } from './types';
+import { formatDuration, getScoreLabel } from './types';
+import { ScoreBadge, StatusBadge } from './components/ui/Badge';
+import { 
+  clampFramingModel, 
+  createCenterCropFramingModel,
+  createFaceCenteredFramingModel,
+  createSpeakerOrientedFramingModel,
+  getFramingAtTime,
+  generateSpeakerKeyframes,
+  assignDefaultSpeakerPositions,
+} from '../shared/framing';
 
 // 4 screens: Home, Review, Export, History
 type Screen = 'home' | 'review' | 'export' | 'history';
+
+function filePathToFileUrl(filePath: string): string {
+  const trimmed = filePath.trim();
+  if (trimmed.startsWith('file://')) return trimmed;
+
+  // Electron/Chromium expects file URLs like: file:///C:/Users/... (not file://C:\Users\...)
+  const normalized = trimmed.replace(/\\/g, '/');
+  const withLeadingSlash = normalized.startsWith('/') ? normalized : `/${normalized}`;
+  return `file://${encodeURI(withLeadingSlash)}`;
+}
 
 function App() {
   const { 
     project,
     setProject,
     clips,
-    detectionProgress,
     setDetectionProgress, 
     setDetectionError, 
     setDetecting,
     isDetecting,
     detectionError,
+    addDetectionLog,
+    clearDetectionLogs,
     setResults,
     updateClipStatus,
     updateClipTrim,
+    updateClipAutoOrient,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    updateClipSpeakerPosition,
     setExportProgress,
     setExporting,
     isExporting,
-    exportProgress,
     setLastExportDir,
     lastExportDir,
     currentJobId,
@@ -40,11 +65,21 @@ function App() {
     transcript,
     transcriptAvailable,
     transcriptError,
-    transcriptSource,
     setTranscriptMeta,
     captionStyle,
     setCaptionStyle,
     openaiApiKey,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    speakerSegments,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    speakerPositions,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    autoOrientEnabled,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    setSpeakerSegments,
+    setSpeakerPositions,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    setAutoOrientEnabled,
   } = useStore();
 
   const { addProject, updateProject, addClip: addClipToHistory, getProjectClips, getProject } = useHistoryStore();
@@ -59,7 +94,9 @@ function App() {
   const [loadedFromHistory, setLoadedFromHistory] = useState(false);
   const [showVideoTranscriptModal, setShowVideoTranscriptModal] = useState(false);
   const [showSettingsModal, setShowSettingsModal] = useState(false);
+  const previewStageRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
+  const wasPlayingBeforeScrubRef = useRef(false);
   const currentJobIdRef = useRef<string | null>(currentJobId);
   const detectingStartedAtRef = useRef<number | null>(null);
   const projectRef = useRef(project);
@@ -73,9 +110,26 @@ function App() {
     projectRef.current = project;
   }, [project]);
 
+  // Ensure video element reloads when the underlying source file changes.
+  useEffect(() => {
+    if (!project?.filePath) return;
+    const video = videoRef.current;
+    if (!video) return;
+
+    try {
+      video.pause();
+      video.load();
+    } catch {
+      // ignore
+    }
+  }, [project?.filePath]);
+
   useEffect(() => {
     currentProjectIdRef.current = currentProjectId;
   }, [currentProjectId]);
+
+  // Note: ResizeObserver for preview stage was removed as it's not currently used
+  // Could be re-enabled if preview size needs to be tracked
 
   const ensureMinDetectingTime = useCallback(async (minMs = 400) => {
     const startedAt = detectingStartedAtRef.current;
@@ -85,33 +139,6 @@ function App() {
       await new Promise((resolve) => setTimeout(resolve, minMs - elapsed));
     }
   }, []);
-
-  const handleCancelDetection = useCallback(async () => {
-    const jobId = currentJobIdRef.current;
-    if (!jobId) return;
-    try {
-      await window.api.cancelDetection(jobId);
-    } catch {
-      // ignore
-    } finally {
-      setCurrentJobId(null);
-      setDetecting(false);
-      setDetectionProgress(null);
-      setDetectionError('Detection cancelled');
-    }
-  }, [setCurrentJobId, setDetecting, setDetectionProgress, setDetectionError]);
-
-  const detectingOverlay = isDetecting ? (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-sz-bg/90 backdrop-blur-sm">
-      <ProgressLoader
-        percent={detectionProgress?.percent || 0}
-        message={detectionProgress?.message || 'Detecting clips...'}
-        subMessage={transcriptSource ? `Transcript source: ${transcriptSource}` : undefined}
-        onCancel={handleCancelDetection}
-        className="w-full max-w-md mx-6"
-      />
-    </div>
-  ) : null;
 
   const inferMoodFromPattern = useCallback((pattern: Clip['pattern'] | undefined): Clip['mood'] => {
     switch (pattern) {
@@ -124,6 +151,18 @@ function App() {
       case 'payoff':
       default:
         return 'impactful';
+    }
+  }, []);
+
+  const normalizePattern = useCallback((value: unknown): Clip['pattern'] | undefined => {
+    switch (value) {
+      case 'payoff':
+      case 'monologue':
+      case 'laughter':
+      case 'debate':
+        return value;
+      default:
+        return undefined;
     }
   }, []);
 
@@ -142,56 +181,262 @@ function App() {
     const unsubProgress = window.api.onDetectionProgress((data) => {
       const jobId = currentJobIdRef.current;
       if (jobId && data.projectId !== jobId) return;
+
+      // If we get progress, we are definitely detecting.
+      if (!currentJobIdRef.current) {
+        setCurrentJobId(data.projectId);
+      }
+      setDetecting(true);
+
       setDetectionProgress({
         percent: data.progress,
         message: data.message,
       });
     });
 
+    const unsubLog = window.api.onDetectionLog((data) => {
+      const jobId = currentJobIdRef.current;
+      // Never let late log lines (e.g. process exit) resurrect a finished job.
+      // Only accept logs for an already-active job, or for a job we *just* started
+      // and are still waiting on initial progress.
+      if (jobId) {
+        if (data.projectId !== jobId) return;
+      } else {
+        if (!detectingStartedAtRef.current) return;
+        setCurrentJobId(data.projectId);
+      }
+
+      // Don't force detecting=true purely from logs; progress events drive that.
+      addDetectionLog({ ts: data.ts, line: data.line, stream: data.stream });
+    });
+
     const unsubComplete = window.api.onDetectionComplete(async (data) => {
       const jobId = currentJobIdRef.current;
-      if (jobId && data.projectId !== jobId) return;
+      const payload = data as unknown as {
+        projectId: string;
+        clips?: unknown;
+        transcript?: unknown;
+        transcriptAvailable?: unknown;
+        transcriptError?: unknown;
+        transcriptSource?: unknown;
+        speakers?: unknown;
+      };
+
+      if (jobId && payload.projectId !== jobId) return;
 
       await ensureMinDetectingTime();
       
-      const transcriptAvailableFromPayload = (data as any).transcriptAvailable as boolean | undefined;
-      const transcriptErrorFromPayload = ((data as any).transcriptError as string | null | undefined) ?? null;
-      const transcriptSourceFromPayload = ((data as any).transcriptSource as string | null | undefined) ?? null;
+      const transcriptAvailableFromPayload = typeof payload.transcriptAvailable === 'boolean' ? payload.transcriptAvailable : undefined;
+      const transcriptErrorFromPayload =
+        payload.transcriptError === null || typeof payload.transcriptError === 'string'
+          ? (payload.transcriptError as string | null)
+          : null;
+      const transcriptSourceFromPayload =
+        payload.transcriptSource === null || typeof payload.transcriptSource === 'string'
+          ? (payload.transcriptSource as string | null)
+          : null;
 
-      console.log('[App] Detection complete, clips:', data.clips?.length, 'transcript segments:', (data.transcript as any)?.segments?.length);
-      const rawClips = Array.isArray(data.clips) ? data.clips : [];
-      const clips = (rawClips as Clip[]).map((clip, index) => ({
-        ...clip,
-        id: clip.id || `clip_${index + 1}`,
-        status: 'pending' as const,
-        trimStartOffset: clip.trimStartOffset || 0,
-        trimEndOffset: clip.trimEndOffset || 0,
-        mood: (clip.mood as Clip['mood']) || inferMoodFromPattern((clip as any).pattern),
-      }));
+      const transcriptObj = payload.transcript as { segments?: unknown } | null | undefined;
+      const transcriptSegmentsLen = Array.isArray(transcriptObj?.segments) ? transcriptObj!.segments.length : 0;
 
-      console.log('[App] Processed clips:', clips.length);
-      console.log('[App] Transcript received:', data.transcript ? `${(data.transcript as any)?.segments?.length || 0} segments` : 'null');
-      setResults(clips, [], data.transcript as Transcript | null, {
+      // Process speaker segments from diarization
+      const speakersPayload = payload.speakers as SpeakerSegment[] | undefined;
+      const speakerSegs: SpeakerSegment[] = Array.isArray(speakersPayload) ? speakersPayload : [];
+      console.log('[App] Speaker segments received:', speakerSegs.length);
+      
+      // Assign default speaker positions based on detected speakers
+      const speakerIds = [...new Set(speakerSegs.map(s => s.speakerId))];
+      const defaultPositions = assignDefaultSpeakerPositions(speakerIds);
+      console.log('[App] Assigned speaker positions:', defaultPositions);
+
+      const clipsPayload = payload.clips;
+      console.log('[App] Detection complete, clips:', Array.isArray(clipsPayload) ? clipsPayload.length : 0, 'transcript segments:', transcriptSegmentsLen);
+      const rawClips = Array.isArray(clipsPayload) ? clipsPayload : [];
+      const inputWidth = projectRef.current?.width || 1920;
+      const inputHeight = projectRef.current?.height || 1080;
+      const defaultFraming = createCenterCropFramingModel({
+        inputWidth,
+        inputHeight,
+        targetWidth: 1080,
+        targetHeight: 1920,
+      });
+      
+      // Generate framing keyframes for each clip based on speaker segments
+      const clips = (rawClips as Clip[]).map((clip, index) => {
+        const clipData: Clip = {
+          ...clip,
+          id: clip.id || `clip_${index + 1}`,
+          status: 'pending' as const,
+          trimStartOffset: clip.trimStartOffset || 0,
+          trimEndOffset: clip.trimEndOffset || 0,
+          mood: (clip.mood as Clip['mood']) || inferMoodFromPattern(normalizePattern((clip as { pattern?: unknown }).pattern)),
+          framing: clip.framing || defaultFraming,
+          autoOrientEnabled: true, // Always enable by default - fallback to center if no speaker data
+        };
+        
+        // Generate framing keyframes for this clip
+        if (speakerSegs.length > 0) {
+          // We have speaker diarization data - use it for smart framing
+          const keyframes = generateSpeakerKeyframes(
+            speakerSegs,
+            defaultPositions,
+            inputWidth,
+            inputHeight,
+            1080,
+            1920,
+            clipData.startTime,
+            clipData.endTime
+          );
+          if (keyframes.length > 0) {
+            clipData.framingKeyframes = keyframes;
+          }
+        }
+        
+        // If no keyframes from speaker diarization, use face detection result
+        // The detector.py now adds speakerPositionData with face_center_x for precise positioning
+        if (!clipData.framingKeyframes || clipData.framingKeyframes.length === 0) {
+          // Get exact face center position from detection (0-1, defaults to 0.5 for center)
+          const positionData = (clip as { speakerPositionData?: { face_center_x?: number; num_faces?: number; confidence?: number; position?: string } }).speakerPositionData;
+          const debugFaceDetection = (clip as { debug?: { faceDetection?: { face_center_x?: number } } }).debug?.faceDetection;
+          const faceCenterX = positionData?.face_center_x ?? debugFaceDetection?.face_center_x ?? 0.5;
+          const numFaces = positionData?.num_faces ?? 0;
+          const detConfidence = positionData?.confidence ?? 0;
+
+          // Heuristic: "fallback" means OpenCV couldn't find a face/person and we defaulted to 0.5.
+          const isFallbackCenter = numFaces === 0 && detConfidence <= 0.35 && Math.abs(faceCenterX - 0.5) < 1e-6;
+          
+          // Store exact face position for use in preview/export
+          clipData.faceCenterX = faceCenterX;
+          clipData.faceDetectionNumFaces = numFaces;
+          clipData.faceDetectionConfidence = detConfidence;
+          clipData.faceDetectionSource = numFaces > 0 ? 'face' : (detConfidence >= 0.4 ? 'person' : 'fallback');
+          
+          // Enable auto-orient by default when we have face detection data
+          clipData.autoOrientEnabled = true;
+
+          // Create framing:
+          // - When detection gives us a meaningful center_x: face-centered.
+          // - When detection fell back: bias based on categorical speakerPosition (if provided).
+          const detectedPosition = (clip as { speakerPosition?: string }).speakerPosition;
+          const validPosition = detectedPosition && ['left', 'center', 'right'].includes(detectedPosition)
+            ? (detectedPosition as 'left' | 'center' | 'right')
+            : 'center';
+
+          const autoFraming = !isFallbackCenter
+            ? createFaceCenteredFramingModel({
+                inputWidth,
+                inputHeight,
+                targetWidth: 1080,
+                targetHeight: 1920,
+                faceCenterX,
+              })
+            : createSpeakerOrientedFramingModel({
+                inputWidth,
+                inputHeight,
+                targetWidth: 1080,
+                targetHeight: 1920,
+                speakerPosition: validPosition,
+              });
+          clipData.framingKeyframes = [{
+            time: clipData.startTime,
+            framing: autoFraming,
+            speakerId: 'face_detection',
+          }];
+
+          console.log(
+            `[App] Clip ${clipData.id}: face detection → ${isFallbackCenter ? `fallback(${validPosition})` : `x=${faceCenterX.toFixed(3)} faces=${numFaces}`}, autoOrientEnabled=true`
+          );
+        }
+        
+        return clipData;
+      });
+
+      // Project-wide bias: if some clips detected a subject center but others fell back,
+      // apply the average center to the fallback clips so the whole project frames consistently.
+      const biasCandidates = clips
+        .filter(c => (c.faceDetectionConfidence ?? 0) >= 0.4 && c.faceCenterX !== undefined)
+        .map(c => c.faceCenterX as number);
+      const projectBiasX = biasCandidates.length > 0
+        ? biasCandidates.reduce((a, b) => a + b, 0) / biasCandidates.length
+        : undefined;
+
+      const finalClips: Clip[] = projectBiasX === undefined
+        ? clips
+        : clips.map((c): Clip => {
+            const isFallback = (c.faceDetectionSource === 'fallback');
+            if (!isFallback) return c;
+
+            // Replace the initial face-detection keyframe with a project-biased framing.
+            if (c.framingKeyframes && c.framingKeyframes.length > 0) {
+              const biased = createFaceCenteredFramingModel({
+                inputWidth,
+                inputHeight,
+                targetWidth: 1080,
+                targetHeight: 1920,
+                faceCenterX: projectBiasX,
+              });
+              return {
+                ...c,
+                faceCenterX: projectBiasX,
+                faceDetectionSource: 'project-bias' as const,
+                framingKeyframes: [{
+                  ...c.framingKeyframes[0],
+                  framing: biased,
+                }],
+              };
+            }
+            return c;
+          });
+
+      console.log('[App] Processed clips:', finalClips.length);
+      console.log('[App] Transcript received:', payload.transcript ? `${transcriptSegmentsLen || 0} segments` : 'null');
+      
+      // Update speaker positions in store
+      setSpeakerPositions(defaultPositions);
+      
+      setResults(finalClips, [], (payload.transcript as Transcript | null) || null, {
         transcriptAvailable: transcriptAvailableFromPayload,
         transcriptError: transcriptErrorFromPayload,
         transcriptSource: transcriptSourceFromPayload,
-      });
+      }, speakerSegs);
       setCurrentJobId(null);
-      setLastJobId(data.projectId);
+      setLastJobId(payload.projectId);
+      clearDetectionLogs();
       detectingStartedAtRef.current = null;
       
       // Add to history
       const projectForHistory = projectRef.current;
       const projectIdForHistory = currentProjectIdRef.current;
       if (projectForHistory && projectIdForHistory) {
-        console.log('[App] Saving transcript to history project:', projectIdForHistory);
+        console.log('[App] Saving transcript and detected clips to history project:', projectIdForHistory);
+        
+        // Convert clips to history format
+        const detectedClipsForHistory = clips.map(clip => ({
+          id: clip.id,
+          startTime: clip.startTime,
+          endTime: clip.endTime,
+          duration: clip.duration,
+          title: clip.title,
+          mood: clip.mood,
+          pattern: clip.pattern,
+          patternLabel: clip.patternLabel,
+          description: clip.description,
+          algorithmScore: clip.algorithmScore,
+          finalScore: clip.finalScore,
+          hookStrength: clip.hookStrength,
+          hookMultiplier: clip.hookMultiplier,
+          status: clip.status,
+          captionStyle: clip.captionStyle,
+        }));
+        
         updateProject(projectIdForHistory, {
           clipCount: clips.length,
           acceptedCount: 0,
-          transcript: data.transcript || null,
+          transcript: payload.transcript || null,
           transcriptAvailable: transcriptAvailableFromPayload,
           transcriptError: transcriptErrorFromPayload,
           transcriptSource: transcriptSourceFromPayload,
+          detectedClips: detectedClipsForHistory,
         });
       }
       
@@ -211,6 +456,7 @@ function App() {
       await ensureMinDetectingTime();
       setDetectionError(data.error);
       setCurrentJobId(null);
+      // Keep logs visible after error (don't clear here)
       detectingStartedAtRef.current = null;
     });
 
@@ -233,12 +479,27 @@ function App() {
 
     return () => {
       unsubProgress();
+      unsubLog();
       unsubComplete();
       unsubError();
       unsubExportProgress();
       unsubExportComplete();
     };
-  }, [ensureMinDetectingTime, inferMoodFromPattern, setDetectionProgress, setDetectionError, setResults, setExportProgress, setExporting, setLastExportDir, setCurrentJobId, setLastJobId]);
+  }, [
+    addDetectionLog,
+    clearDetectionLogs,
+    ensureMinDetectingTime,
+    inferMoodFromPattern,
+    setCurrentJobId,
+    setDetecting,
+    setDetectionProgress,
+    setDetectionError,
+    setResults,
+    setExportProgress,
+    setExporting,
+    setLastExportDir,
+    setLastJobId,
+  ]);
 
   // Handle file selection
   const handleSelectFile = useCallback(async () => {
@@ -258,6 +519,7 @@ function App() {
     setCurrentJobId(jobId);
     setDetecting(true);
     setDetectionError(null);
+    setDetectionProgress({ percent: 1, message: 'Starting detection…' });
     setTranscriptMeta({ transcriptAvailable: false, transcriptError: null, transcriptSource: null });
     detectingStartedAtRef.current = Date.now();
 
@@ -303,6 +565,26 @@ function App() {
   const filteredClips = selectedMood === 'all'
     ? clips
     : clips.filter(c => c.mood === selectedMood);
+
+  const moodCounts = useMemo(() => {
+    const counts: Record<ClipMood, number> = {
+      all: clips.length,
+      impactful: 0,
+      funny: 0,
+      serious: 0,
+      somber: 0,
+      energetic: 0,
+      revealing: 0,
+    };
+
+    for (const clip of clips) {
+      const mood = clip.mood as ClipMood | undefined;
+      if (!mood || mood === 'all') continue;
+      if (mood in counts) counts[mood] += 1;
+    }
+
+    return counts;
+  }, [clips]);
   
   // Reset index if out of bounds after filtering
   useEffect(() => {
@@ -313,6 +595,21 @@ function App() {
   
   const currentClip = filteredClips[currentClipIndex];
   const acceptedClips = clips.filter(c => c.status === 'accepted');
+
+  const jumpToClip = useCallback((clipId: string) => {
+    // If the clip isn't visible in the current filter, switch to 'all' so it becomes visible.
+    const indexInFiltered = filteredClips.findIndex(c => c.id === clipId);
+    if (indexInFiltered >= 0) {
+      setCurrentClipIndex(indexInFiltered);
+      return;
+    }
+
+    const indexInAll = clips.findIndex(c => c.id === clipId);
+    if (indexInAll >= 0) {
+      setSelectedMood('all');
+      setCurrentClipIndex(indexInAll);
+    }
+  }, [clips, filteredClips]);
 
   // Navigation
   const goToNextClip = useCallback(() => {
@@ -331,8 +628,9 @@ function App() {
   const handleAccept = useCallback(() => {
     if (currentClip) {
       updateClipStatus(currentClip.id, currentClip.status === 'accepted' ? 'pending' : 'accepted');
+      goToNextClip();
     }
-  }, [currentClip, updateClipStatus]);
+  }, [currentClip, updateClipStatus, goToNextClip]);
 
   const handleReject = useCallback(() => {
     if (currentClip) {
@@ -340,83 +638,6 @@ function App() {
       goToNextClip();
     }
   }, [currentClip, updateClipStatus, goToNextClip]);
-
-  // Export single clip with vertical format and captions
-  const handleExportClip = useCallback(async () => {
-    if (!project || !currentClip) return;
-
-    try {
-      const outputDir = await window.api.selectOutputDir();
-      if (!outputDir) return;
-
-      setScreen('export');
-      setExporting(true);
-
-      // Map caption style to settings
-      const captionSettings = {
-        viral: { fontSize: 72, outline: 4, shadow: 2 },
-        minimal: { fontSize: 56, outline: 2, shadow: 1 },
-        bold: { fontSize: 84, outline: 6, shadow: 3 },
-      }[captionStyle] || { fontSize: 72, outline: 4, shadow: 2 };
-
-      // Use MVP vertical export with captions
-      await window.api.exportMvpClips({
-        sourceFile: project.filePath,
-        clips: [{
-          clip_id: currentClip.id,
-          start: currentClip.startTime + currentClip.trimStartOffset,
-          end: currentClip.endTime + currentClip.trimEndOffset,
-          duration: (currentClip.endTime + currentClip.trimEndOffset) - (currentClip.startTime + currentClip.trimStartOffset),
-          captionStyle: (currentClip.captionStyle || captionStyle) as 'viral' | 'minimal' | 'bold' | undefined,
-        }] as Array<{
-          clip_id: string;
-          start: number;
-          end: number;
-          duration: number;
-          captionStyle?: 'viral' | 'minimal' | 'bold';
-        }>,
-        transcript: transcript || { segments: [] },
-        outputDir,
-        inputWidth: project.width || 1920,
-        inputHeight: project.height || 1080,
-        settings: {
-          format: 'mp4',
-          vertical: true,
-          targetWidth: 1080,
-          targetHeight: 1920,
-          burnCaptions: true,
-          captionStyle: {
-            fontName: 'Arial Black',
-            ...captionSettings,
-          },
-        },
-      });
-
-      // Update history
-      if (currentProjectId) {
-        updateProject(currentProjectId, {
-          lastExportDir: outputDir,
-          exportedCount: 1,
-        });
-        
-        // Save exported clip to history
-        addClipToHistory({
-          projectId: currentProjectId,
-          title: currentClip.title || currentClip.id,
-          startTime: currentClip.startTime + currentClip.trimStartOffset,
-          endTime: currentClip.endTime + currentClip.trimEndOffset,
-          duration: (currentClip.endTime + currentClip.trimEndOffset) - (currentClip.startTime + currentClip.trimStartOffset),
-          mood: currentClip.mood,
-          exportedAt: Date.now(),
-          exportPath: outputDir,
-          captionStyle,
-        });
-      }
-    } catch (err) {
-      console.error('Export failed:', err);
-      setExporting(false);
-    }
-  }, [project, currentClip, transcript, setExporting, currentProjectId, updateProject, addClipToHistory, captionStyle]);
 
   // Export all accepted clips with vertical format and captions
   const handleExportAll = useCallback(async () => {
@@ -445,6 +666,10 @@ function App() {
           end: clip.endTime + clip.trimEndOffset,
           duration: (clip.endTime + clip.trimEndOffset) - (clip.startTime + clip.trimStartOffset),
           captionStyle: clip.captionStyle || captionStyle,
+          framing: clip.framing,
+          framingKeyframes: clip.autoOrientEnabled !== false ? clip.framingKeyframes : undefined,
+          autoOrientEnabled: clip.autoOrientEnabled,
+          faceCenterX: clip.faceCenterX,  // Pass exact face position for export
         })),
         transcript: transcript || { segments: [] },
         outputDir,
@@ -546,42 +771,81 @@ function App() {
   if (screen === 'history') {
     return (
       <>
+        <GlobalBusyOverlay />
         <HistoryScreen
           onBack={() => setScreen('home')}
           onLoadProject={(projectId) => {
-          // Load exported clips from history
-          const historyClips = getProjectClips(projectId);
+          // Load clips from history - prefer detected clips, fallback to exported clips
           const historyProject = getProject(projectId);
+          const exportedClips = getProjectClips(projectId);
           
-          if (!historyProject || historyClips.length === 0) {
-            console.log('No exported clips found for project:', projectId);
+          if (!historyProject) {
+            console.log('Project not found:', projectId);
             setScreen('home');
             return;
           }
           
-          // Convert history clips back to regular clips format
-          const loadedClips: Clip[] = historyClips.map((clip) => ({
-            id: clip.id,
-            startTime: clip.startTime,
-            endTime: clip.endTime,
-            duration: clip.duration,
-            pattern: 'payoff' as const,
-            patternLabel: clip.title,
-            description: `Exported clip`,
-            algorithmScore: 100,
-            finalScore: 100,
-            hookStrength: 75,
-            hookMultiplier: 1.0,
-            trimStartOffset: 0,
-            trimEndOffset: 0,
-            status: 'accepted' as const,
-            title: clip.title,
-            mood: (clip.mood || 'impactful') as 'impactful' | 'funny' | 'serious' | 'somber' | 'energetic' | 'revealing' | undefined,
-            captionStyle: clip.captionStyle,
-          }));
+          // Try to use detected clips first (all clips from detection), then exported clips
+          const detectedClips = historyProject.detectedClips || [];
+          const hasDetectedClips = detectedClips.length > 0;
+          const hasExportedClips = exportedClips.length > 0;
           
-          // Restore project metadata for preview/export context
-          setProject({
+          if (!hasDetectedClips && !hasExportedClips) {
+            console.log('No clips found for project:', projectId);
+            setScreen('home');
+            return;
+          }
+          
+          // Convert clips to regular format
+          let loadedClips: Clip[];
+          
+          if (hasDetectedClips) {
+            // Use detected clips (preserves all clips from detection)
+            console.log('[History Load] Using detected clips:', detectedClips.length);
+            loadedClips = detectedClips.map((clip) => ({
+              id: clip.id,
+              startTime: clip.startTime,
+              endTime: clip.endTime,
+              duration: clip.duration,
+              pattern: (clip.pattern || 'payoff') as 'payoff' | 'debate' | 'laughter' | 'monologue' | 'silence' | 'story_beat' | 'natural_break' | 'topic_shift' | 'quotable' | 'emotional_peak',
+              patternLabel: clip.patternLabel || clip.title || '',
+              description: clip.description || '',
+              algorithmScore: clip.algorithmScore ?? 100,
+              finalScore: clip.finalScore ?? 100,
+              hookStrength: clip.hookStrength ?? 75,
+              hookMultiplier: clip.hookMultiplier ?? 1.0,
+              trimStartOffset: 0,
+              trimEndOffset: 0,
+              status: (clip.status || 'pending') as 'pending' | 'accepted' | 'rejected',
+              title: clip.title,
+              mood: (clip.mood || 'impactful') as 'impactful' | 'funny' | 'serious' | 'somber' | 'energetic' | 'revealing' | undefined,
+              captionStyle: clip.captionStyle,
+            }));
+          } else {
+            // Fallback to exported clips only
+            console.log('[History Load] Using exported clips:', exportedClips.length);
+            loadedClips = exportedClips.map((clip) => ({
+              id: clip.id,
+              startTime: clip.startTime,
+              endTime: clip.endTime,
+              duration: clip.duration,
+              pattern: 'payoff' as const,
+              patternLabel: clip.title,
+              description: `Exported clip`,
+              algorithmScore: 100,
+              finalScore: 100,
+              hookStrength: 75,
+              hookMultiplier: 1.0,
+              trimStartOffset: 0,
+              trimEndOffset: 0,
+              status: 'accepted' as const,
+              title: clip.title,
+              mood: (clip.mood || 'impactful') as 'impactful' | 'funny' | 'serious' | 'somber' | 'energetic' | 'revealing' | undefined,
+              captionStyle: clip.captionStyle,
+            }));
+          }
+
+          const nextProject = {
             filePath: historyProject.filePath,
             fileName: historyProject.fileName,
             duration: historyProject.duration,
@@ -592,26 +856,44 @@ function App() {
             fps: historyProject.fps,
             thumbnailPath: historyProject.thumbnailPath,
             bitrate: historyProject.bitrate,
-          });
+          };
           
           // Set the loaded clips and go to review screen
-          const loadedTranscript = historyProject.transcript || null;
-          console.log('[History Load] Loading transcript:', loadedTranscript ? `${(loadedTranscript as any)?.segments?.length || 0} segments` : 'null');
-          setResults(loadedClips, [], loadedTranscript, {
+          const loadedTranscript = (historyProject.transcript as Transcript | null) ?? null;
+          const loadedTranscriptObj = loadedTranscript as { segments?: unknown } | null;
+          const loadedSegmentsLen = Array.isArray(loadedTranscriptObj?.segments) ? loadedTranscriptObj!.segments.length : 0;
+          console.log('[History Load] Loading transcript:', loadedTranscript ? `${loadedSegmentsLen} segments` : 'null');
+
+          const transcriptMeta = {
             transcriptAvailable: historyProject.transcriptAvailable,
             transcriptError: historyProject.transcriptError ?? null,
             transcriptSource: historyProject.transcriptSource ?? null,
+          };
+
+          const initialCaptionStyle = loadedClips[0]?.captionStyle;
+
+          // Hard reset first so the <video> can't visually "stick" to a previous source.
+          setProject(null);
+          setResults([], [], null, {
+            transcriptAvailable: false,
+            transcriptError: null,
+            transcriptSource: null,
           });
-          if (loadedClips[0]?.captionStyle) {
-            setCaptionStyle(loadedClips[0].captionStyle);
-          }
-          setCurrentProjectId(projectId);
-          setLoadedFromHistory(true);
+          setCurrentTime(0);
           setCurrentClipIndex(0);
-          setScreen('review');
+
+          // Apply the selected history project on the next tick.
+          setTimeout(() => {
+            setProject(nextProject);
+            setResults(loadedClips, [], loadedTranscript, transcriptMeta);
+            if (initialCaptionStyle) setCaptionStyle(initialCaptionStyle);
+            setCurrentProjectId(projectId);
+            setLoadedFromHistory(true);
+            setCurrentClipIndex(0);
+            setScreen('review');
+          }, 0);
           }}
         />
-        {detectingOverlay}
       </>
     );
   }
@@ -622,6 +904,7 @@ function App() {
   if (screen === 'home') {
     return (
       <>
+        <GlobalBusyOverlay />
         <div className="h-screen w-screen flex flex-col bg-sz-bg text-sz-text relative">
           {/* Settings and History Buttons - Fixed Top Right */}
           <div className="absolute top-6 right-6 flex gap-2 z-10">
@@ -707,22 +990,6 @@ function App() {
                 </button>
               )}
 
-          {isDetecting && (
-            <div className="space-y-4 bg-sz-bg-secondary rounded-xl p-6 border border-sz-border">
-              <div className="flex items-center justify-between">
-                <p className="font-semibold">Detecting clips...</p>
-                <p className="text-sm text-sz-text-muted">{Math.round(detectionProgress?.percent || 0)}%</p>
-              </div>
-              <div className="w-full h-3 bg-sz-bg-tertiary rounded-full overflow-hidden">
-                <div
-                  className="h-full bg-sz-accent transition-all duration-300 ease-out"
-                  style={{ width: `${detectionProgress?.percent || 0}%` }}
-                />
-              </div>
-              <p className="text-sm text-sz-text-muted">{detectionProgress?.message || 'Processing...'}</p>
-            </div>
-          )}
-
           {detectionError && (
             <div className="bg-red-500/10 border border-red-500/30 rounded-xl p-4">
               <p className="text-sm text-red-400">{detectionError}</p>
@@ -737,11 +1004,27 @@ function App() {
           onConfirm={async (data) => {
             console.log('[App] Modal confirmed with:', data);
             try {
+                // Start showing feedback immediately (even before ffprobe validation finishes)
+                const jobId = `job_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+                console.log('[App] Starting detection with jobId:', jobId);
+
+                setCurrentJobId(jobId);
+                setDetecting(true);
+                setDetectionError(null);
+                setDetectionProgress({ percent: 1, message: 'Validating video…' });
+                setTranscriptMeta({ transcriptAvailable: false, transcriptError: null, transcriptSource: null });
+                detectingStartedAtRef.current = Date.now();
+
               const validation = await window.api.validateFile(data.videoPath);
               if (!validation.valid) {
-                alert('Invalid video file');
+                  setCurrentJobId(null);
+                  setDetecting(false);
+                  setDetectionProgress(null);
+                  throw new Error(validation.error || 'Invalid video file');
                 return;
               }
+
+                setDetectionProgress({ percent: 3, message: 'Preparing project…' });
 
               // Create project object from validation data
               const projectData = {
@@ -761,16 +1044,8 @@ function App() {
               // Set project AND start detection immediately with the project data
               setProject(projectData);
               setShowVideoTranscriptModal(false);
-              
-              // Start detection immediately using the local projectData instead of relying on state
-              const jobId = `job_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-              console.log('[App] Starting detection with jobId:', jobId);
-              
-              setCurrentJobId(jobId);
-              setDetecting(true);
-              setDetectionError(null);
-              setTranscriptMeta({ transcriptAvailable: false, transcriptError: null, transcriptSource: null });
-              detectingStartedAtRef.current = Date.now();
+
+              setDetectionProgress({ percent: 4, message: 'Starting detection…' });
 
               // Add to history
               const projectId = addProject({
@@ -800,18 +1075,24 @@ function App() {
 
                 console.log('[App] startDetection result:', result);
                 if (!result.success) {
-                  setDetectionError(result.error || 'Failed to start detection');
+                  setCurrentJobId(null);
                   setDetecting(false);
+                  setDetectionProgress(null);
+                  throw new Error(result.error || 'Failed to start detection');
                 }
               } catch (err) {
                 console.error('[App] startDetection error:', err);
-                setDetectionError(String(err));
+                setDetectionError(err instanceof Error ? err.message : String(err));
                 setDetecting(false);
+                setDetectionProgress(null);
+                setCurrentJobId(null);
+                throw err;
               }
             } catch (err: unknown) {
               const errorMessage = err instanceof Error ? err.message : String(err);
               console.error('[App] Modal error:', errorMessage);
-              alert('Error: ' + errorMessage);
+              // Surface error inside the modal (it will stay open if we didn't close it yet)
+              throw new Error(errorMessage || 'Failed to start detection');
             }
           }}
           onCancel={() => setShowVideoTranscriptModal(false)}
@@ -821,7 +1102,6 @@ function App() {
       {showSettingsModal && (
         <SettingsModal onClose={() => setShowSettingsModal(false)} />
       )}
-        {detectingOverlay}
       </>
     );
   }
@@ -834,6 +1114,7 @@ function App() {
     if (filteredClips.length === 0) {
       return (
         <>
+          <GlobalBusyOverlay />
           <div className="h-screen w-screen flex flex-col bg-sz-bg text-sz-text">
             <div className="p-4 border-b border-sz-border flex items-center justify-between">
             <div className="flex items-center gap-4">
@@ -852,6 +1133,7 @@ function App() {
                   setSelectedMood(mood);
                   setCurrentClipIndex(0);
                 }}
+                moodCounts={moodCounts}
               />
             </div>
             <div className="text-sm text-sz-text-muted">
@@ -872,7 +1154,6 @@ function App() {
               </div>
             </div>
           </div>
-          {detectingOverlay}
         </>
       );
     }
@@ -880,13 +1161,13 @@ function App() {
     if (!currentClip) {
       return (
         <>
+          <GlobalBusyOverlay />
           <div className="h-screen w-screen flex items-center justify-center bg-sz-bg text-sz-text">
             <div className="text-center space-y-4">
               <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-sz-accent mx-auto"></div>
               <p className="text-sz-text-muted">Loading clips...</p>
             </div>
           </div>
-          {detectingOverlay}
         </>
       );
     }
@@ -895,9 +1176,17 @@ function App() {
     const effectiveEnd = currentClip.endTime + currentClip.trimEndOffset;
     const duration = effectiveEnd - effectiveStart;
 
+    const previewRingClass =
+      currentClip.status === 'accepted'
+        ? 'ring-4 ring-green-600/40'
+        : currentClip.status === 'rejected'
+        ? 'ring-4 ring-red-600/40'
+        : 'ring-0';
+
     return (
       <>
-        <div className="h-screen w-screen flex flex-col bg-sz-bg text-sz-text">
+        <GlobalBusyOverlay />
+        <div className="h-screen w-screen flex flex-col min-h-0 bg-sz-bg text-sz-text">
           {/* Caption Warning Banner */}
           {showCaptions && (!transcriptAvailable || !transcript || !transcript.segments || transcript.segments.length === 0) && (
             <div className="bg-yellow-500/10 border-b border-yellow-500/30 px-4 py-2 flex items-center gap-2">
@@ -943,6 +1232,7 @@ function App() {
                 setSelectedMood(mood);
                 setCurrentClipIndex(0);
               }}
+              moodCounts={moodCounts}
             />
             <CaptionStyleSelector
               selectedStyle={captionStyle}
@@ -954,43 +1244,201 @@ function App() {
           </div>
         </div>
 
-        {/* Video Preview */}
-        <div className="flex-1 flex items-center justify-center bg-black p-4 relative">
-          <video
-            ref={videoRef}
-            src={project ? `file://${project.filePath}` : undefined}
-            className="max-h-full max-w-full"
-            controls={false}
-            onTimeUpdate={(e) => {
-              const time = e.currentTarget.currentTime;
-              setCurrentTime(time);
-              // Loop clip when it reaches the end
-              if (time >= effectiveEnd && videoRef.current) {
-                videoRef.current.currentTime = effectiveStart;
-              }
-            }}
-            onClick={() => {
-              if (videoRef.current) {
-                if (videoRef.current.paused) videoRef.current.play();
-                else videoRef.current.pause();
-              }
-            }}
-          />
-          <CaptionOverlay
-            transcript={transcript}
-            transcriptAvailable={transcriptAvailable}
-            transcriptError={transcriptError}
-            currentTime={currentTime}
-            clipStart={effectiveStart}
-            clipEnd={effectiveEnd}
-            captionStyle={captionStyle}
-            show={showCaptions}
-          />
-        </div>
+        {/* Review Layout (3-column): Left = video preview, Middle = controls, Right = cuts panel */}
+        <div className="flex-1 min-h-0 flex overflow-hidden">
+          {/* Left Column: Video Preview */}
+          <div className="w-[380px] min-w-[380px] shrink-0 flex items-center justify-center bg-black p-4 border-r border-sz-border">
+            <div ref={previewStageRef} className="flex items-center justify-center w-full h-full">
+              {(() => {
+                const inputWidth = project?.width || 1920;
+                const inputHeight = project?.height || 1080;
+                
+                // Get face center X position (from detection or default to center)
+                const faceCenterX = currentClip.faceCenterX ?? 0.5;
+                
+                // Create face-centered framing based on exact face position
+                const faceFraming = createFaceCenteredFramingModel({
+                  inputWidth,
+                  inputHeight,
+                  targetWidth: 1080,
+                  targetHeight: 1920,
+                  faceCenterX,
+                });
+                
+                const baseFraming = currentClip.framing || faceFraming;
 
-        {/* Clip Info & Controls */}
-        <div className="p-6 bg-sz-bg-secondary border-t border-sz-border">
-          <div className="max-w-2xl mx-auto space-y-4">
+                // Use dynamic speaker-oriented framing if we have keyframes
+                // Otherwise use the face-centered framing
+                let framing = baseFraming;
+                
+                if (currentClip.autoOrientEnabled !== false) {
+                  if (currentClip.framingKeyframes && currentClip.framingKeyframes.length > 0) {
+                    // Use keyframe-based framing (from speaker diarization or face detection)
+                    const dynamicFraming = getFramingAtTime(currentClip.framingKeyframes, currentTime, 0.4);
+                    if (dynamicFraming) {
+                      framing = dynamicFraming;
+                    }
+                  } else {
+                    // Use face-centered framing
+                    framing = faceFraming;
+                  }
+                }
+
+                // Always preview in the *export* output aspect so preview matches export.
+                const exportWidth = 1080;
+                const exportHeight = 1920;
+                const previewFraming = clampFramingModel({
+                  ...framing,
+                  width: exportWidth,
+                  height: exportHeight,
+                  aspect: exportWidth / exportHeight,
+                });
+
+                // Preview crop using object-fit: cover + object-position.
+                // For a 16:9 video in a 9:16 container with object-fit: cover:
+                // - Video height fills container, width overflows
+                // - object-position: X% aligns X% of video with X% of container
+                // - To show crop starting at crop.x: X = crop.x / (1 - crop.w) * 100
+                const cropW = previewFraming.crop.w || 1;
+                const cropX = previewFraming.crop.x || 0;
+                const maxOffset = Math.max(0.001, 1 - cropW); // Avoid division by zero
+                const objectPositionX = Math.min(100, Math.max(0, (cropX / maxOffset) * 100));
+
+                return (
+                  <div 
+                    className={`relative rounded-xl overflow-hidden ${previewRingClass}`} 
+                    style={{ 
+                      aspectRatio: '9 / 16',
+                      width: '100%',
+                      maxHeight: 'calc(100vh - 140px)',
+                    }}
+                  >
+                    <video
+                      key={project?.filePath || 'no-project'}
+                      ref={videoRef}
+                      src={project ? filePathToFileUrl(project.filePath) : undefined}
+                      className="w-full h-full object-cover transition-all duration-300 ease-out"
+                      style={{
+                        objectPosition: `${objectPositionX}% 50%`,
+                      }}
+                  controls={false}
+                  onTimeUpdate={(e) => {
+                    const time = e.currentTarget.currentTime;
+                    setCurrentTime(time);
+                    // Loop clip when it reaches the end
+                    if (time >= effectiveEnd && videoRef.current) {
+                      videoRef.current.currentTime = effectiveStart;
+                    }
+                  }}
+                  onClick={() => {
+                    if (videoRef.current) {
+                      if (videoRef.current.paused) videoRef.current.play();
+                      else videoRef.current.pause();
+                    }
+                  }}
+                    />
+                    <div className="absolute top-3 left-3 pointer-events-none">
+                      <StatusBadge status={currentClip.status} />
+                    </div>
+
+                    <CaptionOverlay
+                      transcript={transcript}
+                      transcriptAvailable={transcriptAvailable}
+                      transcriptError={transcriptError}
+                      currentTime={currentTime}
+                      clipStart={effectiveStart}
+                      clipEnd={effectiveEnd}
+                      captionStyle={captionStyle}
+                      show={showCaptions}
+                    />
+                  </div>
+                );
+              })()}
+            </div>
+          </div>
+
+          {/* Middle Column: Clip Info & Controls */}
+          <div className="flex-1 min-w-0 flex flex-col overflow-y-auto bg-sz-bg-secondary">
+            <div className="p-6 space-y-4">
+            
+            {/* Timeline controls at top of bottom panel */}
+            {(() => {
+              const clipDuration = Math.max(0, duration || 0);
+              const clipTime = Math.max(0, Math.min(clipDuration, currentTime - effectiveStart));
+
+              const seekTo = (nextClipTimeSeconds: number, options?: { resumeIfPlaying?: boolean }) => {
+                const video = videoRef.current;
+                if (!video) return;
+                const clamped = Math.max(0, Math.min(clipDuration, nextClipTimeSeconds));
+                video.currentTime = effectiveStart + clamped;
+                setCurrentTime(video.currentTime);
+                if (options?.resumeIfPlaying && wasPlayingBeforeScrubRef.current) {
+                  void video.play();
+                }
+              };
+
+              return (
+                <div className="bg-sz-bg border border-sz-border rounded-lg px-4 py-3">
+                  <div className="flex items-center gap-3">
+                    <button
+                      type="button"
+                      className="px-3 py-2 rounded-md bg-sz-bg-tertiary hover:bg-sz-bg-hover transition-colors text-sm font-medium"
+                      onClick={() => {
+                        const video = videoRef.current;
+                        if (!video) return;
+                        if (video.paused) void video.play();
+                        else video.pause();
+                      }}
+                      title="Play / Pause"
+                    >
+                      {videoRef.current?.paused ? '▶ Play' : '⏸ Pause'}
+                    </button>
+
+                    <button
+                      type="button"
+                      className="px-3 py-2 rounded-md bg-sz-bg-tertiary hover:bg-sz-bg-hover transition-colors text-sm font-medium"
+                      onClick={() => {
+                        const video = videoRef.current;
+                        if (!video) return;
+                        video.currentTime = effectiveStart;
+                        setCurrentTime(video.currentTime);
+                        void video.play();
+                      }}
+                      title="Replay"
+                    >
+                      ↻ Replay
+                    </button>
+
+                    <div className="text-xs text-sz-text-secondary tabular-nums whitespace-nowrap">
+                      {formatDuration(clipTime)} / {formatDuration(clipDuration)}
+                    </div>
+
+                    <input
+                      type="range"
+                      min={0}
+                      max={Math.max(clipDuration, 0.001)}
+                      step={0.05}
+                      value={clipTime}
+                      onMouseDown={() => {
+                        const video = videoRef.current;
+                        wasPlayingBeforeScrubRef.current = !!(video && !video.paused);
+                        if (video && !video.paused) video.pause();
+                      }}
+                      onMouseUp={() => {
+                        seekTo(clipTime, { resumeIfPlaying: true });
+                      }}
+                      onChange={(e) => {
+                        const next = Number(e.currentTarget.value);
+                        seekTo(next);
+                      }}
+                      className="flex-1 sz-timeline-range accent-sz-accent"
+                      aria-label="Video timeline"
+                    />
+                  </div>
+                </div>
+              );
+            })()}
+
             {/* Clip Counter & Mood Badge */}
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3">
@@ -1003,9 +1451,12 @@ function App() {
                   </span>
                 )}
               </div>
-              <p className="text-sm text-sz-text-muted">
-                {Math.floor(duration)}s • Score: {Math.round(currentClip.finalScore || 0)}
-              </p>
+              <div className="flex items-center gap-3">
+                <ScoreBadge score={Math.round(currentClip.finalScore || 0)} size="sm" />
+                <p className="text-sm text-sz-text-muted">
+                  {formatDuration(duration)} • {getScoreLabel(Math.round(currentClip.finalScore || 0))}
+                </p>
+              </div>
             </div>
 
             {/* Title */}
@@ -1105,6 +1556,48 @@ function App() {
                 <p className="text-xs text-sz-text-muted">{currentClip.trimEndOffset.toFixed(1)}s</p>
               </div>
             </div>
+            
+            {/* Speaker Position & Framing Controls */}
+            <div className="bg-sz-bg border border-sz-border rounded-lg p-3 space-y-3">
+              {/* Auto-Orient Toggle */}
+              <label className="flex items-center gap-3 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={currentClip.autoOrientEnabled !== false}
+                  onChange={(e) => updateClipAutoOrient(currentClip.id, e.target.checked)}
+                  className="w-4 h-4 accent-sz-accent"
+                />
+                <div className="flex-1">
+                  <span className="text-sm font-medium">
+                    🎯 Smart Framing
+                  </span>
+                  <p className="text-xs text-sz-text-muted mt-0.5">
+                    {currentClip.framingKeyframes && currentClip.framingKeyframes.length > 1
+                      ? `Auto-tracking (${currentClip.framingKeyframes.length} transitions)`
+                      : currentClip.faceCenterX !== undefined
+                        ? (() => {
+                            const pct = (currentClip.faceCenterX * 100).toFixed(0);
+                            const numFaces = currentClip.faceDetectionNumFaces ?? 0;
+                            const conf = currentClip.faceDetectionConfidence;
+                            const source = currentClip.faceDetectionSource;
+                            if (numFaces > 0) {
+                              return `Auto-centered on face (${pct}%)${conf ? ` • conf ${conf.toFixed(2)}` : ''}`;
+                            }
+                            if (source === 'project-bias') {
+                              return `Auto-centered (project bias ${pct}%)`;
+                            }
+                            // Coarse subject fallback (upper-body / person detector)
+                            if ((conf ?? 0) >= 0.4 && currentClip.faceCenterX !== 0.5) {
+                              return `Auto-centered on subject (${pct}%)`;
+                            }
+                            return `Centered (no detection)`;
+                          })()
+                        : 'Use speaker position for vertical crop'
+                    }
+                  </p>
+                </div>
+              </label>
+            </div>
 
             {/* Action Buttons */}
             {!loadedFromHistory && (
@@ -1151,19 +1644,18 @@ function App() {
                 <p className="text-xs uppercase tracking-wider text-sz-accent font-semibold">Step 2: Export Clips</p>
                 <div className="flex flex-col gap-2">
                   <button
-                    onClick={handleExportClip}
-                    className="w-full py-3 px-4 bg-sz-accent text-white rounded-lg font-semibold hover:bg-sz-accent-hover transition-all transform hover:scale-105"
+                    onClick={handleExportAll}
+                    disabled={acceptedClips.length === 0}
+                    className={`w-full py-3 px-4 rounded-lg font-semibold transition-all transform hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed ${
+                      acceptedClips.length === 0
+                        ? 'bg-sz-bg-tertiary text-sz-text'
+                        : 'bg-green-600 text-white hover:bg-green-500'
+                    }`}
                   >
-                    Export This Clip →
+                    {acceptedClips.length === 0
+                      ? 'Export Accepted Clips →'
+                      : `Export ${acceptedClips.length} Accepted →`}
                   </button>
-                  {acceptedClips.length > 1 && (
-                    <button
-                      onClick={handleExportAll}
-                      className="w-full py-3 px-4 bg-green-600 text-white rounded-lg font-semibold hover:bg-green-500 transition-all transform hover:scale-105"
-                    >
-                      Export All {acceptedClips.length} Accepted →
-                    </button>
-                  )}
                 </div>
                 <p className="text-xs text-sz-text-muted text-center">
                   {acceptedClips.length === 0
@@ -1175,7 +1667,7 @@ function App() {
               </div>
             )}
 
-            {/* Navigation + Export All */}
+            {/* Navigation (optional) */}
             <div className="flex items-center justify-between pt-4 border-t border-sz-border">
               <div className="flex items-center gap-2">
                 <button
@@ -1188,13 +1680,7 @@ function App() {
                 <span className="text-xs text-sz-text-muted px-2">
                   {currentClipIndex + 1} / {filteredClips.length}
                 </span>
-                <button
-                  onClick={goToNextClip}
-                  disabled={currentClipIndex === clips.length - 1}
-                  className="px-4 py-2 bg-sz-bg-tertiary rounded-lg hover:bg-sz-bg-hover disabled:opacity-50 disabled:cursor-not-allowed font-medium transition-colors"
-                >
-                  Next →
-                </button>
+                {/* No Next button: accept/reject auto-advances; arrow keys still work */}
               </div>
               
               {loadedFromHistory && (
@@ -1206,10 +1692,20 @@ function App() {
                 </button>
               )}
             </div>
+            </div>
           </div>
+
+          {/* Right Column: Cuts Panel */}
+          <CutsPanel
+            clips={clips}
+            currentClipId={currentClip.id}
+            onSelectClip={jumpToClip}
+            transcript={transcript}
+            transcriptAvailable={transcriptAvailable}
+            transcriptError={transcriptError}
+          />
         </div>
         </div>
-        {detectingOverlay}
       </>
     );
   }
@@ -1218,39 +1714,20 @@ function App() {
   // SCREEN 3: EXPORT
   // ========================================
   if (screen === 'export') {
+    if (isExporting) {
+      return (
+        <>
+          <GlobalBusyOverlay />
+          <div className="h-screen w-screen bg-sz-bg" />
+        </>
+      );
+    }
+
     return (
       <>
+        <GlobalBusyOverlay />
         <div className="h-screen w-screen flex flex-col items-center justify-center bg-sz-bg text-sz-text p-8">
           <div className="max-w-md w-full space-y-6 text-center">
-          {isExporting ? (
-            <>
-              <div className="space-y-2 mb-4">
-                <div className="text-5xl animate-pulse">🚀</div>
-                <h1 className="text-2xl font-bold">Exporting Clips...</h1>
-              </div>
-
-              {/* Progress */}
-              {exportProgress && (
-                <div className="space-y-4 bg-sz-bg-secondary rounded-lg p-6">
-                  <div className="w-full h-3 bg-sz-bg-tertiary rounded-full overflow-hidden">
-                    <div
-                      className="h-full bg-gradient-to-r from-sz-accent to-green-500 transition-all duration-300"
-                      style={{ width: `${(exportProgress.current / exportProgress.total) * 100}%` }}
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <p className="text-sm font-semibold">
-                      {exportProgress.current} of {exportProgress.total} clips
-                    </p>
-                    {exportProgress.clipName && (
-                      <p className="text-xs text-sz-text-muted">{exportProgress.clipName}</p>
-                    )}
-                  </div>
-                </div>
-              )}
-            </>
-          ) : (
-            <>
               <div className="space-y-2 mb-4">
                 <div className="text-5xl">✅</div>
                 <h1 className="text-2xl font-bold">Export Complete!</h1>
@@ -1299,11 +1776,9 @@ function App() {
                   New Project
                 </button>
               </div>
-            </>
-          )}
+
           </div>
         </div>
-        {detectingOverlay}
       </>
     );
   }
@@ -1314,7 +1789,6 @@ function App() {
       <div className="h-screen w-screen flex items-center justify-center bg-sz-bg text-sz-text">
         <p>Loading...</p>
       </div>
-      {detectingOverlay}
       {showVideoTranscriptModal && (
         <VideoAndTranscriptModal
           onConfirm={async (data) => {

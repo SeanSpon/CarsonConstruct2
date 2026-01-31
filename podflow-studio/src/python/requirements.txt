@@ -1,9 +1,13 @@
 # Core audio processing
 librosa>=0.10.1
-numpy>=1.24.3
+# Numba (a dependency of librosa) is not yet compatible with NumPy 2.4+
+numpy>=1.24.3,<2.4
 scipy>=1.11.3
 soundfile>=0.12.1
-webrtcvad
+# WebRTC VAD (optional): if not installed, the app falls back to an energy-based VAD.
+# On Windows/Python versions without a compiler toolchain, installing this may require
+# Microsoft C++ Build Tools.
+# webrtcvad
 pydub>=0.25.0
 
 # Speaker diarization (for multi-camera switching)
@@ -14,6 +18,10 @@ torch>=2.0.0
 
 # Environment
 python-dotenv>=1.0.0
+
+# Face detection for auto-orient
+opencv-python>=4.8.0
+opencv-python-headless>=4.8.0
 
 # AI Providers (install the ones you need)
 # ---------------------------------------
@@ -32,6 +40,9 @@ anthropic>=0.18.0
 # pip install ollama
 ollama>=0.1.6
 
-# Local Transcription (required for auto-transcription)
-# Provides word-level timestamps for karaoke-style captions
-faster-whisper>=0.10.0
+# Local Transcription (optional)
+# Provides word-level timestamps for karaoke-style captions.
+# NOTE: On some Windows/Python versions, faster-whisper may require a Rust toolchain
+# because tokenizers wheels may not be available.
+# Install only if you want local transcription:
+#   pip install "faster-whisper>=0.10.0"

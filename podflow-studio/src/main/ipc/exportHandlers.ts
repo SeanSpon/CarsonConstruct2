@@ -2,9 +2,14 @@ import { ipcMain, shell, app } from 'electron';
 import { spawn } from 'child_process';
 import path from 'path';
 import fs from 'fs';
-import os from 'os';
 import crypto from 'crypto';
 import { getMainWindow } from '../window';
+import type { FramingModel, FramingKeyframe } from '../../shared/framing';
+import { 
+  clampFramingModel, 
+  createCenterCropFramingModel, 
+  framingToFfmpegCropScaleFilter 
+} from '../../shared/framing';
 
 // Use bundled ffmpeg for reliability (no system dependency)
 // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -244,12 +249,20 @@ function exportSingleClip(
   mode: 'fast' | 'accurate'
 ): Promise<void> {
   return new Promise((resolve, reject) => {
-    const args = [
-      '-y',
-      '-ss', startTime.toString(),
-      '-i', sourceFile,
-      '-t', duration.toString(),
-    ];
+    const fadeSeconds = 0.05;
+    const safeDuration = Math.max(0, duration);
+    const fadeOutStart = Math.max(0, safeDuration - fadeSeconds);
+
+    // NOTE:
+    // - fast mode: -ss before -i enables fast seeking but may drift to keyframes.
+    // - accurate mode: -ss after -i decodes up to the exact timestamp.
+    const args = ['-y'];
+
+    if (mode === 'fast') {
+      args.push('-ss', startTime.toString(), '-i', sourceFile, '-t', safeDuration.toString());
+    } else {
+      args.push('-i', sourceFile, '-ss', startTime.toString(), '-t', safeDuration.toString());
+    }
 
     if (mode === 'fast') {
       // Stream copy - fast but keyframe-aligned (boundary timing can drift)
@@ -257,6 +270,8 @@ function exportSingleClip(
     } else {
       // Re-encode - slower but frame-accurate cuts
       args.push(
+        // Gentle audio fades help avoid pops/clicks at hard cuts.
+        '-af', `afade=t=in:st=0:d=${fadeSeconds},afade=t=out:st=${fadeOutStart}:d=${fadeSeconds}`,
         '-c:v', 'libx264',
         '-preset', 'fast',
         '-crf', '23',
@@ -766,7 +781,7 @@ ipcMain.handle('open-folder', async (_event, folderPath: string) => {
       shell.showItemInFolder(folderPath);
     }
     return { success: true };
-  } catch (err) {
+  } catch {
     // Fallback to just opening the path
     try {
       await shell.openPath(folderPath);
@@ -988,6 +1003,11 @@ interface MVPClip {
   end: number;
   duration: number;
   captionStyle?: 'viral' | 'minimal' | 'bold';
+  framing?: FramingModel;
+  framingKeyframes?: FramingKeyframe[];
+  autoOrientEnabled?: boolean;
+  manualSpeakerPosition?: 'left' | 'center' | 'right';
+  faceCenterX?: number;  // Exact face center position from detection (0-1)
 }
 
 /**
@@ -1005,7 +1025,6 @@ function getVerticalCropFilter(
   // Calculate crop width at native height
   // crop_w = in_h * 9/16
   const cropWidth = Math.round(inputHeight * 9 / 16);
-  const cropX = Math.round((inputWidth - cropWidth) / 2);
   
   // Ensure crop doesn't exceed input width
   const safeCropWidth = Math.min(cropWidth, inputWidth);
@@ -1229,6 +1248,87 @@ function resolveCaptionStyle(
 }
 
 /**
+ * Generate an ffmpeg crop filter expression for dynamic speaker-oriented framing.
+ * Uses keyframes to interpolate crop position over time.
+ */
+function generateDynamicCropFilter(
+  keyframes: FramingKeyframe[],
+  inputWidth: number,
+  inputHeight: number,
+  targetWidth: number,
+  targetHeight: number,
+  clipStartTime: number,
+  transitionDuration = 0.4
+): string {
+  if (!keyframes || keyframes.length === 0) {
+    return '';
+  }
+
+  // For a single keyframe, just use static crop
+  if (keyframes.length === 1) {
+    return framingToFfmpegCropScaleFilter(inputWidth, inputHeight, keyframes[0].framing);
+  }
+
+  // Compute crop dimensions (constant for all keyframes since aspect is constant)
+  const firstFraming = clampFramingModel(keyframes[0].framing);
+  const cropW = Math.max(1, Math.round(inputWidth * firstFraming.crop.w));
+  const cropH = Math.max(1, Math.round(inputHeight * firstFraming.crop.h));
+  
+  // Build piecewise linear expression for x position
+  // FFmpeg uses 't' for time since start of clip
+  const buildXExpression = (): string => {
+    const parts: string[] = [];
+    
+    for (let i = 0; i < keyframes.length; i++) {
+      const kf = keyframes[i];
+      const relTime = kf.time - clipStartTime;
+      const framing = clampFramingModel(kf.framing);
+      const x = Math.round(inputWidth * framing.crop.x);
+      
+      if (i === 0) {
+        // Before first keyframe: hold at first position
+        parts.push(`if(lt(t,${relTime.toFixed(3)}),${x}`);
+      } else {
+        const prevKf = keyframes[i - 1];
+        const prevRelTime = prevKf.time - clipStartTime;
+        const prevFraming = clampFramingModel(prevKf.framing);
+        const prevX = Math.round(inputWidth * prevFraming.crop.x);
+        
+        // Transition from previous keyframe to this one
+        const transStart = relTime - transitionDuration;
+        if (transStart <= prevRelTime) {
+          // Direct transition
+          parts.push(`,if(lt(t,${relTime.toFixed(3)}),${prevX}+((${x}-${prevX})*(t-${prevRelTime.toFixed(3)})/${(relTime - prevRelTime).toFixed(3)})`);
+        } else {
+          // Hold then transition
+          parts.push(`,if(lt(t,${transStart.toFixed(3)}),${prevX}`);
+          parts.push(`,if(lt(t,${relTime.toFixed(3)}),${prevX}+((${x}-${prevX})*(t-${transStart.toFixed(3)})/${transitionDuration.toFixed(3)})`);
+        }
+      }
+    }
+    
+    // After last keyframe: hold at last position
+    const lastFraming = clampFramingModel(keyframes[keyframes.length - 1].framing);
+    const lastX = Math.round(inputWidth * lastFraming.crop.x);
+    parts.push(`,${lastX}`);
+    
+    // Close all if statements
+    const closeParens = ')'.repeat(parts.length);
+    
+    return parts.join('') + closeParens;
+  };
+  
+  // Y is typically constant for vertical crops, but include for completeness
+  const y = Math.round(inputHeight * firstFraming.crop.y);
+  
+  const xExpr = buildXExpression();
+  
+  // Simple approach: if keyframes have same y, use constant y
+  // Otherwise would need similar expression for y
+  return `crop=${cropW}:${cropH}:'${xExpr}':${y},scale=${targetWidth}:${targetHeight}`;
+}
+
+/**
  * Export a single clip with vertical crop and optional caption burning.
  */
 function exportVerticalClip(
@@ -1239,23 +1339,57 @@ function exportVerticalClip(
   inputWidth: number,
   inputHeight: number,
   assFile: string | null,
-  settings: MVPExportSettings
+  settings: MVPExportSettings,
+  framing?: FramingModel,
+  framingKeyframes?: FramingKeyframe[]
 ): Promise<void> {
   return new Promise((resolve, reject) => {
     const duration = clipEnd - clipStart;
-    const cropFilter = getVerticalCropFilter(
-      inputWidth,
-      inputHeight,
-      settings.targetWidth,
-      settings.targetHeight
-    );
+
+    // Check if we should use dynamic keyframe-based cropping
+    const useDynamicCrop = framingKeyframes && framingKeyframes.length >= 2;
     
-    // Build filter chain
-    let videoFilter = cropFilter;
-    let debugInfo = {
-      cropFilter,
+    let videoFilter: string;
+    
+    if (useDynamicCrop) {
+      // Use dynamic crop filter for speaker-oriented framing
+      videoFilter = generateDynamicCropFilter(
+        framingKeyframes!,
+        inputWidth,
+        inputHeight,
+        settings.targetWidth,
+        settings.targetHeight,
+        clipStart,
+        0.4 // 400ms transition
+      );
+      console.log('[MVP Export] Using dynamic speaker-oriented crop');
+    } else {
+      // Static framing
+      const effectiveFraming = framing
+        ? clampFramingModel({
+            ...framing,
+            width: framing.width || settings.targetWidth,
+            height: framing.height || settings.targetHeight,
+            aspect:
+              (Number.isFinite(framing.aspect) && framing.aspect > 0
+                ? framing.aspect
+                : (framing.width || settings.targetWidth) / (framing.height || settings.targetHeight)),
+          })
+        : createCenterCropFramingModel({
+            inputWidth,
+            inputHeight,
+            targetWidth: settings.targetWidth,
+            targetHeight: settings.targetHeight,
+          });
+
+      videoFilter = framingToFfmpegCropScaleFilter(inputWidth, inputHeight, effectiveFraming);
+    }
+
+    const debugInfo: Record<string, unknown> = {
+      videoFilter,
       assFile,
       burnCaptions: settings.burnCaptions,
+      useDynamicCrop,
     };
     
     // Add caption burning if ASS file provided
@@ -1323,11 +1457,8 @@ function exportVerticalClip(
     
     const ffmpeg = spawn(ffmpegPath, args, { windowsHide: true });
     let errorOutput = '';
-    let stdoutOutput = '';
     
-    ffmpeg.stdout?.on('data', (data) => {
-      stdoutOutput += data.toString();
-    });
+    // stdout is rarely needed here; keep stderr for debug/error reporting.
     
     ffmpeg.stderr.on('data', (data) => {
       const chunk = data.toString();
@@ -1490,6 +1621,8 @@ ipcMain.handle('export-mvp-clips', async (_event, data: {
       
       // Export clip with captions if assFile was generated
       console.log('[MVP Export] Starting FFmpeg export...');
+      console.log('[MVP Export] Framing keyframes:', clip.framingKeyframes?.length || 0, 'autoOrient:', clip.autoOrientEnabled);
+      
       await exportVerticalClip(
         sourceFile,
         outputFile,
@@ -1498,7 +1631,9 @@ ipcMain.handle('export-mvp-clips', async (_event, data: {
         inputWidth,
         inputHeight,
         assFile,
-        settings
+        settings,
+        clip.framing,
+        clip.autoOrientEnabled !== false ? clip.framingKeyframes : undefined
       );
       
       console.log('[MVP Export] ✅ Clip export successful:', outputFile);
@@ -1549,6 +1684,7 @@ interface VerticalReelExportData {
   startTime: number;
   endTime: number;
   title?: string;
+  framing?: FramingModel;
   transcript?: {
     words?: Array<{ word: string; start: number; end: number }>;
     segments?: Array<{ text: string; start: number; end: number }>;
@@ -1679,6 +1815,7 @@ ipcMain.handle('export-vertical-reel', async (_event, data: VerticalReelExportDa
     startTime,
     endTime,
     title,
+    framing,
     transcript,
     captionSettings,
     inputWidth,
@@ -1705,7 +1842,18 @@ ipcMain.handle('export-vertical-reel', async (_event, data: VerticalReelExportDa
     }
     
     // Build filter chain
-    const cropFilter = getVerticalCropFilter(inputWidth, inputHeight, 1080, 1920);
+    const cropFilter = framing
+      ? framingToFfmpegCropScaleFilter(
+          inputWidth,
+          inputHeight,
+          clampFramingModel({
+            ...framing,
+            width: 1080,
+            height: 1920,
+            aspect: 1080 / 1920,
+          })
+        )
+      : getVerticalCropFilter(inputWidth, inputHeight, 1080, 1920);
     let videoFilter = cropFilter;
     
     if (assFile) {
@@ -1830,7 +1978,14 @@ ipcMain.handle('export-vertical-reels-batch', async (_event, data: VerticalReelB
     }
     
     try {
-      const result = await (ipcMain as any)._events['export-vertical-reel'][0](
+      const events = (ipcMain as unknown as { _events?: Record<string, unknown> })._events;
+      const handler = (events && (events['export-vertical-reel'] as unknown)) as unknown;
+      const first = Array.isArray(handler) ? handler[0] : handler;
+      if (typeof first !== 'function') {
+        throw new Error('export-vertical-reel handler not registered');
+      }
+
+      const result = await (first as (event: unknown, data: unknown) => Promise<{ success: boolean; outputFile?: string; error?: string }>)(
         null,
         {
           sourceFile,
@@ -1857,7 +2012,7 @@ ipcMain.handle('export-vertical-reels-batch', async (_event, data: VerticalReelB
         results.push({
           clipId: clip.id,
           success: false,
-          error: result.error,
+          error: result.error ?? 'Export failed',
         });
       }
     } catch (err) {

@@ -308,7 +308,7 @@ export function SlideInPanel({
       
       {/* Panel */}
       <div 
-        className={`absolute ${side}-0 top-0 bottom-0 ${width} bg-sz-bg-secondary border-${side === 'right' ? 'l' : 'r'} border-sz-border shadow-2xl flex flex-col animate-sz-slide-in-${side}`}
+        className={`absolute ${side}-0 top-0 bottom-0 ${width} bg-sz-bg-secondary border-${side === 'right' ? 'l' : 'r'} border-sz-border shadow-2xl flex flex-col min-h-0 animate-sz-slide-in-${side}`}
       >
         {/* Header */}
         {title && (
@@ -324,7 +324,7 @@ export function SlideInPanel({
         )}
 
         {/* Content */}
-        <div className="flex-1 overflow-y-auto">
+        <div className="flex-1 min-h-0 overflow-y-auto">
           {children}
         </div>
       </div>

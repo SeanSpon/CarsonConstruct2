@@ -50,7 +50,7 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
                 OpenAI API Key
               </label>
               <p className="text-xs text-sz-text-muted mb-3">
-                For Whisper transcription to enable captions on exported clips. Get your key from{' '}
+                For AI-generated clip titles & hooks, plus Whisper transcription for captions. Get your key from{' '}
                 <a
                   href="https://platform.openai.com/api-keys"
                   target="_blank"

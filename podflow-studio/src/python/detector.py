@@ -298,7 +298,8 @@ def run_mvp_pipeline(video_path: str, settings: dict):
     def _transcribe_with_openai_whisper() -> dict:
         """Fallback transcription using OpenAI Whisper API.
 
-        Uses an MP3 transcode to stay within the 25MB Whisper API limit.
+        Uses chunked MP3 segments (created via FFmpeg) to stay within the 25MB
+        Whisper API limit, with progress updates per chunk.
         Returns transcript dict with segments/words/text (+ optional error).
         """
         if not openai_key:
@@ -309,36 +310,30 @@ def run_mvp_pipeline(video_path: str, settings: dict):
         except Exception as e:
             return {"segments": [], "words": [], "text": "", "error": f"Failed to import OpenAI transcription client: {e}"}
 
-        mp3_path = os.path.join(job_dir, "audio_whisper.mp3")
-        if not os.path.exists(mp3_path) or os.path.getsize(mp3_path) == 0:
-            ffmpeg_bin = ffmpeg_path or "ffmpeg"
-            send_progress(21, "Preparing compressed audio for Whisper API...")
-            try:
-                # 1ch, 16kHz, low bitrate MP3 to keep file size under 25MB for long videos
-                subprocess.run(
-                    [
-                        ffmpeg_bin,
-                        "-y",
-                        "-i",
-                        audio_path,
-                        "-vn",
-                        "-ac",
-                        "1",
-                        "-ar",
-                        "16000",
-                        "-b:a",
-                        "32k",
-                        mp3_path,
-                    ],
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                    check=True,
-                )
-            except Exception as e:
-                return {"segments": [], "words": [], "text": "", "error": f"FFmpeg MP3 transcode failed: {e}"}
+        # NOTE: Avoid transcoding the entire file up-front. `transcribe_with_whisper`
+        # will split + re-encode into small MP3 chunks as needed.
+        send_progress(22, "Transcribing with OpenAI Whisper API (chunked)...")
 
-        send_progress(22, "Transcribing with OpenAI Whisper API...")
-        result = transcribe_with_whisper(mp3_path, openai_key)
+        progress_start = 22
+        progress_end = 34  # keep Stage C at 35+
+
+        def _whisper_progress(current: int, total: int, message: str) -> None:
+            if total <= 0:
+                send_progress(progress_start, message)
+                return
+
+            frac = min(max(float(current) / float(total), 0.0), 1.0)
+            pct = progress_start + int(round(frac * (progress_end - progress_start)))
+            send_progress(pct, message)
+
+        chunk_seconds = int(settings.get("whisper_chunk_seconds", 20 * 60))
+        result = transcribe_with_whisper(
+            audio_path,
+            openai_key,
+            ffmpeg_path=ffmpeg_path,
+            chunk_seconds=chunk_seconds,
+            progress_callback=_whisper_progress,
+        )
         # Ensure shape is always consistent
         if not isinstance(result, dict):
             return {"segments": [], "words": [], "text": "", "error": "Invalid Whisper API response"}
@@ -458,7 +453,15 @@ def run_mvp_pipeline(video_path: str, settings: dict):
             _write_json(features_path, features_json, indent=2)
             
         except Exception as e:
-            send_error(f"Failed to compute features: {e}")
+            msg = str(e)
+            if "Numba needs NumPy" in msg and "Got NumPy" in msg:
+                # Keep this a single line so the Electron stdout parser forwards the full message.
+                msg = (
+                    msg
+                    + " | Fix: downgrade NumPy in the Python environment used by PodFlow Studio"
+                    + " (Windows: pip install \"numpy<2.4\"). Restart the app and rerun detection."
+                )
+            send_error(f"Failed to compute features: {msg}")
             sys.exit(1)
     else:
         send_progress(35, "Stage C: Features exist, loading...")
@@ -588,6 +591,21 @@ def run_mvp_pipeline(video_path: str, settings: dict):
             send_error("Failed to load cached clips")
             sys.exit(1)
     
+    # Stage F: AI Enhancement (Optional)
+    use_ai = settings.get("use_ai_enhancement", False)
+    ai_enabled = bool(use_ai and openai_key)
+    
+    if ai_enabled and transcript:
+        send_progress(88, "Stage F: Enhancing with AI titles...")
+        try:
+            from ai.orchestrator import run_ai_enhancement
+            clips = run_ai_enhancement(clips, transcript, settings)
+            send_progress(90, f"AI enhanced {len(clips)} clips")
+        except Exception as e:
+            send_progress(90, f"AI enhancement skipped: {e}")
+    else:
+        send_progress(90, "Skipping AI enhancement...")
+    
     # The clips from score_and_select_clips are already in the right format
     # Just add any missing fields for UI compatibility
     final_clips = []
@@ -611,6 +629,8 @@ def run_mvp_pipeline(video_path: str, settings: dict):
             "trimEndOffset": clip.get("trimEndOffset", 0),
             "status": clip.get("status", "pending"),
             "title": clip.get("title") or f"Clip {i+1}",
+            "hookText": clip.get("hookText", ""),
+            "category": clip.get("category", ""),
             "mood": mood,  # Add mood field
             # MVP-specific fields
             "score_breakdown": clip.get("score_breakdown"),
@@ -850,6 +870,7 @@ def main(video_path: str, settings: dict):
                     min_duration,
                     max_duration,
                     snap_window_s=snap_settings.get("snap_window_s", 2.0),
+                    head_padding_s=snap_settings.get("head_padding_s", 0.2),
                     tail_padding_s=snap_settings.get("tail_padding_s", 0.4),
                 )
                 clip["startTime"] = round(new_start, 2)
@@ -896,7 +917,7 @@ def main(video_path: str, settings: dict):
                 try:
                     send_progress(85, "Transcribing audio with Whisper...")
                     from ai.transcription import transcribe_with_whisper
-                    transcript = transcribe_with_whisper(audio_path, openai_key)
+                    transcript = transcribe_with_whisper(audio_path, openai_key, ffmpeg_path=ffmpeg_path)
                     if transcript_cache_path:
                         _write_json(
                             transcript_cache_path,
@@ -986,6 +1007,102 @@ def main(video_path: str, settings: dict):
                     speaker_segments = []
 
         # Final selection (top N by score or thinker order)
+        # If we have a transcript, avoid mid-word cuts by snapping to word-safe boundaries.
+        # This runs after AI so both algorithm-only and AI-enriched clips benefit.
+        transcript_available = bool(transcript and isinstance(transcript, dict) and transcript.get("segments"))
+        if transcript_available and final_clips:
+            try:
+                from vad_utils import snap_to_word_boundaries
+
+                # Keep within user-defined intro/outro boundaries.
+                safe_bounds_start = float(settings.get("skip_intro", 0) or 0)
+                safe_bounds_end = None
+                if duration is not None:
+                    safe_bounds_end = max(0.0, float(duration) - float(settings.get("skip_outro", 0) or 0))
+
+                for clip in final_clips:
+                    old_start = float(clip.get("startTime", 0.0))
+                    old_end = float(clip.get("endTime", 0.0))
+
+                    new_start, new_end, snapped, snap_reason = snap_to_word_boundaries(
+                        old_start,
+                        old_end,
+                        transcript,
+                        prefer_sentence_boundaries=True,
+                        max_adjustment=float(settings.get("word_snap_max_adjust_s", 1.0) or 1.0),
+                        add_breathing_room=True,
+                        head_padding_s=float(settings.get("head_padding_s", 0.15) or 0.15),
+                        tail_padding_s=float(settings.get("tail_padding_s", 0.3) or 0.3),
+                    )
+
+                    if safe_bounds_end is not None:
+                        new_start = max(safe_bounds_start, min(new_start, safe_bounds_end))
+                        new_end = max(safe_bounds_start, min(new_end, safe_bounds_end))
+                    else:
+                        new_start = max(0.0, new_start)
+                        new_end = max(new_start, new_end)
+
+                    # Preserve min/max duration constraints.
+                    if new_end <= new_start:
+                        continue
+                    if (new_end - new_start) < float(settings.get("min_duration", 0) or 0):
+                        continue
+                    if (new_end - new_start) > float(settings.get("max_duration", 1e9) or 1e9):
+                        continue
+
+                    if snapped:
+                        clip["startTime"] = round(new_start, 2)
+                        clip["endTime"] = round(new_end, 2)
+                        clip["duration"] = round(new_end - new_start, 2)
+                        if debug:
+                            clip.setdefault("debug", {})
+                            clip["debug"]["wordSnapApplied"] = True
+                            clip["debug"]["wordSnapReason"] = snap_reason
+            except Exception:
+                # Word snapping is best-effort; never fail the pipeline.
+                pass
+
+        # Face detection for auto-orient (detect speaker position in each clip)
+        enable_face_detection = settings.get("enable_face_detection", True)
+        if enable_face_detection and final_clips:
+            try:
+                send_progress(94, "Detecting speaker positions...")
+                from ai.face_detection import detect_speaker_position_for_clip
+                
+                for clip in final_clips:
+                    start_time = float(clip.get("startTime", 0))
+                    end_time = float(clip.get("endTime", start_time + 30))
+                    
+                    position_result = detect_speaker_position_for_clip(
+                        video_path,
+                        start_time,
+                        end_time,
+                        num_samples=int(settings.get("face_detection_samples", 9) or 9),
+                    )
+                    
+                    clip["speakerPosition"] = position_result.position
+                    clip["speakerPositionConfidence"] = round(position_result.confidence, 2)
+                    # Always include detailed position data for the renderer/export pipeline
+                    # (so the UI can do precise face-centered framing instead of categorical L/C/R)
+                    clip["speakerPositionData"] = position_result.to_dict()
+                    if debug:
+                        clip.setdefault("debug", {})
+                        clip["debug"]["faceDetection"] = position_result.to_dict()
+                
+                send_progress(95, f"Speaker positions detected for {len(final_clips)} clips")
+            except Exception as e:
+                send_progress(95, f"Face detection skipped: {e}")
+                # Fallback: set all clips to center
+                for clip in final_clips:
+                    clip["speakerPosition"] = "center"
+                    clip["speakerPositionConfidence"] = 0.0
+                    clip["speakerPositionData"] = {
+                        "position": "center",
+                        "confidence": 0.0,
+                        "face_center_x": 0.5,
+                        "num_faces": 0,
+                    }
+
         if not ai_enabled:
             final_clips = sorted(
                 final_clips,
@@ -1004,7 +1121,6 @@ def main(video_path: str, settings: dict):
             }
 
         # Send results
-        transcript_available = bool(transcript and isinstance(transcript, dict) and transcript.get("segments"))
         send_result(
             final_clips,
             dead_spaces,
